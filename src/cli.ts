@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { writeFileSync } from "node:fs";
+import { realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { evaluate } from "./pipeline.js";
 import { renderReport } from "./report.js";
@@ -83,9 +83,20 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   return result.exitCode;
 }
 
+function sameRealPath(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return a === b;
+  }
+}
+
+// Compare resolved paths: an installed binary is often invoked through a
+// symlinked path (macOS `/var` and `/tmp`, npm bin shims), which would
+// otherwise make the entry check fail and exit silently.
 const invokedDirectly =
   process.argv[1] !== undefined &&
-  fileURLToPath(import.meta.url) === process.argv[1];
+  sameRealPath(fileURLToPath(import.meta.url), process.argv[1]);
 
 if (invokedDirectly) {
   main()

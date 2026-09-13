@@ -55,7 +55,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
     lines.push("");
     lines.push("New suppression debt requiring an exception:");
     for (const entry of flagged) {
-      lines.push(...renderProblem(entry));
+      lines.push(...renderProblem(entry, tty));
     }
   }
   if (flaggedConfig.length > 0) {
@@ -101,11 +101,11 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
   return joinLines(lines);
 }
 
-function renderProblem(entry: InventoryEntry): string[] {
+function renderProblem(entry: InventoryEntry, tty: boolean): string[] {
   const line = entry.lines.head ?? "?";
   const out: string[] = [];
   out.push(
-    `  ${color(`${entry.file}:${line}`, DIM, false)}  ${entry.rule}  (${entry.suppressionType}, ${entry.guardKind}, ${entry.disposition})`,
+    `  ${color(`${entry.file}:${line}`, DIM, tty)}  ${entry.rule}  (${entry.suppressionType}, ${entry.guardKind}, ${entry.disposition})`,
   );
   out.push("    remediate with:");
   const record: Array<[string, string]> = [

@@ -95,7 +95,7 @@ Run the authoritative check on a full-depth checkout:
   with:
     fetch-depth: 0            # Pocket Lock needs real history
 - run: npm ci
-- run: npx pocket-lock check --base origin/${{ github.base_ref }} --json pocket-lock.json
+- run: npx pocket-lock check --base origin/main --json pocket-lock.json
 - uses: actions/upload-artifact@v4
   if: always()
   with:
