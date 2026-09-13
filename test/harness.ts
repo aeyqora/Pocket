@@ -181,3 +181,5 @@ export function exceptionYaml(record: {
 
 export const NEXT_LINE_NO_CONSOLE_FP =
   "v1:sha256:aa3906bd4b359e41c41625a924d3d3bbe95138e721f89cd87cd38839056a0f3e";
+export const NEXT_LINE_NO_DEBUGGER_FP =
+  "v1:sha256:61de84d29f5ac52d69962ac28ca6fd2641c241ba465381af1992868081eae6b5";

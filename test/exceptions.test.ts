@@ -5,6 +5,7 @@ import {
   eslintConfig,
   exceptionYaml,
   NEXT_LINE_NO_CONSOLE_FP,
+  NEXT_LINE_NO_DEBUGGER_FP,
   type FixtureRepo,
 } from "./harness.js";
 
@@ -18,6 +19,10 @@ function repo(): FixtureRepo {
 }
 
 const disabled = "// eslint-disable-next-line no-console\n";
+
+function utcDate(offsetDays: number): string {
+  return new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
+}
 
 function baseRecord(overrides: Partial<Parameters<typeof exceptionYaml>[0]> = {}) {
   return exceptionYaml({
@@ -47,6 +52,7 @@ describe("the exception registry", () => {
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
     const entry = res.record?.inventory.find((e) => e.disposition === "new");
     assert.equal(entry?.exception?.fingerprint, NEXT_LINE_NO_CONSOLE_FP);
+    assert.equal(res.record?.exceptions[0]?.status, "used");
   });
 
   it("supports permanent records with no expiry", () => {
@@ -79,6 +85,7 @@ describe("the exception registry", () => {
     assert.equal(res.status, 1);
     assert.equal(res.record?.summary.newDebt.unauthorized, 1);
     assert.equal(res.record?.summary.cleanup.expiredExceptions, 1);
+    assert.equal(res.record?.exceptions[0]?.status, "expired");
   });
 
   it("reports a dangling exception as cleanup debt without failing the gate", () => {
@@ -93,6 +100,7 @@ describe("the exception registry", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
     assert.equal(res.record?.summary.cleanup.danglingExceptions, 1);
+    assert.equal(res.record?.exceptions[0]?.status, "dangling");
   });
 
   it("reports a spent exception when its suppression became existing debt", () => {
@@ -149,5 +157,209 @@ describe("the exception registry", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 2);
     assert.equal(res.record?.errors[0]?.code, "CONFIG_ERROR");
+  });
+
+  it("proceeds with enforcement when the registry is empty", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-lock/exceptions.yml", "");
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+  });
+
+  it("proceeds with enforcement when no registry file exists", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+  });
+
+  it("authorizes through the end of the current UTC date", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-lock/exceptions.yml", baseRecord({ expires: utcDate(0) }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(res.record?.summary.newDebt.authorized, 1);
+  });
+
+  it("stops authorizing after the UTC date has passed", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-lock/exceptions.yml", baseRecord({ expires: utcDate(-1) }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.cleanup.expiredExceptions, 1);
+  });
+
+  it("does not authorize a suppression on a different rule", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write(
+      ".pocket-lock/exceptions.yml",
+      baseRecord({ rule: "no-debugger", fingerprint: NEXT_LINE_NO_DEBUGGER_FP }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+    assert.equal(res.record?.summary.cleanup.danglingExceptions, 1);
+  });
+
+  it("does not authorize on a mismatched rule even when the fingerprint matches", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(
+      ".pocket-lock/exceptions.yml",
+      baseRecord({ rule: "no-debugger", fingerprint: NEXT_LINE_NO_CONSOLE_FP }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.authorized, 0);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+  });
+
+  it("does not authorize on a mismatched suppression type", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(
+      ".pocket-lock/exceptions.yml",
+      baseRecord({ suppressionType: "line", fingerprint: NEXT_LINE_NO_CONSOLE_FP }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.authorized, 0);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+  });
+
+  it("does not authorize on a mismatched fingerprint", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(
+      ".pocket-lock/exceptions.yml",
+      baseRecord({ fingerprint: `v1:sha256:${"0".repeat(64)}` }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.authorized, 0);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+  });
+
+  it("treats a renewal in the same change as a fresh authorization", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-lock/exceptions.yml", baseRecord({ expires: "2000-01-01" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(".pocket-lock/exceptions.yml", baseRecord({ expires: "2099-01-01" }));
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.authorized, 0);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+    assert.equal(res.record?.summary.cleanup.expiredExceptions, 1);
+  });
+
+  it("treats temporary-to-permanent in the same change as a fresh authorization", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-lock/exceptions.yml", baseRecord({ expires: "2000-01-01" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(
+      ".pocket-lock/exceptions.yml",
+      baseRecord({ type: "permanent", expires: undefined }),
+    );
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.authorized, 0);
+  });
+
+  it("fails closed on invalid record fields", () => {
+    const valid = `- rule: no-console\n  suppression_type: next-line\n  fingerprint: ${NEXT_LINE_NO_CONSOLE_FP}\n  file: app.js\n  type: permanent\n  reason: r\n  owner: o\n  reference: ref\n`;
+    const without = (line: string) => valid.replace(line, "");
+    const cases: Array<{ name: string; yaml: string; field: RegExp }> = [
+      { name: "invalid type", yaml: valid.replace("type: permanent", "type: whenever"), field: /type/ },
+      {
+        name: "temporary without expires",
+        yaml: valid.replace("type: permanent", "type: temporary"),
+        field: /expires/,
+      },
+      {
+        name: "non-exceptable config-off type",
+        yaml: valid.replace("suppression_type: next-line", "suppression_type: config-off"),
+        field: /suppression_type/,
+      },
+      { name: "permanent with expires", yaml: valid + "  expires: 2099-01-01\n", field: /expires/ },
+      { name: "missing reason", yaml: without("  reason: r\n"), field: /reason/ },
+      { name: "missing owner", yaml: without("  owner: o\n"), field: /owner/ },
+      { name: "missing reference", yaml: without("  reference: ref\n"), field: /reference/ },
+      {
+        name: "invalid expires date",
+        yaml: valid.replace("type: permanent", "type: temporary") + "  expires: not-a-date\n",
+        field: /expires/,
+      },
+    ];
+    for (const c of cases) {
+      const r = repo();
+      r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+      r.write(".pocket-lock/exceptions.yml", c.yaml);
+      r.write("app.js", "export const a = 1;\n");
+      r.commit("base");
+      r.branch("base");
+      const res = r.runCli(["check", "--base", "base"]);
+      assert.equal(res.status, 2, c.name);
+      assert.equal(res.record?.errors[0]?.code, "CONFIG_ERROR", c.name);
+      assert.match(res.record?.errors[0]?.message ?? "", c.field, c.name);
+    }
   });
 });
