@@ -181,14 +181,6 @@ export class Git {
     return res.stdout.toString("utf8");
   }
 
-  showBuffer(revSpec: string): Buffer | null {
-    const res = spawnSync("git", ["-C", this.root, "show", revSpec], {
-      maxBuffer: 512 * 1024 * 1024,
-    });
-    if (res.status !== 0) return null;
-    return res.stdout;
-  }
-
   fileAt(commit: string, path: string): string | null {
     return this.show(`${commit}:${normalizePath(path)}`);
   }

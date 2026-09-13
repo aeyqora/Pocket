@@ -1,10 +1,14 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { Git, EMPTY_TREE } from "./git.js";
 import { EslintSession } from "./eslint.js";
-import { recognizeConfigOffs, recognizeDirectives, applicableRules } from "./recognize.js";
-import { computeGovernedSet, parsePolicy } from "./policy.js";
+import {
+  configPluginRuleNames,
+  recognizeConfigOffs,
+  recognizeDirectives,
+  applicableRules,
+} from "./recognize.js";
+import { computeGovernedSet, parsePolicy, viewPolicy } from "./policy.js";
 import { isExpired, parseRegistry } from "./registry.js";
 import {
   diffLineIndices,
@@ -89,6 +93,9 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       const baselineSession = await EslintSession.create(baselineDir);
       const headSession = await EslintSession.create(headDir);
       const knownRules = headSession.coreRuleNames();
+      for (const treeDir of [baselineDir, headDir]) {
+        for (const name of await configPluginRuleNames(treeDir)) knownRules.add(name);
+      }
 
       const baselineRegistryRaw = git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY);
       const policy = parsePolicy(baselinePolicyRaw, knownRules);
@@ -128,7 +135,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         headIndex: analysis.headIndex,
       });
 
-      const { expired, dangling, spent } = applyExceptions({
+      const { counts: cleanup, statuses: exceptionStatuses } = applyExceptions({
         head,
         registry,
         now,
@@ -170,9 +177,8 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         head,
         baseline,
         registry,
-        expired,
-        dangling,
-        spent,
+        cleanup,
+        exceptionStatuses,
         errors,
         verdict: gateFailure ? "fail" : "pass",
       });
@@ -188,40 +194,13 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
   } catch (err) {
     if (err instanceof PocketLockError) {
       errors.push({ code: err.code, message: err.message, detail: err.detail });
-      const record: EvaluationRecord = {
-        schemaVersion: SCHEMA_VERSION,
-        tool: { name: TOOL_NAME, version: TOOL_VERSION },
-        mode: options.mode,
-        verdict: "fail",
-        baseline: { ref: options.baseRef, tree: "" },
-        proposedChange: { ref: options.mode === "check" ? "HEAD" : "index", tree: "" },
-        summary: emptySummary(),
-        inventory: [],
-        exceptions: [],
-        errors,
-      };
-      return { record, exitCode: 2, report: "" };
+      return { record: operationalFailureRecord(options, errors), exitCode: 2, report: "" };
     }
     errors.push({
       code: "INTERNAL_ERROR",
       message: err instanceof Error ? err.message : String(err),
     });
-    return {
-      record: {
-        schemaVersion: SCHEMA_VERSION,
-        tool: { name: TOOL_NAME, version: TOOL_VERSION },
-        mode: options.mode,
-        verdict: "fail",
-        baseline: { ref: options.baseRef, tree: "" },
-        proposedChange: { ref: options.mode === "check" ? "HEAD" : "index", tree: "" },
-        summary: emptySummary(),
-        inventory: [],
-        exceptions: [],
-        errors,
-      },
-      exitCode: 2,
-      report: "",
-    };
+    return { record: operationalFailureRecord(options, errors), exitCode: 2, report: "" };
   }
 }
 
@@ -595,9 +574,15 @@ function isTomb(
   // diffLineIndices uses 0-based line indices.
   const diff = lineDiffs.get(head.file);
   const commentAdded = diff ? diff.addedHead.has(head.line - 1) : false;
-  if (!commentAdded) return false;
+  // Newborn: the comment is diff-added, or its guarded statement moved to a new
+  // position. A guarded statement rewritten at the same position is an in-place
+  // rewrite (existing debt), never a tomb.
+  const guardMoved = head.guardStart !== baseline.guardStart;
+  if (!commentAdded && !guardMoved) return false;
 
-  const twinRemoved = diff ? diff.removedBase.has(baseline.line - 1) : false;
+  // Spec §8.3 condition 3: the twin's *guarded* line is diff-removed (for a
+  // `line` directive that coincides with the comment line).
+  const twinRemoved = diff ? diff.removedBase.has(baseline.guardStart - 1) : false;
   if (!twinRemoved) return false;
 
   const newStatement =
@@ -611,29 +596,39 @@ function compareSuppressions(a: LogicalSuppression, b: LogicalSuppression): numb
   return a.file.localeCompare(b.file) || a.line - b.line || a.rule.localeCompare(b.rule);
 }
 
+type ExceptionStatus = "used" | "dangling" | "spent" | "expired";
+
+/** Exception match key: fingerprint + suppression type + rule (never position). */
+function exceptionMatches(
+  record: ExceptionRecord,
+  suppression: { fingerprint: string; suppressionType: SuppressionType; rule: string },
+): boolean {
+  return (
+    record.fingerprint === suppression.fingerprint &&
+    record.suppression_type === suppression.suppressionType &&
+    record.rule === suppression.rule
+  );
+}
+
 interface ApplyExceptionsInput {
   head: HeadSuppression[];
   registry: ExceptionRecord[];
   now: Date;
 }
 
-function applyExceptions(input: ApplyExceptionsInput): {
-  expired: number;
-  dangling: number;
-  spent: number;
-} {
-  const { head, registry, now } = input;
-  const usedRecords = new Set<ExceptionRecord>();
-  let expired = 0;
+interface AppliedExceptions {
+  counts: { expired: number; dangling: number; spent: number };
+  statuses: Map<ExceptionRecord, ExceptionStatus>;
+}
 
+function applyExceptions(input: ApplyExceptionsInput): AppliedExceptions {
+  const { head, registry, now } = input;
+  const statuses = new Map<ExceptionRecord, ExceptionStatus>();
+
+  // Authorize new/materially-changed debt, or mark the record expired.
   for (const h of head) {
     if (h.disposition !== "new" && h.disposition !== "materially-changed") continue;
-    const record = registry.find(
-      (r) =>
-        r.fingerprint === h.fingerprint &&
-        r.suppression_type === h.suppressionType &&
-        r.rule === h.rule,
-    );
+    const record = registry.find((r) => exceptionMatches(r, h));
     if (!record) continue;
     if (record.file !== h.file) {
       throw configError(
@@ -641,8 +636,7 @@ function applyExceptions(input: ApplyExceptionsInput): {
       );
     }
     if (isExpired(record.expires, now)) {
-      expired++;
-      usedRecords.add(record);
+      statuses.set(record, "expired");
       continue;
     }
     h.exception = {
@@ -650,26 +644,29 @@ function applyExceptions(input: ApplyExceptionsInput): {
       suppressionType: record.suppression_type,
       rule: record.rule,
     };
-    usedRecords.add(record);
+    statuses.set(record, "used");
   }
 
-  let dangling = 0;
-  let spent = 0;
+  // Classify the rest: expired is reported distinctly, then spent, then dangling.
   for (const record of registry) {
-    if (usedRecords.has(record)) continue;
+    if (statuses.has(record)) continue;
     const matchesExisting = head.some(
       (h) =>
         (h.disposition === "existing" || h.disposition === "moved-existing") &&
-        h.fingerprint === record.fingerprint &&
-        h.suppressionType === record.suppression_type &&
-        h.rule === record.rule,
+        exceptionMatches(record, h),
     );
-    if (matchesExisting) spent++;
-    else if (isExpired(record.expires, now)) expired++;
-    else dangling++;
+    if (isExpired(record.expires, now)) statuses.set(record, "expired");
+    else if (matchesExisting) statuses.set(record, "spent");
+    else statuses.set(record, "dangling");
   }
 
-  return { expired, dangling, spent };
+  const counts = { expired: 0, dangling: 0, spent: 0 };
+  for (const status of statuses.values()) {
+    if (status === "expired") counts.expired++;
+    else if (status === "spent") counts.spent++;
+    else if (status === "dangling") counts.dangling++;
+  }
+  return { counts, statuses };
 }
 
 interface PolicyChangeInput {
@@ -695,9 +692,9 @@ function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult {
   if (!touchesProtected) return { weakening: false, failure: false };
 
   const baselineConfig = git.fileAt(trees.baselineCommit, PROTECTED_CONFIG);
-  const headConfig = readHeadProtected(git, trees, options, headDir, PROTECTED_CONFIG);
+  const headConfig = readHeadContent(git, trees, options, headDir, PROTECTED_CONFIG);
   const baselineRegistry = git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY);
-  const headRegistry = readHeadProtected(git, trees, options, headDir, PROTECTED_REGISTRY);
+  const headRegistry = readHeadContent(git, trees, options, headDir, PROTECTED_REGISTRY);
 
   const weakening =
     configWeakened(baselineConfig, headConfig, baselineGoverned) ||
@@ -707,52 +704,26 @@ function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult {
   return { weakening: true, failure: consumedDebt > 0 };
 }
 
-function readHeadProtected(
-  git: Git,
-  trees: ResolvedTrees,
-  options: EvaluateOptions,
-  headDir: string,
-  path: string,
-): string | null {
-  if (options.mode === "pre-commit") {
-    return git.stagedFile(path) ?? readTreeFile(headDir, path);
-  }
-  return git.fileAt(trees.headCommit!, path);
-}
-
 function configWeakened(
   baselineRaw: string | null,
   headRaw: string | null,
   baselineGoverned: string[],
 ): boolean {
-  const parseLenient = (raw: string | null): { enabled: boolean; rules: string[] | null } => {
-    if (raw === null || raw.trim() === "") return { enabled: true, rules: null };
-    try {
-      const doc = raw.includes(":")
-        ? (parseYaml(raw) as Record<string, unknown>)
-        : ({} as Record<string, unknown>);
-      const enabled = typeof doc["enabled"] === "boolean" ? (doc["enabled"] as boolean) : true;
-      const rulesRaw = doc["governedRules"];
-      const rules = Array.isArray(rulesRaw)
-        ? rulesRaw.filter((r): r is string => typeof r === "string")
-        : null;
-      return { enabled, rules };
-    } catch {
-      return { enabled: true, rules: null };
-    }
-  };
-  const base = parseLenient(baselineRaw);
-  const head = parseLenient(headRaw);
-  if (base.enabled && !head.enabled) return true;
-  if (base.rules === null && head.rules !== null) {
+  const base = viewPolicy(baselineRaw);
+  const head = viewPolicy(headRaw);
+  // `enabled` flips true -> false, or is removed while the baseline declared it true.
+  if (base.enabled && (!head.enabled || (base.enabledPresent && !head.enabledPresent))) {
+    return true;
+  }
+  if (base.governedRules === null && head.governedRules !== null) {
     // Introducing an allowlist only weakens if it drops a rule the baseline
     // actually governed; a list covering every governed rule changes nothing.
-    const headSet = new Set(head.rules);
+    const headSet = new Set(head.governedRules);
     if (baselineGoverned.some((r) => !headSet.has(r))) return true;
   }
-  if (base.rules !== null && head.rules !== null) {
-    const headSet = new Set(head.rules);
-    if (base.rules.some((r) => !headSet.has(r))) return true;
+  if (base.governedRules !== null && head.governedRules !== null) {
+    const headSet = new Set(head.governedRules);
+    if (base.governedRules.some((r) => !headSet.has(r))) return true;
   }
   return false;
 }
@@ -781,9 +752,8 @@ interface BuildRecordInput {
   head: HeadSuppression[];
   baseline: BaselineSuppression[];
   registry: ExceptionRecord[];
-  expired: number;
-  dangling: number;
-  spent: number;
+  cleanup: { expired: number; dangling: number; spent: number };
+  exceptionStatuses: Map<ExceptionRecord, ExceptionStatus>;
   errors: RecordError[];
   verdict: Verdict;
 }
@@ -813,9 +783,9 @@ function buildRecord(input: BuildRecordInput): EvaluationRecord {
       ).length,
     },
     cleanup: {
-      danglingExceptions: input.dangling,
-      spentExceptions: input.spent,
-      expiredExceptions: input.expired,
+      danglingExceptions: input.cleanup.dangling,
+      spentExceptions: input.cleanup.spent,
+      expiredExceptions: input.cleanup.expired,
     },
   };
 
@@ -842,30 +812,14 @@ function buildRecord(input: BuildRecordInput): EvaluationRecord {
     })),
   ];
 
-  const exceptionEntries: RecordExceptionEntry[] = input.registry.map((r) => {
-    const matches = (h: HeadSuppression) =>
-      h.fingerprint === r.fingerprint &&
-      h.suppressionType === r.suppression_type &&
-      h.rule === r.rule;
-    const used = head.some((h) => h.exception !== null && matches(h));
-    const spent = head.some(
-      (h) =>
-        (h.disposition === "existing" || h.disposition === "moved-existing") &&
-        matches(h),
-    );
-    let status: RecordExceptionEntry["status"] = "dangling";
-    if (used) status = "used";
-    else if (isExpired(r.expires, options.now ?? new Date())) status = "expired";
-    else if (spent) status = "spent";
-    return {
-      fingerprint: r.fingerprint,
-      suppressionType: r.suppression_type,
-      rule: r.rule,
-      file: r.file,
-      type: r.type,
-      status,
-    };
-  });
+  const exceptionEntries: RecordExceptionEntry[] = input.registry.map((r) => ({
+    fingerprint: r.fingerprint,
+    suppressionType: r.suppression_type,
+    rule: r.rule,
+    file: r.file,
+    type: r.type,
+    status: input.exceptionStatuses.get(r) ?? "dangling",
+  }));
 
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -911,6 +865,24 @@ function excludedResult(
     errors: [],
   };
   return { record, exitCode: 0, report: "" };
+}
+
+function operationalFailureRecord(
+  options: EvaluateOptions,
+  errors: RecordError[],
+): EvaluationRecord {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    tool: { name: TOOL_NAME, version: TOOL_VERSION },
+    mode: options.mode,
+    verdict: "fail",
+    baseline: { ref: options.baseRef, tree: "" },
+    proposedChange: { ref: options.mode === "check" ? "HEAD" : "index", tree: "" },
+    summary: emptySummary(),
+    inventory: [],
+    exceptions: [],
+    errors,
+  };
 }
 
 function emptySummary(): EvaluationSummary {

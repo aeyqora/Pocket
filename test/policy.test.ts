@@ -81,9 +81,18 @@ describe("governed scope and lock enablement", () => {
     assert.deepEqual(res.record?.summary.governedRules, []);
   });
 
-  it("accepts a plugin-scoped allowlist rule that ESLint cannot verify as core", () => {
+  it("accepts a plugin rule the loaded config declares", () => {
     const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(
+      "eslint.config.mjs",
+      [
+        'const plugin = { rules: { "no-autofocus": {} } };',
+        "export default [",
+        '  { plugins: { "jsx-a11y": plugin }, rules: { "no-console": "error" } },',
+        "];",
+        "",
+      ].join("\n"),
+    );
     r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["jsx-a11y/no-autofocus"] }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
@@ -91,6 +100,27 @@ describe("governed scope and lock enablement", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
     assert.equal(res.record?.verdict, "pass");
+  });
+
+  it("fails closed on a mistyped plugin rule", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      [
+        'const plugin = { rules: { "no-autofocus": {} } };',
+        "export default [",
+        '  { plugins: { "jsx-a11y": plugin }, rules: { "no-console": "error" } },',
+        "];",
+        "",
+      ].join("\n"),
+    );
+    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["jsx-a11y/no-autofocuss"] }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 2);
+    assert.equal(res.record?.errors[0]?.code, "CONFIG_ERROR");
   });
 
   it("fails closed on an unrecognized allowlist rule", () => {

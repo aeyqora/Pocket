@@ -98,7 +98,7 @@ export function diffLineIndices(
   return { addedHead, removedBase };
 }
 
-export interface Pair {
+export interface SuppressionPair {
   head: LogicalSuppression;
   baseline: LogicalSuppression;
   similarity: number;
@@ -111,7 +111,7 @@ export interface Pair {
 export function pairPools(
   headPool: LogicalSuppression[],
   baselinePool: LogicalSuppression[],
-): Pair[] {
+): SuppressionPair[] {
   const candidates: Array<{ h: number; b: number; sim: number }> = [];
   for (let hi = 0; hi < headPool.length; hi++) {
     const ht = tokenize(headPool[hi]!.guardedContent);
@@ -123,7 +123,7 @@ export function pairPools(
   candidates.sort((x, y) => y.sim - x.sim || x.h - y.h || x.b - y.b);
   const usedH = new Set<number>();
   const usedB = new Set<number>();
-  const pairs: Pair[] = [];
+  const pairs: SuppressionPair[] = [];
   for (const c of candidates) {
     if (usedH.has(c.h) || usedB.has(c.b)) continue;
     usedH.add(c.h);

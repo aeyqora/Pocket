@@ -34,9 +34,9 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
   }
 
   lines.push(color("pocket-lock: FAIL", RED, tty));
-  const d = record.summary.dispositions;
+  const dispositions = record.summary.dispositions;
   lines.push(
-    `  existing: ${d.existing}  moved-existing: ${d.movedExisting}  removed: ${d.removed}  new: ${d.new}  materially-changed: ${d.materiallyChanged}`,
+    `  existing: ${dispositions.existing}  moved-existing: ${dispositions.movedExisting}  removed: ${dispositions.removed}  new: ${dispositions.new}  materially-changed: ${dispositions.materiallyChanged}`,
   );
 
   const flagged = record.inventory.filter(

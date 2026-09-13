@@ -95,6 +95,36 @@ describe("policy-change detection", () => {
     assert.ok(hasPolicyChange(res.record));
   });
 
+  it("records removal of an explicitly-true enabled key as weakening", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    // Drop the `enabled` key entirely.
+    r.write(".pocket-lock/config.yml", "# policy unchanged beyond removing the flag\n");
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.ok(hasPolicyChange(res.record));
+  });
+
+  it("fails when removal of an explicitly-true enabled key is consumed", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(".pocket-lock/config.yml", "# policy unchanged beyond removing the flag\n");
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.ok(hasPolicyChange(res.record));
+  });
+
   it("does not fire when no protected file is touched", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));

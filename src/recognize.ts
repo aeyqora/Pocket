@@ -115,6 +115,21 @@ export function parseDirectiveComments(
     endLine: number;
   }> = [];
 
+  const emit = (
+    block: { namedRules: string[]; justification: string; line: number; endLine: number },
+    form: "block" | "file-level directive",
+    guardEnd: number,
+  ): void => {
+    out.push({
+      form,
+      namedRules: block.namedRules,
+      justification: block.justification,
+      line: block.line,
+      guardStart: block.endLine + 1,
+      guardEnd,
+    });
+  };
+
   for (const { p } of parsed) {
     if (p.label === "eslint-disable-next-line") {
       out.push({
@@ -142,46 +157,30 @@ export function parseDirectiveComments(
         endLine: p.endLine,
       });
     } else if (p.label === "eslint-enable") {
-      const idx = lastOpenBlockIndex(openBlocks, p.rules);
-      if (idx >= 0) {
-        const block = openBlocks[idx]!;
-        openBlocks.splice(idx, 1);
-        out.push({
-          form: "block",
-          namedRules: block.namedRules,
-          justification: block.justification,
-          line: block.line,
-          guardStart: block.endLine + 1,
-          guardEnd: Math.max(block.endLine, p.line - 1),
-        });
+      // An unnamed enable closes every open block; a named enable re-enables
+      // only the named rules, so a `disable a, b` / `enable a` leaves `b`
+      // suppressed to EOF (ESLint's semantics).
+      for (let i = openBlocks.length - 1; i >= 0; i--) {
+        const block = openBlocks[i]!;
+        const guardEnd = Math.max(block.endLine, p.line - 1);
+        if (p.rules.length === 0) {
+          emit(block, "block", guardEnd);
+          openBlocks.splice(i, 1);
+          continue;
+        }
+        if (block.namedRules.length === 0) continue; // broad block: named enable is partial
+        const closed = block.namedRules.filter((r) => p.rules.includes(r));
+        if (closed.length === 0) continue;
+        emit({ ...block, namedRules: closed }, "block", guardEnd);
+        block.namedRules = block.namedRules.filter((r) => !p.rules.includes(r));
+        if (block.namedRules.length === 0) openBlocks.splice(i, 1);
       }
     }
   }
 
-  for (const block of openBlocks) {
-    out.push({
-      form: "file-level directive",
-      namedRules: block.namedRules,
-      justification: block.justification,
-      line: block.line,
-      guardStart: block.endLine + 1,
-      guardEnd: totalLines,
-    });
-  }
+  for (const block of openBlocks) emit(block, "file-level directive", totalLines);
 
   return out;
-}
-
-function lastOpenBlockIndex(
-  openBlocks: Array<{ namedRules: string[]; justification: string; line: number }>,
-  enableRules: string[],
-): number {
-  for (let i = openBlocks.length - 1; i >= 0; i--) {
-    const b = openBlocks[i]!;
-    if (enableRules.length === 0 || b.namedRules.length === 0) return i;
-    if (enableRules.some((r) => b.namedRules.includes(r))) return i;
-  }
-  return openBlocks.length - 1;
 }
 
 function guardedContentFor(
@@ -359,6 +358,35 @@ function isReEnabled(decls: ConfigDecl[], off: ConfigDecl): boolean {
 export interface ConfigOffResult {
   suppressions: LogicalSuppression[];
   configFile: string | null;
+}
+
+/**
+ * Rule ids contributed by plugins declared in the flat config, so an allowlist
+ * naming a plugin rule can be validated (a typo is then an unrecognized rule).
+ */
+export async function configPluginRuleNames(treeDir: string): Promise<Set<string>> {
+  const configFile = findConfigFile(treeDir);
+  if (!configFile || !FLAT_CONFIG_NAMES.includes(configFile)) return new Set();
+  let raw: unknown;
+  try {
+    raw = await loadConfigValue(treeDir, configFile);
+  } catch {
+    return new Set();
+  }
+  const entries = Array.isArray(raw) ? raw : [raw];
+  const names = new Set<string>();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const plugins = (entry as Record<string, unknown>)["plugins"];
+    if (!plugins || typeof plugins !== "object") continue;
+    for (const [prefix, plugin] of Object.entries(plugins as Record<string, unknown>)) {
+      const rules = (plugin as { rules?: Record<string, unknown> } | null)?.rules;
+      if (rules && typeof rules === "object") {
+        for (const rule of Object.keys(rules)) names.add(`${prefix}/${rule}`);
+      }
+    }
+  }
+  return names;
 }
 
 export async function recognizeConfigOffs(treeDir: string): Promise<ConfigOffResult> {

@@ -106,6 +106,31 @@ describe("inline-directive recognition", () => {
     assert.equal(res.record?.summary.dispositions.new, 0);
   });
 
+  it("keeps the un-re-enabled rules of a block suppressed to EOF", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(
+      "app.js",
+      "/* eslint-disable no-console, no-debugger */\nconsole.log(1);\n/* eslint-enable no-console */\ndebugger;\n",
+    );
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    const entries = res.record?.inventory ?? [];
+    assert.deepEqual(
+      entries.map((e) => e.rule).sort(),
+      ["no-console", "no-debugger"],
+    );
+    assert.ok(entries.some((e) => e.suppressionType === "block"));
+    assert.ok(entries.some((e) => e.suppressionType === "file-level directive"));
+  });
+
   it("ignores a directive naming a rule ESLint cannot define", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));

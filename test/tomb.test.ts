@@ -68,6 +68,22 @@ describe("the tomb rule", () => {
     assert.equal(d.new, 0);
   });
 
+  it("tombstones when the twin's guarded statement is removed", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("gate.js", `${noConsoleNextLine}console.log("a");\nwork();\n${noConsoleNextLine}console.log("dead");\n`);
+    r.commit("base");
+    r.branch("base");
+    r.write(
+      "gate.js",
+      `${noConsoleNextLine}console.log("a");\nwork();\nend();\nfeature();\n${noConsoleNextLine}console.log("brand-new");\n`,
+    );
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.dispositions.materiallyChanged, 1);
+  });
+
   it("does not tomb a line-form rewrite (comment shares the guarded line)", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));

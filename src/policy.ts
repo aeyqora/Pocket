@@ -4,56 +4,85 @@ import type { Policy } from "./types.js";
 
 export const DEFAULT_POLICY: Policy = { enabled: true, governedRules: null };
 
-export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy {
-  if (raw === null || raw.trim().length === 0) return { ...DEFAULT_POLICY };
+/**
+ * Tolerant, non-throwing view of a policy document. Shared by strict validation
+ * (`parsePolicy`) and policy-change detection so the extraction lives once.
+ */
+export interface PolicyView {
+  enabled: boolean;
+  enabledPresent: boolean;
+  enabledValid: boolean;
+  governedRules: string[] | null;
+  governedRulesValid: boolean;
+  malformed: boolean;
+}
+
+export function viewPolicy(raw: string | null): PolicyView {
+  const base: PolicyView = {
+    enabled: true,
+    enabledPresent: false,
+    enabledValid: true,
+    governedRules: null,
+    governedRulesValid: true,
+    malformed: false,
+  };
+  if (raw === null || raw.trim().length === 0) return base;
   let doc: unknown;
   try {
     doc = parseYaml(raw);
-  } catch (err) {
-    throw configError("malformed .pocket-lock/config.yml", String(err));
+  } catch {
+    return { ...base, malformed: true };
   }
-  if (doc === null || doc === undefined) return { ...DEFAULT_POLICY };
-  if (typeof doc !== "object" || Array.isArray(doc)) {
-    throw configError(".pocket-lock/config.yml must be a mapping");
-  }
+  if (doc === null || doc === undefined) return base;
+  if (typeof doc !== "object" || Array.isArray(doc)) return { ...base, malformed: true };
   const obj = doc as Record<string, unknown>;
+
   const enabledRaw = obj["enabled"];
-  let enabled = true;
-  if (enabledRaw !== undefined) {
-    if (typeof enabledRaw !== "boolean") {
-      throw configError(".pocket-lock/config.yml: 'enabled' must be a boolean");
+  const enabledPresent = enabledRaw !== undefined;
+  const enabledValid = enabledRaw === undefined || typeof enabledRaw === "boolean";
+  const enabled = typeof enabledRaw === "boolean" ? enabledRaw : true;
+
+  const rulesRaw = obj["governedRules"];
+  let governedRules: string[] | null = null;
+  let governedRulesValid = true;
+  if (rulesRaw !== undefined && rulesRaw !== null) {
+    if (
+      !Array.isArray(rulesRaw) ||
+      rulesRaw.some((r) => typeof r !== "string" || r.trim().length === 0)
+    ) {
+      governedRulesValid = false;
+    } else {
+      governedRules = rulesRaw as string[];
     }
-    enabled = enabledRaw;
   }
-  if (!enabled) {
+  return { enabled, enabledPresent, enabledValid, governedRules, governedRulesValid, malformed: false };
+}
+
+export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy {
+  const view = viewPolicy(raw);
+  if (view.malformed) throw configError("malformed .pocket-lock/config.yml");
+  if (!view.enabledValid) {
+    throw configError(".pocket-lock/config.yml: 'enabled' must be a boolean");
+  }
+  if (!view.enabled) {
     // Policy validation is skipped entirely when the gate is off.
     return { enabled: false, governedRules: null };
   }
-  const governedRaw = obj["governedRules"];
-  let governedRules: string[] | null = null;
-  if (governedRaw !== undefined && governedRaw !== null) {
-    if (!Array.isArray(governedRaw)) {
-      throw configError(".pocket-lock/config.yml: 'governedRules' must be a list");
-    }
-    governedRules = [];
-    for (const entry of governedRaw) {
-      if (typeof entry !== "string" || entry.trim().length === 0) {
-        throw configError(
-          ".pocket-lock/config.yml: 'governedRules' entries must be non-empty strings",
-        );
-      }
-      // Plugin-scoped rules (e.g. `jsx-a11y/no-autofocus`) cannot be verified
-      // against ESLint's built-in rule set without loading the plugin, so they
-      // are accepted; core rules are checked against the built-in set.
-      if (knownRules.size > 0 && !entry.includes("/") && !knownRules.has(entry)) {
+  if (!view.governedRulesValid) {
+    throw configError(
+      ".pocket-lock/config.yml: 'governedRules' must be a list of non-empty strings",
+    );
+  }
+  if (view.governedRules !== null && knownRules.size > 0) {
+    for (const entry of view.governedRules) {
+      if (!knownRules.has(entry)) {
         throw configError(
           `.pocket-lock/config.yml: governedRules names an unrecognized ESLint rule '${entry}'`,
         );
       }
-      governedRules.push(entry);
     }
   }
-  return { enabled, governedRules };
+  return { enabled: true, governedRules: view.governedRules };
 }
 
 export function computeGovernedSet(
