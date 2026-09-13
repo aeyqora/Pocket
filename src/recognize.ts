@@ -82,6 +82,11 @@ function parseComment(comment: EslintComment): ParsedComment | null {
   if (comment.type === "Line" && label !== "eslint-disable-next-line" && label !== "eslint-disable-line") {
     return null;
   }
+  // ESLint refuses an `eslint-disable-line` comment that spans multiple lines
+  // (it emits a directive-format error and suppresses nothing).
+  if (label === "eslint-disable-line" && comment.loc.end.line > comment.loc.start.line) {
+    return null;
+  }
   const { rules, justification } = splitDirectiveArgs(m[2] ?? "");
   return {
     label,

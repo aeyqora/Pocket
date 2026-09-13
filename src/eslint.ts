@@ -24,6 +24,13 @@ export interface LintMessage {
   fix?: { range: [number, number]; text: string };
 }
 
+/** A directive ESLint reports as unused, with the rules it names. */
+export interface UnusedDirective {
+  ruleNames: string[];
+  isEnable: boolean;
+  fixRange: [number, number] | null;
+}
+
 export interface LintResultLike {
   messages: LintMessage[];
   suppressedMessages: SuppressedMessage[];
@@ -168,7 +175,7 @@ export class EslintSession {
   async lint(
     code: string,
     filePath: string,
-  ): Promise<{ used: SuppressedMessage[]; unused: LintMessage[]; all: LintMessage[] }> {
+  ): Promise<{ used: SuppressedMessage[]; unused: UnusedDirective[]; all: LintMessage[] }> {
     let pass1: LintResultLike;
     let pass2: LintResultLike;
     try {
@@ -181,9 +188,15 @@ export class EslintSession {
     } catch (err) {
       throw eslintError(`ESLint failed to run on ${filePath}`, String(err));
     }
-    const unused = (pass2.messages ?? []).filter(
-      (m) => m.ruleId === null && /^Unused eslint-/.test(m.message),
-    );
+    const unused = (pass2.messages ?? [])
+      .filter((m) => m.ruleId === null && /^Unused eslint-/.test(m.message))
+      .map((m) => ({
+        ruleNames: [...m.message.matchAll(/'([^']+)'/g)]
+          .map((match) => match[1])
+          .filter((name): name is string => Boolean(name)),
+        isEnable: /eslint-enable/.test(m.message),
+        fixRange: m.fix?.range ?? null,
+      }));
     return {
       used: pass1.suppressedMessages ?? [],
       unused,

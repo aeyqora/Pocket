@@ -7,7 +7,7 @@ import { recognizeConfigOffs, recognizeDirectives, applicableRules } from "./rec
 import { computeGovernedSet, parsePolicy } from "./policy.js";
 import { isExpired, parseRegistry } from "./registry.js";
 import { driftDisposition, pairPools } from "./identity.js";
-import { PocketLockError, configError, gitError } from "./errors.js";
+import { PocketLockError, configError, eslintError, gitError } from "./errors.js";
 import type {
   Disposition,
   ErrorCode,
@@ -409,11 +409,32 @@ interface RecognizeSideInput {
 async function recognizeSide(input: RecognizeSideInput): Promise<void> {
   const { session, treeDir, relFile, content, suppressions, applicable } = input;
   const filePath = join(treeDir, relFile);
-  await session.lint(content, filePath);
+  const { used, unused } = await session.lint(content, filePath);
   const cfg = await session.effectiveConfig(filePath);
-  for (const rule of applicableRules(cfg)) applicable.add(rule);
+  const fileApplicable = new Set(applicableRules(cfg));
+  for (const rule of fileApplicable) applicable.add(rule);
   const comments = session.comments(content, filePath, cfg.languageOptions);
   const found = recognizeDirectives({ file: relFile, code: content, cfg, comments });
+  // Fail closed if ESLint acknowledged a suppression we did not inventory as a
+  // logical suppression: a "pass" must never mean "we didn't look".
+  const inventoriedRules = new Set(found.map((s) => s.rule));
+  const assertInventoried = (rule: string, shape: string): void => {
+    if (fileApplicable.has(rule) && !inventoriedRules.has(rule)) {
+      throw eslintError(
+        `recognition missed a ${shape} logical suppression for rule '${rule}' in ${relFile}`,
+      );
+    }
+  };
+  for (const message of used) {
+    const rule = message.ruleId;
+    if (!rule) continue;
+    const viaDirective = (message.suppressions ?? []).some((s) => s.kind === "directive");
+    if (viaDirective) assertInventoried(rule, "used");
+  }
+  for (const directive of unused) {
+    if (directive.isEnable) continue;
+    for (const rule of directive.ruleNames) assertInventoried(rule, "unused");
+  }
   suppressions.push(...found);
 }
 
