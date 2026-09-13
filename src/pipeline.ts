@@ -6,7 +6,12 @@ import { EslintSession } from "./eslint.js";
 import { recognizeConfigOffs, recognizeDirectives, applicableRules } from "./recognize.js";
 import { computeGovernedSet, parsePolicy } from "./policy.js";
 import { isExpired, parseRegistry } from "./registry.js";
-import { driftDisposition, pairPools } from "./identity.js";
+import {
+  diffLineIndices,
+  driftDisposition,
+  pairPools,
+  type LineDiff,
+} from "./identity.js";
 import { PocketLockError, configError, eslintError, gitError } from "./errors.js";
 import type {
   Disposition,
@@ -321,7 +326,7 @@ interface Analysis {
   headSuppressions: LogicalSuppression[];
   applicableBaseline: string[];
   applicableHead: string[];
-  lineDiffs: Map<string, { addedHead: Set<number>; removedBase: Set<number> }>;
+  lineDiffs: Map<string, LineDiff>;
   baselineIndex: Set<string>;
   headIndex: Set<string>;
 }
@@ -342,10 +347,7 @@ async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
   const headSuppressions: LogicalSuppression[] = [];
   const applicableBaselineSet = new Set<string>();
   const applicableHeadSet = new Set<string>();
-  const lineDiffs =
-    options.mode === "pre-commit"
-      ? git.stagedUnifiedHunks()
-      : git.unifiedChangeHunks(trees.baselineCommit, trees.headCommit!);
+  const lineDiffs = new Map<string, LineDiff>();
 
   for (const [newPath, statusRaw] of changeMap.files) {
     const status = statusRaw[0];
@@ -356,6 +358,18 @@ async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
     const baseContent = status === "A" ? null : git.fileAt(trees.baselineCommit, oldPath);
     const headContent =
       status === "D" ? null : readHeadContent(git, trees, options, headDir, newPath);
+
+    // Line movement is judged on identity-canonicalized text (whitespace- and
+    // justification-insensitive), so re-indentation and justification edits
+    // never read as a fresh comment or a dead twin.
+    if (baseContent !== null && headContent !== null) {
+      lineDiffs.set(
+        newPath,
+        diffLineIndices(baseContent.split(/\r?\n/), headContent.split(/\r?\n/), (a, b) =>
+          canonicalDiffLine(a) === canonicalDiffLine(b),
+        ),
+      );
+    }
 
     if (baseContent !== null) {
       await recognizeSide({
@@ -472,10 +486,31 @@ function canonicalLine(line: string): string {
   return s;
 }
 
+/**
+ * Canonical text for change-movement comparison. A `line`-form directive shares
+ * its physical line with the guarded statement, so the code must be stripped:
+ * identity is the directive comment, and rewriting the code beside it must not
+ * read as a newly introduced comment.
+ */
+function canonicalDiffLine(line: string): string {
+  const directive = /(?:\/\/|\/\*)\s*eslint-disable-(next-line|line)\b([\s\S]*)$/.exec(line);
+  if (directive) {
+    const rules = (directive[2] ?? "")
+      .replace(/\s*\*\/\s*$/, "")
+      .replace(/\s--\s+[\s\S]*$/, "")
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .sort()
+      .join(",");
+    return `eslint-disable-${directive[1]} ${rules}`;
+  }
+  return canonicalLine(line);
+}
+
 interface ReconcileInput {
   headSuppressions: LogicalSuppression[];
   baselineSuppressions: LogicalSuppression[];
-  lineDiffs: Map<string, { addedHead: Set<number>; removedBase: Set<number> }>;
+  lineDiffs: Map<string, LineDiff>;
   baselineIndex: Set<string>;
   headIndex: Set<string>;
 }
@@ -548,18 +583,19 @@ function reconcileSuppressions(input: ReconcileInput): ReconcileOutput {
 function isTomb(
   head: LogicalSuppression,
   baseline: LogicalSuppression,
-  lineDiffs: Map<string, { addedHead: Set<number>; removedBase: Set<number> }>,
+  lineDiffs: Map<string, LineDiff>,
   baselineIndex: Set<string>,
   headIndex: Set<string>,
 ): boolean {
   if (head.guardKind !== "directive") return false;
   if (head.suppressionType !== "next-line" && head.suppressionType !== "line") return false;
 
+  // diffLineIndices uses 0-based line indices.
   const diff = lineDiffs.get(head.file);
-  const commentAdded = diff ? diff.addedHead.has(head.line) : false;
+  const commentAdded = diff ? diff.addedHead.has(head.line - 1) : false;
   if (!commentAdded) return false;
 
-  const twinRemoved = diff ? diff.removedBase.has(baseline.line) : false;
+  const twinRemoved = diff ? diff.removedBase.has(baseline.line - 1) : false;
   if (!twinRemoved) return false;
 
   const newStatement =

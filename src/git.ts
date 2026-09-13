@@ -176,34 +176,6 @@ export class Git {
     );
   }
 
-  unifiedChangeHunks(
-    baseCommit: string,
-    headCommit: string,
-  ): Map<string, { addedHead: Set<number>; removedBase: Set<number> }> {
-    const out = this.run([
-      "diff",
-      "--unified=0",
-      "-M",
-      baseCommit,
-      headCommit,
-      "--",
-    ]);
-    return parseUnifiedDiff(out.stdout);
-  }
-
-  stagedUnifiedHunks(): Map<string, { addedHead: Set<number>; removedBase: Set<number> }> {
-    const base = this.hasCommit("HEAD") ? "HEAD" : this.emptyTree();
-    const out = this.run([
-      "diff",
-      "--cached",
-      "--unified=0",
-      "-M",
-      base,
-      "--",
-    ]);
-    return parseUnifiedDiff(out.stdout);
-  }
-
   show(revSpec: string): string | null {
     const res = spawnSync("git", ["-C", this.root, "show", revSpec], {
       maxBuffer: 512 * 1024 * 1024,
@@ -271,50 +243,6 @@ function linkNodeModules(repoRoot: string, dir: string): void {
       /* best effort */
     }
   }
-}
-
-export function parseUnifiedDiff(
-  diff: string,
-): Map<string, { addedHead: Set<number>; removedBase: Set<number> }> {
-  const result = new Map<string, { addedHead: Set<number>; removedBase: Set<number> }>();
-  let current: { addedHead: Set<number>; removedBase: Set<number> } | null = null;
-  const lines = diff.split("\n");
-  for (const line of lines) {
-    if (line.startsWith("diff --git ")) {
-      current = null;
-      continue;
-    }
-    if (line.startsWith("+++ ")) {
-      const p = line.slice(4).trim();
-      if (p !== "/dev/null") {
-        const path = stripPrefix(p);
-        current = { addedHead: new Set(), removedBase: new Set() };
-        result.set(path, current);
-      } else {
-        current = null;
-      }
-      continue;
-    }
-    if (line.startsWith("@@ ")) {
-      const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
-      if (!m || !current) continue;
-      const oldStart = Number(m[1]);
-      const oldCount = m[2] === undefined ? 1 : Number(m[2]);
-      const newStart = Number(m[3]);
-      const newCount = m[4] === undefined ? 1 : Number(m[4]);
-      for (let i = 0; i < oldCount; i++) current.removedBase.add(oldStart + i);
-      for (let i = 0; i < newCount; i++) current.addedHead.add(newStart + i);
-    }
-  }
-  return result;
-}
-
-function stripPrefix(p: string): string {
-  if (p.startsWith('"') && p.endsWith('"')) {
-    p = p.slice(1, -1);
-  }
-  if (p.startsWith("a/") || p.startsWith("b/")) return p.slice(2);
-  return p;
 }
 
 export function parseChangeMap(nameStatusOut: string, numstatOut: string): ChangeMap {

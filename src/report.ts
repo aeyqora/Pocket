@@ -105,7 +105,7 @@ function renderProblem(entry: InventoryEntry): string[] {
   const line = entry.lines.head ?? "?";
   const out: string[] = [];
   out.push(
-    `  ${color(`${entry.file}:${line}`, DIM, false)}  ${entry.rule}  (${entry.suppressionType}, ${entry.guardKind})`,
+    `  ${color(`${entry.file}:${line}`, DIM, false)}  ${entry.rule}  (${entry.suppressionType}, ${entry.guardKind}, ${entry.disposition})`,
   );
   out.push("    remediate with:");
   const record: Array<[string, string]> = [
