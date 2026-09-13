@@ -24,6 +24,7 @@ describe("governed scope and lock enablement", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
+    assert.deepEqual(res.record?.summary.policy, { enabled: true, allowlist: null });
     assert.deepEqual(res.record?.summary.governedRules, ["no-console"]);
   });
 
@@ -40,6 +41,7 @@ describe("governed scope and lock enablement", () => {
     assert.equal(res.status, 0);
     assert.equal(res.record?.verdict, "excluded");
     assert.deepEqual(res.record?.inventory, []);
+    assert.deepEqual(res.record?.summary.policy, { enabled: false, allowlist: null });
     assert.deepEqual(res.record?.summary.governedRules, []);
   });
 
@@ -58,6 +60,10 @@ describe("governed scope and lock enablement", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
     assert.equal(res.record?.summary.dispositions.new, 0);
+    assert.deepEqual(res.record?.summary.policy, {
+      enabled: true,
+      allowlist: ["no-debugger"],
+    });
     assert.deepEqual(res.record?.summary.governedRules, ["no-debugger"]);
   });
 
@@ -142,5 +148,151 @@ describe("config-level off recognition", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
     assert.equal(res.record?.summary.dispositions.removed, 1);
+  });
+});
+
+describe("governed set details", () => {
+  it("keeps only the governed rule of a mixed multi-rule directive", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("base");
+    r.branch("base");
+    r.write(
+      "app.js",
+      `${disabled}console.log(1);\n// eslint-disable-next-line no-console, no-debugger\nfoo();\n`,
+    );
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.dispositions.new, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+    assert.deepEqual(
+      res.record?.inventory.map((e) => e.rule),
+      ["no-debugger"],
+    );
+  });
+
+  it("expands a broad directive to governed rules only", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `${disabled}console.log(1);\n/* eslint-disable */\nfoo();\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.dispositions.new, 1);
+    assert.deepEqual(
+      res.record?.inventory.map((e) => e.rule),
+      ["no-debugger"],
+    );
+  });
+});
+
+describe("the effective policy is baseline-authoritative", () => {
+  it("does not let a head-side allowlist shape the current evaluation", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.deepEqual(res.record?.summary.policy, { enabled: true, allowlist: null });
+    const newRules = res.record?.inventory
+      .filter((e) => e.disposition === "new")
+      .map((e) => e.rule);
+    assert.deepEqual(newRules, ["no-console"]);
+    assert.deepEqual(res.record?.summary.governedRules, ["no-console", "no-debugger"]);
+  });
+
+  it("evaluates the enablement flip under the old policy, then grandfathers it", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-lock/config.yml", configYaml({ enabled: false }));
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("A");
+    r.branch("baseA");
+    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
+    r.commit("B");
+    r.branch("baseB");
+
+    const flip = r.runCli(["check", "--base", "baseA"]);
+    assert.equal(flip.status, 0);
+    assert.equal(flip.record?.verdict, "excluded");
+    assert.deepEqual(flip.record?.summary.policy, { enabled: false, allowlist: null });
+
+    r.write("app.js", `${disabled}console.log(1);\nconst b = 2;\n`);
+    r.commit("C");
+    const next = r.runCli(["check", "--base", "baseB"]);
+    assert.equal(next.status, 0);
+    assert.ok((next.record?.summary.dispositions.existing ?? 0) >= 1);
+    assert.equal(next.record?.summary.dispositions.new, 0);
+  });
+
+  it("evaluates the allowlist widening under the old policy, then grandfathers it", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("A");
+    r.branch("baseA");
+    r.write(
+      ".pocket-lock/config.yml",
+      configYaml({ governedRules: ["no-debugger", "no-console"] }),
+    );
+    r.write("app.js", `${disabled}console.log(1);\nconst b = 2;\n`);
+    r.commit("B");
+    r.branch("baseB");
+
+    const widen = r.runCli(["check", "--base", "baseA"]);
+    assert.equal(widen.status, 0);
+    assert.deepEqual(widen.record?.summary.governedRules, ["no-debugger"]);
+    assert.equal(widen.record?.summary.dispositions.new, 0);
+
+    r.write("app.js", `${disabled}console.log(1);\nconst b = 2;\nconst c = 3;\n`);
+    r.commit("C");
+    const next = r.runCli(["check", "--base", "baseB"]);
+    assert.equal(next.status, 0);
+    assert.deepEqual(next.record?.summary.governedRules, ["no-console", "no-debugger"]);
+    assert.ok((next.record?.summary.dispositions.existing ?? 0) >= 1);
+    assert.equal(next.record?.summary.dispositions.new, 0);
+  });
+
+  it("skips policy validation entirely when disabled", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(
+      ".pocket-lock/config.yml",
+      "enabled: false\ngovernedRules: [no-such-rule-xyz]\n",
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(res.record?.verdict, "excluded");
+    assert.deepEqual(res.record?.errors, []);
   });
 });
