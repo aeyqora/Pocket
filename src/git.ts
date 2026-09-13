@@ -22,14 +22,21 @@ export class Git {
 
   static async discover(cwd: string): Promise<Git> {
     const probe = rawGit(["-C", cwd, "rev-parse", "--show-toplevel"]);
-    if (probe.status !== 0) {
-      const fmt = rawGit(["-C", cwd, "rev-parse", "repositoryformatversion"]);
-      if (fmt.status !== 0) {
-        throw gitError("not a git repository", probe.stderr.trim());
-      }
-      throw gitError("unsupported repository format", probe.stderr.trim());
+    if (probe.status === 0 && probe.stdout.trim().length > 0) {
+      return new Git(probe.stdout.trim());
     }
-    return new Git(probe.stdout.trim());
+    // Bare repositories have no work tree; object-graph forms still work, so
+    // anchor on the git directory itself instead of failing.
+    const bare = rawGit(["-C", cwd, "rev-parse", "--is-bare-repository"]);
+    if (bare.status === 0 && bare.stdout.trim() === "true") {
+      const gitDir = rawGit(["-C", cwd, "rev-parse", "--absolute-git-dir"]);
+      return new Git(gitDir.status === 0 && gitDir.stdout.trim() ? gitDir.stdout.trim() : cwd);
+    }
+    const gitDirProbe = rawGit(["-C", cwd, "rev-parse", "--git-dir"]);
+    if (gitDirProbe.status !== 0) {
+      throw gitError("not a git repository", probe.stderr.trim());
+    }
+    throw gitError("unsupported repository format", probe.stderr.trim());
   }
 
   run(args: string[], opts: { allowFail?: boolean } = {}): GitResult {
@@ -109,6 +116,13 @@ export class Git {
     const res = this.run(["rev-list", "--parents", "-n", "1", rev]);
     const parts = res.stdout.trim().split(/\s+/);
     return Math.max(0, parts.length - 1);
+  }
+
+  isAncestor(ancestor: string, descendant: string): boolean {
+    const res = this.run(["merge-base", "--is-ancestor", ancestor, descendant], {
+      allowFail: true,
+    });
+    return res.status === 0;
   }
 
   mergeBase(a: string, b: string): string | null {
@@ -342,12 +356,15 @@ export function parseNumstat(out: string, binary: Set<string>): void {
     const add = m[1];
     const del = m[2];
     const path = m[3] ?? "";
+    const isBinary = add === "-" || del === "-";
     if (path === "") {
       // rename/copy: old path follows, then new path
+      const newPath = tokens[i + 2] ?? "";
+      if (isBinary && newPath) binary.add(newPath);
       i += 3;
       continue;
     }
-    if (add === "-" || del === "-") binary.add(path);
+    if (isBinary) binary.add(path);
     i += 1;
   }
 }

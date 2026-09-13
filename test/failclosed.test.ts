@@ -24,6 +24,7 @@ describe("fail-closed posture", () => {
     const res = r.runCli(["check", "--base", "main"]);
     assert.equal(res.status, 2);
     assert.equal(res.record?.errors[0]?.code, "GIT_ERROR");
+    assert.match(res.record?.errors[0]?.message ?? "", /pinned base/i);
   });
 
   it("fails closed with CONFIG_ERROR on malformed policy", () => {

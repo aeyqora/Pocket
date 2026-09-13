@@ -6,6 +6,7 @@ import {
   readFileSync,
   existsSync,
 } from "node:fs";
+import { Buffer } from "node:buffer";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +43,12 @@ export class FixtureRepo {
     const full = join(this.dir, path);
     mkdirSync(dirname(full), { recursive: true });
     writeFileSync(full, content, "utf8");
+  }
+
+  writeBytes(path: string, bytes: Buffer): void {
+    const full = join(this.dir, path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, bytes);
   }
 
   read(path: string): string {
@@ -89,29 +96,38 @@ export class FixtureRepo {
       tmpdir(),
       `pocket-lock-record-${process.pid}-${Date.now()}-${this.counter++}.json`,
     );
-    const fullArgs = [...args];
-    if (opts.json !== false) fullArgs.push("--json", jsonPath);
-    const res: SpawnSyncReturns<string> = spawnSync(
-      process.execPath,
-      [CLI, ...fullArgs],
-      { cwd: this.dir, encoding: "utf8" },
-    );
-    let record: EvaluationRecord | null = null;
-    if (existsSync(jsonPath)) {
-      record = JSON.parse(readFileSync(jsonPath, "utf8")) as EvaluationRecord;
-      rmSync(jsonPath, { force: true });
-    }
-    return {
-      status: res.status ?? 1,
-      stdout: res.stdout ?? "",
-      stderr: res.stderr ?? "",
-      record,
-    };
+    return runCliIn(this.dir, args, jsonPath, opts.json !== false);
   }
 
   cleanup(): void {
     rmSync(this.dir, { recursive: true, force: true });
   }
+}
+
+export function runCliIn(
+  dir: string,
+  args: string[],
+  jsonPath?: string,
+  writeJson = true,
+): RunResult {
+  const target = jsonPath ?? join(tmpdir(), `pocket-lock-record-${process.pid}-${Date.now()}.json`);
+  const fullArgs = [...args];
+  if (writeJson) fullArgs.push("--json", target);
+  const res: SpawnSyncReturns<string> = spawnSync(process.execPath, [CLI, ...fullArgs], {
+    cwd: dir,
+    encoding: "utf8",
+  });
+  let record: EvaluationRecord | null = null;
+  if (existsSync(target)) {
+    record = JSON.parse(readFileSync(target, "utf8")) as EvaluationRecord;
+    rmSync(target, { force: true });
+  }
+  return {
+    status: res.status ?? 1,
+    stdout: res.stdout ?? "",
+    stderr: res.stderr ?? "",
+    record,
+  };
 }
 
 export function createRepo(): FixtureRepo {

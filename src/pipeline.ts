@@ -59,10 +59,10 @@ interface BaselineSuppression extends LogicalSuppression {
 
 export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult> {
   const now = options.now ?? new Date();
-  const git = await Git.discover(options.cwd);
   const errors: RecordError[] = [];
 
   try {
+    const git = await Git.discover(options.cwd);
     assertGitPosture(git, options.mode);
 
     const trees = resolveTrees(git, options);
@@ -77,10 +77,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
     }
 
     const baselineDir = git.materialize(trees.baselineCommit);
-    const headDir =
-      options.mode === "pre-commit" && trees.proposedTree !== "index"
-        ? git.materialize(trees.proposedTree)
-        : git.root;
+    const headDir = resolveHeadDir(git, options, trees);
     const tmpDirs = [baselineDir, ...(headDir === git.root ? [] : [headDir])];
 
     try {
@@ -251,7 +248,10 @@ function resolveTrees(git: Git, options: EvaluateOptions): ResolvedTrees {
   const headCommit = git.revParse("HEAD");
   let baselineCommit: string;
   let baselineRef = options.baseRef;
-  if (git.parentCount(headCommit) >= 2) {
+  // Merge-result-first: a two-parent HEAD whose first parent is the target tip
+  // (i.e. the supplied base is an ancestor). Anything else falls back to the
+  // computed merge-base rather than guessing.
+  if (git.parentCount(headCommit) === 2 && git.isAncestor(baseCommit, headCommit)) {
     baselineCommit = git.revParse(`${headCommit}^1`);
     baselineRef = "merge-result-first-parent";
   } else {
@@ -270,6 +270,21 @@ function resolveTrees(git: Git, options: EvaluateOptions): ResolvedTrees {
     baselineTree: git.treeOf(baselineCommit),
     proposedTree: git.treeOf(headCommit),
   };
+}
+
+/**
+ * The directory ESLint and the tombstone line-index read the proposed-change
+ * tree from. Pre-commit uses the staged index tree; bare checkouts have no work
+ * tree, so the head commit is materialized; otherwise the worktree is used.
+ */
+function resolveHeadDir(git: Git, options: EvaluateOptions, trees: ResolvedTrees): string {
+  if (options.mode === "pre-commit" && trees.proposedTree !== "index") {
+    return git.materialize(trees.proposedTree);
+  }
+  if (git.isBare()) {
+    return git.materialize(trees.headCommit ?? trees.baselineCommit);
+  }
+  return git.root;
 }
 
 function assertGitPosture(git: Git, mode: Mode): void {
