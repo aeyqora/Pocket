@@ -1,0 +1,167 @@
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  readFileSync,
+  existsSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import type { EvaluationRecord } from "../src/types.js";
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+export const CLI = join(ROOT, "dist", "cli.js");
+
+export interface RunResult {
+  status: number;
+  stdout: string;
+  stderr: string;
+  record: EvaluationRecord | null;
+}
+
+export class FixtureRepo {
+  readonly dir: string;
+  private counter = 0;
+
+  constructor(dir: string) {
+    this.dir = dir;
+  }
+
+  git(args: string[], opts: { allowFail?: boolean } = {}): string {
+    const res = spawnSync("git", ["-C", this.dir, ...args], { encoding: "utf8" });
+    if (res.status !== 0 && !opts.allowFail) {
+      throw new Error(`git ${args.join(" ")} failed: ${res.stderr}`);
+    }
+    return res.stdout;
+  }
+
+  write(path: string, content: string): void {
+    const full = join(this.dir, path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, content, "utf8");
+  }
+
+  read(path: string): string {
+    return readFileSync(join(this.dir, path), "utf8");
+  }
+
+  remove(path: string): void {
+    rmSync(join(this.dir, path), { force: true });
+  }
+
+  mkdir(path: string): void {
+    mkdirSync(join(this.dir, path), { recursive: true });
+  }
+
+  stage(path?: string): void {
+    this.git(["add", path ?? "-A"]);
+  }
+
+  commit(message: string): string {
+    this.git(["add", "-A"]);
+    this.git(["commit", "-q", "-m", message]);
+    return this.git(["rev-parse", "HEAD"]).trim();
+  }
+
+  emptyCommit(message: string): string {
+    this.git(["commit", "-q", "--allow-empty", "-m", message]);
+    return this.git(["rev-parse", "HEAD"]).trim();
+  }
+
+  rev(ref: string): string {
+    return this.git(["rev-parse", ref]).trim();
+  }
+
+  branch(name: string): void {
+    this.git(["branch", name]);
+  }
+
+  checkout(ref: string, opts: { create?: string } = {}): void {
+    if (opts.create) this.git(["checkout", "-q", "-b", opts.create, ref]);
+    else this.git(["checkout", "-q", ref]);
+  }
+
+  runCli(args: string[], opts: { json?: boolean } = {}): RunResult {
+    const jsonPath = join(
+      tmpdir(),
+      `pocket-lock-record-${process.pid}-${Date.now()}-${this.counter++}.json`,
+    );
+    const fullArgs = [...args];
+    if (opts.json !== false) fullArgs.push("--json", jsonPath);
+    const res: SpawnSyncReturns<string> = spawnSync(
+      process.execPath,
+      [CLI, ...fullArgs],
+      { cwd: this.dir, encoding: "utf8" },
+    );
+    let record: EvaluationRecord | null = null;
+    if (existsSync(jsonPath)) {
+      record = JSON.parse(readFileSync(jsonPath, "utf8")) as EvaluationRecord;
+      rmSync(jsonPath, { force: true });
+    }
+    return {
+      status: res.status ?? 1,
+      stdout: res.stdout ?? "",
+      stderr: res.stderr ?? "",
+      record,
+    };
+  }
+
+  cleanup(): void {
+    rmSync(this.dir, { recursive: true, force: true });
+  }
+}
+
+export function createRepo(): FixtureRepo {
+  const dir = mkdtempSync(join(tmpdir(), "pocket-lock-test-"));
+  const repo = new FixtureRepo(dir);
+  repo.git(["init", "-q", "-b", "main"]);
+  repo.git(["config", "user.email", "test@example.com"]);
+  repo.git(["config", "user.name", "Test"]);
+  return repo;
+}
+
+/** A standard flat config enabling a set of core rules at error severity. */
+export function eslintConfig(rules: Record<string, string>): string {
+  const body = Object.entries(rules)
+    .map(([rule, sev]) => `    "${rule}": ${JSON.stringify(sev)}`)
+    .join(",\n");
+  return `export default [\n  {\n    rules: {\n${body}\n    },\n  },\n];\n`;
+}
+
+export function configYaml(opts: { enabled?: boolean; governedRules?: string[] }): string {
+  const lines: string[] = [];
+  if (opts.enabled !== undefined) lines.push(`enabled: ${opts.enabled}`);
+  if (opts.governedRules !== undefined) {
+    lines.push("governedRules:");
+    for (const r of opts.governedRules) lines.push(`  - ${r}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+export function exceptionYaml(record: {
+  rule: string;
+  suppressionType: string;
+  fingerprint: string;
+  file: string;
+  type?: "temporary" | "permanent";
+  expires?: string;
+}): string {
+  const lines = [
+    `- rule: ${record.rule}`,
+    `  suppression_type: ${record.suppressionType}`,
+    `  fingerprint: ${record.fingerprint}`,
+    `  file: ${record.file}`,
+    `  type: ${record.type ?? "temporary"}`,
+    `  reason: needed`,
+    `  owner: "@team"`,
+    `  reference: "#1"`,
+  ];
+  if (record.expires) lines.push(`  expires: ${record.expires}`);
+  return lines.join("\n") + "\n";
+}
+
+export const NEXT_LINE_NO_CONSOLE_FP =
+  "v1:sha256:aa3906bd4b359e41c41625a924d3d3bbe95138e721f89cd87cd38839056a0f3e";
