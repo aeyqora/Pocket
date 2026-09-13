@@ -143,6 +143,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         consumedDebt: head.filter(
           (h) => h.disposition === "new" || h.disposition === "materially-changed",
         ).length,
+        baselineGoverned: governedBaseline,
       });
 
       const gateFailure =
@@ -677,6 +678,8 @@ interface PolicyChangeInput {
   headDir: string;
   changeMap: ReturnType<Git["changeMap"]>;
   consumedDebt: number;
+  /** Rules governed under the baseline policy — used to judge allowlist narrowing. */
+  baselineGoverned: string[];
 }
 
 interface PolicyChangeResult {
@@ -685,7 +688,7 @@ interface PolicyChangeResult {
 }
 
 function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult {
-  const { git, options, trees, headDir, changeMap, consumedDebt } = input;
+  const { git, options, trees, headDir, changeMap, consumedDebt, baselineGoverned } = input;
   const touchesProtected =
     changeMap.files.has(PROTECTED_CONFIG) || changeMap.files.has(PROTECTED_REGISTRY);
   if (!touchesProtected) return { weakening: false, failure: false };
@@ -696,7 +699,7 @@ function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult {
   const headRegistry = readHeadProtected(git, trees, options, headDir, PROTECTED_REGISTRY);
 
   const weakening =
-    configWeakened(baselineConfig, headConfig) ||
+    configWeakened(baselineConfig, headConfig, baselineGoverned) ||
     registryBroadened(baselineRegistry, headRegistry);
 
   if (!weakening) return { weakening: false, failure: false };
@@ -716,7 +719,11 @@ function readHeadProtected(
   return git.fileAt(trees.headCommit!, path);
 }
 
-function configWeakened(baselineRaw: string | null, headRaw: string | null): boolean {
+function configWeakened(
+  baselineRaw: string | null,
+  headRaw: string | null,
+  baselineGoverned: string[],
+): boolean {
   const parseLenient = (raw: string | null): { enabled: boolean; rules: string[] | null } => {
     if (raw === null || raw.trim() === "") return { enabled: true, rules: null };
     try {
@@ -736,7 +743,12 @@ function configWeakened(baselineRaw: string | null, headRaw: string | null): boo
   const base = parseLenient(baselineRaw);
   const head = parseLenient(headRaw);
   if (base.enabled && !head.enabled) return true;
-  if (base.rules === null && head.rules !== null) return true;
+  if (base.rules === null && head.rules !== null) {
+    // Introducing an allowlist only weakens if it drops a rule the baseline
+    // actually governed; a list covering every governed rule changes nothing.
+    const headSet = new Set(head.rules);
+    if (baselineGoverned.some((r) => !headSet.has(r))) return true;
+  }
   if (base.rules !== null && head.rules !== null) {
     const headSet = new Set(head.rules);
     if (base.rules.some((r) => !headSet.has(r))) return true;
