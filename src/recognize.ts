@@ -255,6 +255,7 @@ interface ConfigDecl {
   files: string[] | null;
   ignores: string[] | null;
   index: number;
+  off: boolean;
 }
 
 export interface ConfigOffDeclaration {
@@ -263,10 +264,16 @@ export interface ConfigOffDeclaration {
   file: string;
 }
 
+function normalizedPatterns(patterns: string[] | null | undefined): string[] | null {
+  return patterns ? [...patterns].map((s) => s.trim()).sort() : null;
+}
+
 export function scopeKeyOf(configFile: string, files: string[] | null, ignores: string[] | null): string {
-  const norm = (v: string[] | null | undefined) =>
-    v ? [...v].map((s) => s.trim()).sort() : null;
-  return JSON.stringify({ config: configFile, files: norm(files), ignores: norm(ignores) });
+  return JSON.stringify({
+    config: configFile,
+    files: normalizedPatterns(files),
+    ignores: normalizedPatterns(ignores),
+  });
 }
 
 function normalizePatterns(value: unknown): string[] | null {
@@ -286,7 +293,7 @@ function collectFlatDecls(config: unknown): ConfigDecl[] {
     const files = normalizePatterns(obj["files"]);
     const ignores = normalizePatterns(obj["ignores"]);
     for (const [rule, value] of Object.entries(rules as Record<string, unknown>)) {
-      if (severityOf(value) === 0) decls.push({ rule, files, ignores, index });
+      decls.push({ rule, files, ignores, index, off: severityOf(value) === 0 });
     }
   });
   return decls;
@@ -297,9 +304,16 @@ function legacyDecls(config: unknown): ConfigDecl[] {
   const root = (config ?? {}) as Record<string, unknown>;
   const rootRules = root["rules"];
   const rootFiles = normalizePatterns(root["files"]);
+  const rootIgnores = normalizePatterns(root["ignorePatterns"]);
   if (rootRules && typeof rootRules === "object") {
     for (const [rule, value] of Object.entries(rootRules as Record<string, unknown>)) {
-      if (severityOf(value) === 0) decls.push({ rule, files: rootFiles, ignores: null, index: 0 });
+      decls.push({
+        rule,
+        files: rootFiles,
+        ignores: rootIgnores,
+        index: 0,
+        off: severityOf(value) === 0,
+      });
     }
   }
   const overrides = root["overrides"];
@@ -308,26 +322,36 @@ function legacyDecls(config: unknown): ConfigDecl[] {
       if (!ov || typeof ov !== "object") return;
       const o = ov as Record<string, unknown>;
       const files = normalizePatterns(o["files"]);
+      const ignores = normalizePatterns(o["excludedFiles"]);
       const rules = o["rules"];
       if (!rules || typeof rules !== "object") return;
       for (const [rule, value] of Object.entries(rules as Record<string, unknown>)) {
-        if (severityOf(value) === 0) decls.push({ rule, files, ignores: null, index: index + 1 });
+        decls.push({
+          rule,
+          files,
+          ignores,
+          index: index + 1,
+          off: severityOf(value) === 0,
+        });
       }
     });
   }
   return decls;
 }
 
+function sameScope(a: ConfigDecl, b: ConfigDecl): boolean {
+  const key = (v: string[] | null) => JSON.stringify(normalizedPatterns(v));
+  return key(a.files) === key(b.files) && key(a.ignores) === key(b.ignores);
+}
+
 function isReEnabled(decls: ConfigDecl[], off: ConfigDecl): boolean {
   for (const d of decls) {
-    if (d === off) continue;
-    if (d.rule !== off.rule) continue;
-    if (d.index <= off.index) continue;
-    // A global on declaration overrides everything.
+    if (d.rule !== off.rule || d.off || d.index <= off.index) continue;
+    // A later global `on` overrides every scope.
     if (d.files === null) return true;
-    if (off.files === null) continue; // global off still effective elsewhere
-    const same = [...d.files].sort().join("|") === [...off.files].sort().join("|");
-    if (same) return true;
+    // A later scoped `on` overrides an equal-scope `off`; a global off remains
+    // effective for every scope the override does not cover.
+    if (off.files !== null && sameScope(d, off)) return true;
   }
   return false;
 }
@@ -350,6 +374,7 @@ export async function recognizeConfigOffs(treeDir: string): Promise<ConfigOffRes
   const decls = isFlat ? collectFlatDecls(raw) : legacyDecls(raw);
   const suppressions: LogicalSuppression[] = [];
   for (const decl of decls) {
+    if (!decl.off) continue;
     if (isReEnabled(decls, decl)) continue;
     const scopeKey = scopeKeyOf(configFile, decl.files, decl.ignores);
     const canonicalText = canonicalConfigOffText(decl.rule, scopeKey);

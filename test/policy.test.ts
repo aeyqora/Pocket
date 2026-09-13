@@ -149,6 +149,159 @@ describe("config-level off recognition", () => {
     assert.equal(res.status, 0);
     assert.equal(res.record?.summary.dispositions.removed, 1);
   });
+
+  it("counts one config-level off however many files its pattern matches", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-debugger": "error" }));
+    for (const f of ["src/a.js", "src/b.js", "src/c.js"]) {
+      r.write(f, "export const a = 1;\n");
+    }
+    r.commit("base");
+    r.branch("base");
+    r.write(
+      "eslint.config.mjs",
+      [
+        "export default [",
+        '  { rules: { "no-debugger": "error" } },',
+        '  { files: ["src/**"], rules: { "no-console": "off" } },',
+        "];",
+        "",
+      ].join("\n"),
+    );
+    for (const f of ["src/a.js", "src/b.js", "src/c.js"]) {
+      r.write(f, "export const a = 2;\n");
+    }
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    const configOffs = res.record?.inventory.filter((e) => e.guardKind === "config-level");
+    assert.equal(configOffs?.length, 1);
+    assert.equal(res.record?.summary.dispositions.new, 1);
+  });
+
+  it("does not count a config-level off an equal-scope declaration re-enables", () => {
+    const r = repo();
+    const config = [
+      "export default [",
+      '  { files: ["test/**"], rules: { "no-console": "off" } },',
+      '  { files: ["test/**"], rules: { "no-console": "error" } },',
+      "];",
+      "",
+    ].join("\n");
+    r.write("eslint.config.mjs", config);
+    r.write("test/a.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("test/a.js", "export const a = 2;\n");
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(res.record?.inventory.length, 0);
+  });
+
+  it("keeps a global off that a narrower override only partially re-enables", () => {
+    const r = repo();
+    const config = [
+      "export default [",
+      '  { rules: { "no-console": "off" } },',
+      '  { files: ["src/special/**"], rules: { "no-console": "error" } },',
+      "];",
+      "",
+    ].join("\n");
+    r.write("eslint.config.mjs", config);
+    r.write("src/a.js", "export const a = 1;\n");
+    r.write("src/special/b.js", "export const b = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("src/a.js", "export const a = 2;\n");
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    const configOffs = res.record?.inventory.filter((e) => e.guardKind === "config-level");
+    assert.equal(configOffs?.length, 1);
+    assert.equal(configOffs?.[0]?.disposition, "existing");
+  });
+
+  it("does not hide debt on a partially-overridden off", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      [
+        "export default [",
+        '  { files: ["src/**"], rules: { "no-console": "off" } },',
+        '  { files: ["src/*.js"], rules: { "no-console": "error" } },',
+        "];",
+        "",
+      ].join("\n"),
+    );
+    r.write("src/a.js", "export const a = 1;\n");
+    r.write("src/sub/b.js", "export const b = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("src/a.js", "export const a = 2;\n");
+    r.write("src/sub/b.js", "export const b = 2;\n");
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    const configOffs = res.record?.inventory.filter((e) => e.guardKind === "config-level");
+    assert.equal(configOffs?.length, 1);
+    assert.equal(configOffs?.[0]?.disposition, "existing");
+  });
+
+  it("keeps config-off continuity when the declaration is reordered", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      'export default [{ rules: { "no-console": "off", "no-debugger": "error" } }];\n',
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(
+      "eslint.config.mjs",
+      [
+        "export default [",
+        '  { rules: { "no-debugger": "error" } },',
+        '  { rules: { "no-console": "off" } },',
+        "];",
+        "",
+      ].join("\n"),
+    );
+    r.write("app.js", "export const a = 2;\n");
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    const configOffs = res.record?.inventory.filter((e) => e.guardKind === "config-level");
+    assert.equal(configOffs?.length, 1);
+    assert.equal(configOffs?.[0]?.disposition, "existing");
+  });
+
+  it("fails closed when the registry tries to except a config-level off", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(
+      ".pocket-lock/exceptions.yml",
+      [
+        "- rule: no-console",
+        "  suppression_type: config-off",
+        `  fingerprint: v1:sha256:${"0".repeat(64)}`,
+        "  file: eslint.config.mjs",
+        "  type: permanent",
+        "  reason: r",
+        "  owner: o",
+        "  reference: ref",
+        "",
+      ].join("\n"),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "off" }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 2);
+    assert.equal(res.record?.errors[0]?.code, "CONFIG_ERROR");
+  });
 });
 
 describe("governed set details", () => {
