@@ -33,10 +33,14 @@ export class Git {
       return new Git(gitDir.status === 0 && gitDir.stdout.trim() ? gitDir.stdout.trim() : cwd);
     }
     const gitDirProbe = rawGit(["-C", cwd, "rev-parse", "--git-dir"]);
-    if (gitDirProbe.status !== 0) {
-      throw gitError("not a git repository", probe.stderr.trim());
+    const stderr = [probe.stderr, bare.stderr, gitDirProbe.stderr]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join("\n");
+    if (gitDirProbe.status === 0 || /repo version|repository format|repository extension/i.test(stderr)) {
+      throw gitError("unsupported repository format", stderr);
     }
-    throw gitError("unsupported repository format", probe.stderr.trim());
+    throw gitError("not a git repository", stderr);
   }
 
   run(args: string[], opts: { allowFail?: boolean } = {}): GitResult {
@@ -97,10 +101,10 @@ export class Git {
     args.push(`${ref}^{commit}`);
     const res = this.run(args, { allowFail: true });
     if (res.status !== 0) {
-      throw gitError(`cannot resolve ref '${ref}' to a commit`, {
-        ref,
-        stderr: res.stderr.trim(),
-      });
+      throw gitError(
+        `cannot resolve ref '${ref}' to a commit; fetch the explicit refspec or pass the host-provided SHA`,
+        { ref, stderr: res.stderr.trim() },
+      );
     }
     return res.stdout.trim();
   }
@@ -116,13 +120,6 @@ export class Git {
     const res = this.run(["rev-list", "--parents", "-n", "1", rev]);
     const parts = res.stdout.trim().split(/\s+/);
     return Math.max(0, parts.length - 1);
-  }
-
-  isAncestor(ancestor: string, descendant: string): boolean {
-    const res = this.run(["merge-base", "--is-ancestor", ancestor, descendant], {
-      allowFail: true,
-    });
-    return res.status === 0;
   }
 
   mergeBase(a: string, b: string): string | null {
@@ -226,6 +223,9 @@ function rawGit(args: string[]): SpawnSyncReturns<string> {
   return spawnSync("git", args, {
     encoding: "utf8",
     maxBuffer: 512 * 1024 * 1024,
+    // Stable English diagnostics: the unsupported-format posture keys off git's
+    // error text, so locale must not change it.
+    env: { ...process.env, LC_ALL: "C", LANG: "C" },
   });
 }
 

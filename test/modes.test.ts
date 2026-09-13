@@ -40,6 +40,24 @@ describe("CI merge-result-first tree resolution", () => {
     assert.equal(res.record?.baseline.tree, cTree);
     assert.equal(res.record?.proposedChange.tree, mTree);
   });
+
+  it("resolves a raw branch against the computed merge-base", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    const aSha = r.commit("A");
+    r.branch("base");
+
+    r.write("other.js", "export const c = 1;\n");
+    const cSha = r.commit("C");
+
+    const aTree = r.git(["rev-parse", `${aSha}^{tree}`]).trim();
+    const cTree = r.git(["rev-parse", `${cSha}^{tree}`]).trim();
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.record?.baseline.ref, "base");
+    assert.equal(res.record?.baseline.tree, aTree);
+    assert.equal(res.record?.proposedChange.tree, cTree);
+  });
 });
 
 describe("pre-commit mode", () => {

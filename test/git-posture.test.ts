@@ -115,6 +115,7 @@ describe("git failure posture", () => {
     assert.equal(res.status, 2);
     assert.equal(res.record?.errors[0]?.code, "GIT_ERROR");
     assert.match(res.record?.errors[0]?.message ?? "", /cannot resolve ref/i);
+    assert.match(res.record?.errors[0]?.message ?? "", /refspec|host-provided SHA/i);
   });
 
   it("fails closed with GIT_ERROR when run outside a repository", () => {
@@ -178,5 +179,111 @@ describe("git failure posture", () => {
     assert.equal(res.status, 2);
     assert.equal(res.record?.errors[0]?.code, "GIT_ERROR");
     assert.match(res.record?.errors[0]?.message ?? "", /full clone/i);
+  });
+
+  it("fails closed on an unsupported repository format", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.git(["config", "core.repositoryformatversion", "99"]);
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 2);
+    assert.equal(res.record?.errors[0]?.code, "GIT_ERROR");
+    assert.match(res.record?.errors[0]?.message ?? "", /unsupported repository format/i);
+  });
+});
+
+describe("submodules and merge results", () => {
+  it("skips submodule gitlink changes without intra-submodule line maps", () => {
+    const source = repo();
+    source.write("s.txt", "// eslint-disable-next-line no-console\nconsole.log(1);\n");
+    source.commit("sub1");
+
+    const sup = repo();
+    sup.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    sup.write("app.js", "export const a = 1;\n");
+    sup.git([
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      "-q",
+      `file://${source.dir}`,
+      "mod",
+    ]);
+    sup.commit("base");
+    sup.branch("base");
+
+    source.write("s.txt", "// eslint-disable-next-line no-console\nconsole.log(2);\n");
+    source.commit("sub2");
+    sup.git(["-c", "protocol.file.allow=always", "submodule", "update", "--remote", "mod"]);
+    sup.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    sup.commit("head");
+
+    const res = sup.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.deepEqual(res.record?.errors, []);
+    // Only the superproject's own change is inventoried; the submodule's
+    // suppression is not counted and no intra-submodule map is produced.
+    assert.deepEqual(
+      res.record?.inventory.map((e) => e.file),
+      ["app.js"],
+    );
+  });
+
+  it("does not treat a merge whose first parent is the head branch as a merge result", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("A");
+    r.branch("base");
+
+    r.checkout("base", { create: "feature" });
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    r.commit("B");
+
+    r.checkout("main");
+    r.write("other.js", "export const c = 1;\n");
+    const cSha = r.commit("C");
+    const cTree = r.git(["rev-parse", `${cSha}^{tree}`]).trim();
+
+    r.checkout("feature");
+    r.git(["merge", "--no-ff", "-m", "merge main", "main"]);
+
+    const res = r.runCli(["check", "--base", "main"]);
+    assert.equal(res.record?.baseline.tree, cTree);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.dispositions.new, 1);
+  });
+
+  it("falls back to the merge-base for a two-parent HEAD the base does not reach", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    const aSha = r.commit("A");
+    const aTree = r.git(["rev-parse", `${aSha}^{tree}`]).trim();
+    r.branch("base");
+
+    r.checkout("base", { create: "other" });
+    r.write("other.js", "export const o = 1;\n");
+    r.commit("O");
+
+    r.checkout("base", { create: "feat" });
+    r.write("feat.js", `export const f = 1;\n${disabled}console.log(1);\n`);
+    r.commit("F");
+
+    r.checkout("base");
+    r.write("c.js", "export const c = 1;\n");
+    r.commit("C");
+    r.checkout("base", { create: "mr" });
+    r.write("c.js", "export const c = 2;\n");
+    const c2Sha = r.commit("C2");
+    const c2Tree = r.git(["rev-parse", `${c2Sha}^{tree}`]).trim();
+    r.git(["merge", "--no-ff", "-m", "merge feat", "feat"]);
+
+    const res = r.runCli(["check", "--base", "other"]);
+    assert.equal(res.record?.baseline.tree, aTree);
+    assert.notEqual(res.record?.baseline.tree, c2Tree);
   });
 });

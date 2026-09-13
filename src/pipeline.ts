@@ -254,11 +254,12 @@ function resolveTrees(git: Git, options: EvaluateOptions): ResolvedTrees {
   const headCommit = git.revParse("HEAD");
   let baselineCommit: string;
   let baselineRef = options.baseRef;
-  // Merge-result-first: a two-parent HEAD whose first parent is the target tip
-  // (i.e. the supplied base is an ancestor). Anything else falls back to the
-  // computed merge-base rather than guessing.
-  if (git.parentCount(headCommit) === 2 && git.isAncestor(baseCommit, headCommit)) {
-    baselineCommit = git.revParse(`${headCommit}^1`);
+  // Merge-result-first: the host supplies a two-parent merge commit whose
+  // first parent is the current target tip (the supplied base). Anything else
+  // — including a merge whose first parent is the head branch — falls back to
+  // the computed merge-base rather than guessing.
+  if (git.parentCount(headCommit) === 2 && git.revParse(`${headCommit}^1`) === baseCommit) {
+    baselineCommit = baseCommit;
     baselineRef = "merge-result-first-parent";
   } else {
     const mb = git.mergeBase(baseCommit, headCommit);
