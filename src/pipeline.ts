@@ -10,7 +10,12 @@ import {
 } from "./recognize.js";
 import { computeGovernedSet, parsePolicy, viewPolicy } from "./policy.js";
 import { isExpired, parseRegistry } from "./registry.js";
-import { diffLineIndices, type LineDiff } from "./identity.js";
+import {
+  canonicalCodeLine,
+  canonicalMovementLine,
+  diffLineIndices,
+  type LineDiff,
+} from "./identity.js";
 import { reconcile } from "./reconcile.js";
 import { PocketLockError, configError, eslintError, gitError } from "./errors.js";
 import type {
@@ -333,7 +338,7 @@ async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
       lineDiffs.set(
         newPath,
         diffLineIndices(baseContent.split(/\r?\n/), headContent.split(/\r?\n/), (a, b) =>
-          canonicalDiffLine(a) === canonicalDiffLine(b),
+          canonicalMovementLine(a) === canonicalMovementLine(b),
         ),
       );
     }
@@ -444,34 +449,6 @@ function readTreeFile(dir: string, path: string): string | null {
 
 function isSkippedPath(path: string): boolean {
   return SKIP_PREFIXES.some((p) => path.startsWith(p));
-}
-
-function canonicalLine(line: string): string {
-  let s = line.trim().replace(/\s+/g, " ");
-  const m = /\s--\s+/.exec(s);
-  if (m && /eslint-/.test(s.slice(0, m.index))) s = s.slice(0, m.index);
-  return s;
-}
-
-/**
- * Canonical text for change-movement comparison. A `line`-form directive shares
- * its physical line with the guarded statement, so the code must be stripped:
- * identity is the directive comment, and rewriting the code beside it must not
- * read as a newly introduced comment.
- */
-function canonicalDiffLine(line: string): string {
-  const directive = /(?:\/\/|\/\*)\s*eslint-disable-(next-line|line)\b([\s\S]*)$/.exec(line);
-  if (directive) {
-    const rules = (directive[2] ?? "")
-      .replace(/\s*\*\/\s*$/, "")
-      .replace(/\s--\s+[\s\S]*$/, "")
-      .split(/[\s,]+/)
-      .filter(Boolean)
-      .sort()
-      .join(",");
-    return `eslint-disable-${directive[1]} ${rules}`;
-  }
-  return canonicalLine(line);
 }
 
 type ExceptionStatus = "used" | "dangling" | "spent" | "expired";
@@ -808,7 +785,7 @@ function walk(root: string, dir: string, index: Set<string>): void {
       }
       if (content.includes("\u0000")) continue;
       for (const line of content.split(/\r?\n/)) {
-        const norm = canonicalLine(line);
+        const norm = canonicalCodeLine(line);
         if (norm.length > 0) index.add(norm);
       }
     }

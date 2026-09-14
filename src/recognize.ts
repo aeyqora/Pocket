@@ -7,8 +7,10 @@ import {
   canonicalConfigOffText,
   canonicalDirectiveText,
   fingerprintOf,
-  normalizeRuleTokens,
+  normalizedPatterns,
   normalizeWhitespace,
+  parseDirectiveArgs,
+  scopeKeyOf,
 } from "./identity.js";
 import { severityOf, type EslintComment, type EslintSession } from "./eslint.js";
 import type { LogicalSuppression, SuppressionType } from "./types.js";
@@ -50,18 +52,6 @@ export function applicableRules(cfg: { rules?: Record<string, unknown> }): strin
   return out;
 }
 
-function splitDirectiveArgs(raw: string): { rules: string[]; justification: string } {
-  let body = raw.trim();
-  let justification = "";
-  const m = /\s--\s+([\s\S]*)$/.exec(body);
-  if (m) {
-    justification = m[1]!.trim();
-    body = body.slice(0, m.index).trim();
-  }
-  const rules = body.split(/[\s,]+/).filter(Boolean);
-  return { rules: normalizeRuleTokens(rules), justification };
-}
-
 interface ParsedComment {
   label: string;
   rules: string[];
@@ -87,7 +77,7 @@ function parseComment(comment: EslintComment): ParsedComment | null {
   if (label === "eslint-disable-line" && comment.loc.end.line > comment.loc.start.line) {
     return null;
   }
-  const { rules, justification } = splitDirectiveArgs(m[2] ?? "");
+  const { rules, justification } = parseDirectiveArgs(m[2] ?? "");
   return {
     label,
     rules,
@@ -261,18 +251,6 @@ export interface ConfigOffDeclaration {
   rule: string;
   scopeKey: string;
   file: string;
-}
-
-function normalizedPatterns(patterns: string[] | null | undefined): string[] | null {
-  return patterns ? [...patterns].map((s) => s.trim()).sort() : null;
-}
-
-export function scopeKeyOf(configFile: string, files: string[] | null, ignores: string[] | null): string {
-  return JSON.stringify({
-    config: configFile,
-    files: normalizedPatterns(files),
-    ignores: normalizedPatterns(ignores),
-  });
 }
 
 function normalizePatterns(value: unknown): string[] | null {

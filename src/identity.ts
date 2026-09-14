@@ -21,8 +21,46 @@ export function canonicalDirectiveText(
   return `${form}\n${normalizeRuleTokens(ruleTokens).join(",")}`;
 }
 
+/**
+ * Split a directive's argument text into normalized rule tokens and its
+ * free-text justification. One parser feeds recognition and movement
+ * canonicalization alike.
+ */
+export function parseDirectiveArgs(raw: string): {
+  rules: string[];
+  justification: string;
+} {
+  let body = raw.trim();
+  let justification = "";
+  const m = /\s--\s+([\s\S]*)$/.exec(body);
+  if (m) {
+    justification = m[1]!.trim();
+    body = body.slice(0, m.index).trim();
+  }
+  const rules = body.split(/[\s,]+/).filter(Boolean);
+  return { rules: normalizeRuleTokens(rules), justification };
+}
+
 export function canonicalConfigOffText(rule: string, scopeKey: string): string {
   return `config-off\n${rule}\n${scopeKey}`;
+}
+
+export function normalizedPatterns(
+  patterns: string[] | null | undefined,
+): string[] | null {
+  return patterns ? [...patterns].map((s) => s.trim()).sort() : null;
+}
+
+export function scopeKeyOf(
+  configFile: string,
+  files: string[] | null,
+  ignores: string[] | null,
+): string {
+  return JSON.stringify({
+    config: configFile,
+    files: normalizedPatterns(files),
+    ignores: normalizedPatterns(ignores),
+  });
 }
 
 export function fingerprintOf(canonicalText: string): string {
@@ -32,6 +70,31 @@ export function fingerprintOf(canonicalText: string): string {
 
 export function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Canonical text for the whole-tree content index: whitespace-normalized, with
+ * a directive's justification stripped. `--` separates justification only on
+ * an eslint directive, so code such as `a -- b` is left intact.
+ */
+export function canonicalCodeLine(line: string): string {
+  let s = normalizeWhitespace(line);
+  const m = /\s--\s+/.exec(s);
+  if (m && /eslint-/.test(s.slice(0, m.index))) s = s.slice(0, m.index);
+  return s;
+}
+
+/**
+ * Canonical text for change-movement comparison. A `line`-form directive
+ * shares its physical line with the guarded statement, so the code must be
+ * stripped: identity is the directive comment, and rewriting the code beside
+ * it must not read as a newly introduced comment.
+ */
+export function canonicalMovementLine(line: string): string {
+  const directive = /(?:\/\/|\/\*)\s*eslint-disable-(next-line|line)\b([\s\S]*)$/.exec(line);
+  if (!directive) return canonicalCodeLine(line);
+  const { rules } = parseDirectiveArgs((directive[2] ?? "").replace(/\s*\*\/\s*$/, ""));
+  return `eslint-disable-${directive[1]} ${rules.join(",")}`;
 }
 
 export function tokenize(text: string): string[] {
