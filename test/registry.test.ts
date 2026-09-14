@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { coverExceptions, recordMatchKey } from "../src/registry.js";
-import { PocketLockError } from "../src/errors.js";
+import { PocketZipperError } from "../src/errors.js";
 import type { ExceptionRecord, ReconciledSuppression } from "../src/types.js";
 
 const NOW = new Date("2026-09-14T12:00:00Z");
@@ -157,7 +157,7 @@ describe("registry: verification", () => {
           records: [record({ file: "other.js" })],
           now: NOW,
         }),
-      (err) => err instanceof PocketLockError && err.code === "CONFIG_ERROR",
+      (err) => err instanceof PocketZipperError && err.code === "CONFIG_ERROR",
     );
   });
 });

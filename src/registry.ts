@@ -24,17 +24,17 @@ export function parseRegistry(raw: string | null): ExceptionRecord[] {
   try {
     doc = parseYaml(raw);
   } catch (err) {
-    throw configError("malformed .pocket-lock/exceptions.yml", String(err));
+    throw configError("malformed .pocket-zipper/exceptions.yml", String(err));
   }
   if (doc === null || doc === undefined) return [];
   if (!Array.isArray(doc)) {
-    throw configError(".pocket-lock/exceptions.yml must be a list of records");
+    throw configError(".pocket-zipper/exceptions.yml must be a list of records");
   }
   return doc.map((entry, index) => validateRecord(entry, index));
 }
 
 function validateRecord(entry: unknown, index: number): ExceptionRecord {
-  const where = `.pocket-lock/exceptions.yml[${index}]`;
+  const where = `.pocket-zipper/exceptions.yml[${index}]`;
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
     throw configError(`${where} must be a mapping`);
   }

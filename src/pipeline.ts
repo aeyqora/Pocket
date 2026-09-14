@@ -19,7 +19,7 @@ import {
   type LineDiff,
 } from "./identity.js";
 import { reconcile } from "./reconcile.js";
-import { PocketLockError, eslintError, gitError } from "./errors.js";
+import { PocketZipperError, eslintError, gitError } from "./errors.js";
 import type {
   ErrorCode,
   EvaluationRecord,
@@ -31,9 +31,9 @@ import type {
 
 export { TOOL_NAME, TOOL_VERSION, SCHEMA_VERSION } from "./record.js";
 
-const PROTECTED_CONFIG = ".pocket-lock/config.yml";
-const PROTECTED_REGISTRY = ".pocket-lock/exceptions.yml";
-const SKIP_PREFIXES = [".git/", "node_modules/", ".pocket-lock/"];
+const PROTECTED_CONFIG = ".pocket-zipper/config.yml";
+const PROTECTED_REGISTRY = ".pocket-zipper/exceptions.yml";
+const SKIP_PREFIXES = [".git/", "node_modules/", ".pocket-zipper/"];
 
 export interface EvaluateOptions {
   mode: Mode;
@@ -184,7 +184,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       for (const dir of tmpDirs) git.cleanup(dir);
     }
   } catch (err) {
-    if (err instanceof PocketLockError) {
+    if (err instanceof PocketZipperError) {
       errors.push({ code: err.code, message: err.message, detail: err.detail });
       return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "" };
     }
@@ -268,7 +268,7 @@ function resolveHeadDir(git: Git, options: EvaluateOptions, trees: ResolvedTrees
 function assertGitPosture(git: Git, mode: Mode): void {
   if (git.promisorRemotes().length > 0) {
     throw gitError(
-      "partial (promisor) clone detected; Pocket Lock requires a full clone",
+      "partial (promisor) clone detected; Pocket Zipper requires a full clone",
     );
   }
   if (git.isShallow()) {

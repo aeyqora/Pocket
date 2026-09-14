@@ -48,8 +48,8 @@ function parseArgs(argv: string[]): Args | { error: string } | { help: true } {
 function usage(): string {
   return [
     "Usage:",
-    "  pocket-lock check --base <ref> [--json <path>] [--verbose]",
-    "  pocket-lock pre-commit [--json <path>] [--verbose]",
+    "  pocket-zipper check --base <ref> [--json <path>] [--verbose]",
+    "  pocket-zipper pre-commit [--json <path>] [--verbose]",
   ].join("\n");
 }
 
@@ -104,7 +104,7 @@ if (invokedDirectly) {
       process.exitCode = code;
     })
     .catch((err) => {
-      process.stderr.write(`pocket-lock: internal error: ${String(err)}\n`);
+      process.stderr.write(`pocket-zipper: internal error: ${String(err)}\n`);
       process.exitCode = 2;
     });
 }

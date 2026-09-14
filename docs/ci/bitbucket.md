@@ -24,7 +24,7 @@ Bitbucket's wording ("merges the destination branch *into* your working branch")
 to the merge commit's **first parent being the source tip**, the destination tip the
 second parent.
 
-That is the opposite of what Pocket Lock's merge-result-first rule expects: it
+That is the opposite of what Pocket Zipper's merge-result-first rule expects: it
 shortcuts to HEAD's first parent as the baseline **only** when that first parent is the
 resolved `--base` ([principles §2](principles.md#2-tree-resolution-is-merge-result-first)),
 and here the first parent is the change's own source tree. The explanation therefore
@@ -51,13 +51,13 @@ example fetches it explicitly:
 git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
 ```
 
-and Pocket Lock's auto-unshallow completes the history so the destination's ancestors
+and Pocket Zipper's auto-unshallow completes the history so the destination's ancestors
 are present for the merge-base computation
 ([principles §1](principles.md#1-a-full-depth-clone-is-mandatory)).
 
 ## Evaluation record
 
-`--json pocket-lock.json` writes the record. Persist it with **step-level**
+`--json pocket-zipper.json` writes the record. Persist it with **step-level**
 `artifacts:` — there is **no `definitions: artifacts:` block** (`definitions:` governs
 caches, services, and step configs). The step's `artifacts:` lists glob paths relative
 to `$BITBUCKET_CLONE_DIR`; `capture-on` **defaults to `always`**, so the record
@@ -71,10 +71,10 @@ Useful PR variables in the step: `$BITBUCKET_PR_DESTINATION_BRANCH` (destination
 branch), `$BITBUCKET_PR_ID` (the PR number), `$BITBUCKET_PR_DESTINATION_COMMIT` (the
 destination's current commit), `$BITBUCKET_BRANCH` (the PR's source branch).
 
-## Trust: protecting `.pocket-lock/**`
+## Trust: protecting `.pocket-zipper/**`
 
 Branch restrictions (branch permissions) plus a merge check
-([principles §5](principles.md#5-the-pocket-lock-protection-prerequisite)):
+([principles §5](principles.md#5-the-pocket-zipper-protection-prerequisite)):
 
 - **Branch restrictions** on the protected branch: restrict write access (no direct
   write ⇒ changes must come through PRs) and restrict who may merge via PR. A branch

@@ -30,11 +30,11 @@ describe("policy-change detection through the pipeline", () => {
   it("fails when a weakening edit is consumed by new debt in the same change", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: false }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -45,11 +45,11 @@ describe("policy-change detection through the pipeline", () => {
   it("fails when removal of an explicitly-true enabled key is consumed", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-lock/config.yml", "# policy unchanged beyond removing the flag\n");
+    r.write(".pocket-zipper/config.yml", "# policy unchanged beyond removing the flag\n");
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -60,7 +60,7 @@ describe("policy-change detection through the pipeline", () => {
   it("does not fire when no protected file is touched", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -74,9 +74,9 @@ describe("policy-change detection through the pipeline", () => {
   it("fires even when the consumed debt is authorized by an exception", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
     r.write(
-      ".pocket-lock/exceptions.yml",
+      ".pocket-zipper/exceptions.yml",
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -88,7 +88,7 @@ describe("policy-change detection through the pipeline", () => {
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: false }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -104,11 +104,11 @@ describe("policy-change detection through the pipeline", () => {
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
     r.write(
-      ".pocket-lock/config.yml",
+      ".pocket-zipper/config.yml",
       configYaml({ governedRules: ["no-console", "no-debugger"] }),
     );
     r.write(
-      ".pocket-lock/exceptions.yml",
+      ".pocket-zipper/exceptions.yml",
       exceptionYaml({
         rule: "no-debugger",
         suppressionType: "next-line",
@@ -120,7 +120,7 @@ describe("policy-change detection through the pipeline", () => {
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
     r.write("app.js", `export const a = 1;\n${noDebugger}\ndebugger;\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -136,7 +136,7 @@ describe("policy-change detection through the pipeline", () => {
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
     r.write(
-      ".pocket-lock/exceptions.yml",
+      ".pocket-zipper/exceptions.yml",
       exceptionYaml({
         rule: "no-debugger",
         suppressionType: "next-line",
@@ -148,7 +148,7 @@ describe("policy-change detection through the pipeline", () => {
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
     r.write("app.js", `export const a = 1;\n${noDebugger}\ndebugger;\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -160,12 +160,12 @@ describe("policy-change detection through the pipeline", () => {
   it("fires when the exception registry broadens and is consumed", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
     r.write(
-      ".pocket-lock/exceptions.yml",
+      ".pocket-zipper/exceptions.yml",
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -187,9 +187,9 @@ describe("policy-change detection through the pipeline", () => {
       "eslint.config.mjs",
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
     r.write(
-      ".pocket-lock/exceptions.yml",
+      ".pocket-zipper/exceptions.yml",
       exceptionYaml({
         rule: "no-debugger",
         suppressionType: "next-line",
@@ -202,7 +202,7 @@ describe("policy-change detection through the pipeline", () => {
     r.commit("base");
     r.branch("base");
     r.write(
-      ".pocket-lock/exceptions.yml",
+      ".pocket-zipper/exceptions.yml",
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",

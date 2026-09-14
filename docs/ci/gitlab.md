@@ -20,7 +20,7 @@ rules match both a branch pipeline and an MR pipeline, GitLab runs both.
 
 ## What the runner checks out
 
-| Pipeline type | HEAD shape | Pocket Lock path | Tier |
+| Pipeline type | HEAD shape | Pocket Zipper path | Tier |
 | --- | --- | --- | --- |
 | Branch pipeline (default) | single-parent commit on the branch | merge-base | — |
 | Detached MR pipeline (default MR pipeline) | single-parent commit (MR head `refs/merge-requests/<iid>/head`) | merge-base | Free |
@@ -51,7 +51,7 @@ unresolvable ref until the target is present locally. The example fetches it fir
 git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 ```
 
-and Pocket Lock's auto-unshallow completes the history
+and Pocket Zipper's auto-unshallow completes the history
 ([principles §1](principles.md#1-a-full-depth-clone-is-mandatory)). The simpler
 alternative is to disable shallow for the whole pipeline:
 
@@ -88,21 +88,21 @@ pipeline the SHAs are not there to resolve.
 
 ## Evaluation record
 
-`--json pocket-lock.json` writes the record, and job `artifacts:` persists it. Use
+`--json pocket-zipper.json` writes the record, and job `artifacts:` persists it. Use
 `when: always` (or `on_failure`): the default `on_success` would drop the artifact
 exactly when the gate fails ([principles §4](principles.md#4-the-evaluation-record-is-the-statistics-artifact)).
 `expire_in` defaults to 30 days (or the instance-wide setting).
 
-## Trust: protecting `.pocket-lock/**`
+## Trust: protecting `.pocket-zipper/**`
 
 Code Owner approval plus a protected branch
-([principles §5](principles.md#5-the-pocket-lock-protection-prerequisite)):
+([principles §5](principles.md#5-the-pocket-zipper-protection-prerequisite)):
 
 - Protect the `main` branch with **"Require merge requests"** so no one can direct-push
   past the review path — anyone allowed to push to a protected branch skips MR approval
   rules, Code Owners included.
 - Enable **Code Owner approval** on the protected branch and add a rule matching
-  `.pocket-lock/**` to its owners. Code Owners are direct-group members only: group
+  `.pocket-zipper/**` to its owners. Code Owners are direct-group members only: group
   approvers count only if they belong to the eligible group directly, not through an
   inherited membership.
 - **"Pipelines must succeed"** on the MR makes a failing lock block the merge before

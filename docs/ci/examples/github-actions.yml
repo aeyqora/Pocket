@@ -1,4 +1,4 @@
-name: pocket-lock
+name: pocket-zipper
 
 on:
   pull_request:
@@ -14,22 +14,22 @@ permissions:
   contents: read
 
 jobs:
-  pocket-lock:
+  pocket-zipper:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0            # full history: the --base ref must resolve
       - run: npm ci
-      - name: Pocket Lock
+      - name: Pocket Zipper
         run: |
-          npx pocket-lock check \
+          npx pocket-zipper check \
             --base origin/${{ github.base_ref || 'main' }} \
-            --json pocket-lock.json
+            --json pocket-zipper.json
       # Persist the evaluation record even when the check fails.
-      - name: Upload Pocket Lock evaluation record
+      - name: Upload Pocket Zipper evaluation record
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pocket-lock
-          path: pocket-lock.json
+          name: pocket-zipper
+          path: pocket-zipper.json

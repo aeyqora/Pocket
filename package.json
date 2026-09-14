@@ -1,11 +1,11 @@
 {
-  "name": "pocket-lock",
+  "name": "pocket-zipper",
   "version": "0.1.0",
   "description": "Gate a proposed change from adding new ESLint suppression debt.",
   "type": "module",
   "license": "MIT",
   "bin": {
-    "pocket-lock": "dist/cli.js"
+    "pocket-zipper": "dist/cli.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

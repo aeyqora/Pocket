@@ -14,7 +14,7 @@ import type {
   Verdict,
 } from "./types.js";
 
-export const TOOL_NAME = "pocket-lock";
+export const TOOL_NAME = "pocket-zipper";
 export const TOOL_VERSION = "0.1.0";
 export const SCHEMA_VERSION = 1 as const;
 

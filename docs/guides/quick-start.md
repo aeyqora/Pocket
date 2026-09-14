@@ -1,6 +1,6 @@
 # Quick start
 
-Get Pocket Lock running against a repository in about five minutes.
+Get Pocket Zipper running against a repository in about five minutes.
 
 If your repository already has a lot of ESLint suppressions you do not want to block
 on, read [Onboarding an existing codebase](onboarding-existing-codebase.md) instead —
@@ -11,7 +11,7 @@ enabling the gate cold would flag all of them as new debt.
 - Node.js 20 or newer.
 - `git` 2.43 or newer. The tool spells its git commands explicitly (including
   `git merge-base A B`).
-- ESLint installed and configured in the repository. Pocket Lock uses *your* installed
+- ESLint installed and configured in the repository. Pocket Zipper uses *your* installed
   ESLint as the semantic authority for which rules apply where.
 - A full clone. Shallow clones are auto-unshallowed when possible; partial (promisor)
   clones fail closed. See [Troubleshooting](troubleshooting.md).
@@ -19,12 +19,12 @@ enabling the gate cold would flag all of them as new debt.
 ## 1. Install
 
 ```sh
-npm install --save-dev pocket-lock eslint
+npm install --save-dev pocket-zipper eslint
 ```
 
 ## 2. Add a config file
 
-Create `.pocket-lock/config.yml`. The smallest useful config is:
+Create `.pocket-zipper/config.yml`. The smallest useful config is:
 
 ```yaml
 enabled: true
@@ -53,17 +53,17 @@ An absent config file means the same as `enabled: true` with no allowlist.
 ## 3. Run your first check
 
 ```sh
-npx pocket-lock check --base main
+npx pocket-zipper check --base main
 ```
 
-`--base` is the target you compare against — here, the local `main` branch. Pocket Lock
+`--base` is the target you compare against — here, the local `main` branch. Pocket Zipper
 resolves the baseline from git and compares it against your current `HEAD` (the proposed
 change). It never uses a two-point `git diff`.
 
 To also write the machine-readable evaluation record:
 
 ```sh
-npx pocket-lock check --base main --json pocket-lock.json
+npx pocket-zipper check --base main --json pocket-zipper.json
 ```
 
 ## 4. Read the verdict
@@ -81,8 +81,8 @@ counts, and the offending suppressions. Colors appear only when stdout is a term
 ## Commands
 
 ```sh
-pocket-lock check --base <ref> [--json <path>] [--verbose]
-pocket-lock pre-commit [--json <path>] [--verbose]
+pocket-zipper check --base <ref> [--json <path>] [--verbose]
+pocket-zipper pre-commit [--json <path>] [--verbose]
 ```
 
 - `check` is the authoritative gate; run it in CI against the target branch.

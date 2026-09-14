@@ -94,7 +94,7 @@ export class FixtureRepo {
   runCli(args: string[], opts: { json?: boolean } = {}): RunResult {
     const jsonPath = join(
       tmpdir(),
-      `pocket-lock-record-${process.pid}-${Date.now()}-${this.counter++}.json`,
+      `pocket-zipper-record-${process.pid}-${Date.now()}-${this.counter++}.json`,
     );
     return runCliIn(this.dir, args, jsonPath, opts.json !== false);
   }
@@ -110,7 +110,7 @@ export function runCliIn(
   jsonPath?: string,
   writeJson = true,
 ): RunResult {
-  const target = jsonPath ?? join(tmpdir(), `pocket-lock-record-${process.pid}-${Date.now()}.json`);
+  const target = jsonPath ?? join(tmpdir(), `pocket-zipper-record-${process.pid}-${Date.now()}.json`);
   const fullArgs = [...args];
   if (writeJson) fullArgs.push("--json", target);
   const res: SpawnSyncReturns<string> = spawnSync(process.execPath, [CLI, ...fullArgs], {
@@ -131,7 +131,7 @@ export function runCliIn(
 }
 
 export function createRepo(): FixtureRepo {
-  const dir = mkdtempSync(join(tmpdir(), "pocket-lock-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "pocket-zipper-test-"));
   const repo = new FixtureRepo(dir);
   repo.git(["init", "-q", "-b", "main"]);
   repo.git(["config", "user.email", "test@example.com"]);

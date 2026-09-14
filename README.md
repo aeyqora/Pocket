@@ -1,4 +1,4 @@
-# Pocket Lock
+# Pocket Zipper
 
 A CLI that gates a proposed change from adding new ESLint suppression debt. It reconciles
 the suppression inventory of a git-derived baseline against the inventory of the change
@@ -12,10 +12,10 @@ down.
 ## Install
 
 ```sh
-npm install --save-dev pocket-lock eslint
+npm install --save-dev pocket-zipper eslint
 ```
 
-Pocket Lock is a plain-git, host-agnostic Node.js package. Its only runtime inputs are the
+Pocket Zipper is a plain-git, host-agnostic Node.js package. Its only runtime inputs are the
 repository's installed ESLint (the semantic authority), the `git` binary, and a YAML
 parser. There is no hosted service and no committed baseline manifest — the baseline is
 recomputed from git on every run.
@@ -24,11 +24,11 @@ recomputed from git on every run.
 
 ```sh
 # 1. Add a policy file
-mkdir -p .pocket-lock
-printf 'enabled: true\n' > .pocket-lock/config.yml
+mkdir -p .pocket-zipper
+printf 'enabled: true\n' > .pocket-zipper/config.yml
 
 # 2. Run the authoritative check against your target branch
-npx pocket-lock check --base main
+npx pocket-zipper check --base main
 ```
 
 - `PASS` (exit 0) — no unauthorized new debt.
@@ -44,8 +44,8 @@ debt grandfathers instead of blocking.
 ## Commands
 
 ```sh
-pocket-lock check --base <ref> [--json <path>] [--verbose]   # authoritative CI gate
-pocket-lock pre-commit [--json <path>] [--verbose]           # staged index, local feedback
+pocket-zipper check --base <ref> [--json <path>] [--verbose]   # authoritative CI gate
+pocket-zipper pre-commit [--json <path>] [--verbose]           # staged index, local feedback
 ```
 
 `--json <path>` writes the versioned evaluation record; stdout stays for the human report.
@@ -69,12 +69,12 @@ pocket-lock pre-commit [--json <path>] [--verbose]           # staged index, loc
 Two rules are load-bearing enough to state here:
 
 - **The effective policy is always the baseline's.** A head-side edit to
-  `.pocket-lock/config.yml` or `.pocket-lock/exceptions.yml` never shapes its own
+  `.pocket-zipper/config.yml` or `.pocket-zipper/exceptions.yml` never shapes its own
   evaluation; it takes effect from the next one (one-merge lag).
-- **Protect `.pocket-lock/**`.** Keep the policy and exception registry mergeable only
+- **Protect `.pocket-zipper/**`.** Keep the policy and exception registry mergeable only
   through approved policy PRs (required reviewers or CODEOWNERS), or the exception
   registry is toothless. See
-  [CI wiring principles §5](docs/ci/principles.md#5-the-pocket-lock-protection-prerequisite).
+  [CI wiring principles §5](docs/ci/principles.md#5-the-pocket-zipper-protection-prerequisite).
 
 ## Requirements
 

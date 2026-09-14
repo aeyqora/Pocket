@@ -1,6 +1,6 @@
 # Onboarding an existing codebase
 
-Enabling Pocket Lock on a repository that already has ESLint suppressions would flag
+Enabling Pocket Zipper on a repository that already has ESLint suppressions would flag
 every one of them as new debt and block the first change. Grandfather them instead: land
 the policy switched off, add the suppressions you need, then flip the gate on. The
 suppressions that already exist become **existing debt** and are allowed to remain.
@@ -12,7 +12,7 @@ takes effect from the next evaluation, and the flip itself is judged under the o
 
 ## Step 1 — land the policy disabled
 
-Add `.pocket-lock/config.yml` with the gate off:
+Add `.pocket-zipper/config.yml` with the gate off:
 
 ```yaml
 enabled: false
@@ -20,9 +20,9 @@ enabled: false
 
 Land this through your **protected policy PR** — the same review path that will later
 guard exceptions. See [Protecting the policy](#protecting-the-policy) below and
-[CI wiring principles §5](../ci/principles.md#5-the-pocket-lock-protection-prerequisite).
+[CI wiring principles §5](../ci/principles.md#5-the-pocket-zipper-protection-prerequisite).
 
-While `enabled: false`, Pocket Lock evaluates nothing, exits 0, and skips policy
+While `enabled: false`, Pocket Zipper evaluates nothing, exits 0, and skips policy
 validation entirely.
 
 ## Step 2 — mass-suppress in ordinary PRs
@@ -84,13 +84,13 @@ forward declaration and is fine.
 
 ## Protecting the policy
 
-`.pocket-lock/config.yml` and `.pocket-lock/exceptions.yml` are the policy surface: one
+`.pocket-zipper/config.yml` and `.pocket-zipper/exceptions.yml` are the policy surface: one
 shapes what debt exists, the other authorizes new debt. Keep both mergeable only through
-approved policy pull requests (required reviewers or CODEOWNERS on `.pocket-lock/**`) and
+approved policy pull requests (required reviewers or CODEOWNERS on `.pocket-zipper/**`) and
 protect the code-owners file itself. Without that protection an author could weaken the
 gate and approve their own debt in one change — the exception registry would be
 toothless. The per-host
-[CI guides](ci/github.md) and [principles §5](../ci/principles.md#5-the-pocket-lock-protection-prerequisite)
+[CI guides](ci/github.md) and [principles §5](../ci/principles.md#5-the-pocket-zipper-protection-prerequisite)
 cover the wiring.
 
 ## Next steps

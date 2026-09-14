@@ -1,6 +1,6 @@
 # Bitbucket Cloud quick start
 
-Run Pocket Lock on every pull request. Add the `pull-requests:` pipeline from
+Run Pocket Zipper on every pull request. Add the `pull-requests:` pipeline from
 [`examples/bitbucket-pipelines.yml`](../../ci/examples/bitbucket-pipelines.yml) to your
 `bitbucket-pipelines.yml`:
 
@@ -9,17 +9,17 @@ pipelines:
   pull-requests:
     '**':        # matches the source branch of every PR; fork PRs do not trigger
       - step:
-          name: Pocket Lock
+          name: Pocket Zipper
           script:
             # PR pipelines merge the destination into the source, so HEAD's first
             # parent is the source, not the baseline; always force the merge-base
             # path with an explicit --base and never rely on parent order.
             - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
             - npm ci
-            - npx pocket-lock check --base "origin/$BITBUCKET_PR_DESTINATION_BRANCH" --json pocket-lock.json
+            - npx pocket-zipper check --base "origin/$BITBUCKET_PR_DESTINATION_BRANCH" --json pocket-zipper.json
           artifacts:
             # capture-on defaults to always, so this survives a failed check.
-            - pocket-lock.json
+            - pocket-zipper.json
 ```
 
 ## What makes it work
@@ -29,7 +29,7 @@ pipelines:
   commit and the generic first-parent shortcut does not apply. Passing `--base` forces
   the merge-base path, which is correct regardless of parent order.
 - **`git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"`** — the default clone is
-  shallow and the destination ref may be absent. Fetch it before `--base`; Pocket Lock
+  shallow and the destination ref may be absent. Fetch it before `--base`; Pocket Zipper
   then auto-unshallows.
 - **Step-level `artifacts:`** — `capture-on` defaults to `always`, so the record survives
   a failed check. There is no `definitions: artifacts:` block.

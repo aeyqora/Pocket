@@ -60,9 +60,9 @@ export function viewPolicy(raw: string | null): PolicyView {
 
 export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy {
   const view = viewPolicy(raw);
-  if (view.malformed) throw configError("malformed .pocket-lock/config.yml");
+  if (view.malformed) throw configError("malformed .pocket-zipper/config.yml");
   if (!view.enabledValid) {
-    throw configError(".pocket-lock/config.yml: 'enabled' must be a boolean");
+    throw configError(".pocket-zipper/config.yml: 'enabled' must be a boolean");
   }
   if (!view.enabled) {
     // Policy validation is skipped entirely when the gate is off.
@@ -70,14 +70,14 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
   }
   if (!view.governedRulesValid) {
     throw configError(
-      ".pocket-lock/config.yml: 'governedRules' must be a list of non-empty strings",
+      ".pocket-zipper/config.yml: 'governedRules' must be a list of non-empty strings",
     );
   }
   if (view.governedRules !== null && knownRules.size > 0) {
     for (const entry of view.governedRules) {
       if (!knownRules.has(entry)) {
         throw configError(
-          `.pocket-lock/config.yml: governedRules names an unrecognized ESLint rule '${entry}'`,
+          `.pocket-zipper/config.yml: governedRules names an unrecognized ESLint rule '${entry}'`,
         );
       }
     }

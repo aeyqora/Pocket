@@ -1,7 +1,7 @@
 # GitHub Actions
 
 Copy [`examples/github-actions.yml`](examples/github-actions.yml) as
-`.github/workflows/pocket-lock.yml` and the lock becomes a required check on every PR
+`.github/workflows/pocket-zipper.yml` and the lock becomes a required check on every PR
 that adds new governed suppression debt. This page explains what that file encodes;
 the ground rules it follows are the [CI wiring principles](principles.md).
 
@@ -39,7 +39,7 @@ used.
 | `workflow_dispatch` | selected branch or tag | No | **empty** | same as `push` |
 
 `pull_request` and `merge_group` check out **merge commits whose first parent is the
-current target tip**, so Pocket Lock's merge-result-first path applies
+current target tip**, so Pocket Zipper's merge-result-first path applies
 ([principles §2](principles.md#2-tree-resolution-is-merge-result-first)): the baseline
 is `HEAD^1` and the proposed change is the merged result. `push` and `workflow_dispatch`
 are plain tips, so the merge-base path runs. The example's
@@ -57,23 +57,23 @@ mirrored and fork PRs resolve exactly like same-repo PRs.
 
 ## Evaluation record
 
-`--json pocket-lock.json` writes the record, and
+`--json pocket-zipper.json` writes the record, and
 `actions/upload-artifact@v4` persists it — with `if: always()`, because the default
 `success()` would skip the upload exactly when the check fails. The failed step's log
-(where `pocket-lock check` prints the human report and exits 1) is the readable
+(where `pocket-zipper check` prints the human report and exits 1) is the readable
 surface; the artifact is the durable record
 ([principles §4](principles.md#4-the-evaluation-record-is-the-statistics-artifact)).
 
-## Trust: protecting `.pocket-lock/**`
+## Trust: protecting `.pocket-zipper/**`
 
 Two orthogonal controls, both configured on the base branch
-([principles §5](principles.md#5-the-pocket-lock-protection-prerequisite)):
+([principles §5](principles.md#5-the-pocket-zipper-protection-prerequisite)):
 
-- **Required status check** named after the lock job (`pocket-lock`), so a failing or
+- **Required status check** named after the lock job (`pocket-zipper`), so a failing or
   absent lock blocks the merge. When a merge queue is used, the check must be required
   against **both** `pull_request` and `merge_group` — the queue re-reports the check on
   its own SHA and merging would otherwise proceed unreported.
-- **CODEOWNERS review** on `.pocket-lock/**` (`/.pocket-lock/ @org/lock-owners`
+- **CODEOWNERS review** on `.pocket-zipper/**` (`/.pocket-zipper/ @org/lock-owners`
   covers the directory and subdirectories, hence both `config.yml` and
   `exceptions.yml`), with "Require review from Code Owners" and "Do not allow bypassing
   the above settings" enabled. Protect the CODEOWNERS file itself

@@ -30,7 +30,7 @@ describe("fail-closed posture", () => {
   it("fails closed with CONFIG_ERROR on malformed policy", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", "enabled: [not, a, boolean]\n");
+    r.write(".pocket-zipper/config.yml", "enabled: [not, a, boolean]\n");
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -45,7 +45,7 @@ describe("fail-closed posture", () => {
       "eslint.config.mjs",
       "export default (() => { throw new Error('config boom'); })();\n",
     );
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: false }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -85,7 +85,7 @@ describe("evaluation record contract", () => {
     const res = r.runCli(["check", "--base", "base"]);
     const record = res.record!;
     assert.equal(record.schemaVersion, 1);
-    assert.equal(record.tool.name, "pocket-lock");
+    assert.equal(record.tool.name, "pocket-zipper");
     assert.equal(record.mode, "check");
     assert.equal(record.verdict, "pass");
     assert.match(record.baseline.tree, /^[0-9a-f]{40}$/);
@@ -98,7 +98,7 @@ describe("evaluation record contract", () => {
   it("emits a minimal excluded record for enabled: false", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: false }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     const res = r.runCli(["check", "--base", "main"]);

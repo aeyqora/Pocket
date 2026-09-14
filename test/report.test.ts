@@ -6,7 +6,7 @@ import type { EvaluationRecord, Verdict } from "../src/types.js";
 function record(verdict: Verdict): EvaluationRecord {
   return {
     schemaVersion: 1,
-    tool: { name: "pocket-lock", version: "0.1.0" },
+    tool: { name: "pocket-zipper", version: "0.1.0" },
     mode: "check",
     verdict,
     baseline: { ref: "main", tree: "a".repeat(40) },

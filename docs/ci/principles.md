@@ -1,13 +1,13 @@
-# Pocket Lock CI wiring principles
+# Pocket Zipper CI wiring principles
 
-> New to Pocket Lock? Start with the [Guides](../guides/README.md). This page is the deep
+> New to Pocket Zipper? Start with the [Guides](../guides/README.md). This page is the deep
 > reference for how CI must be wired, not a setup walkthrough.
 
-Every Pocket Lock CI integration encodes the same six ground rules. Read this page
+Every Pocket Zipper CI integration encodes the same six ground rules. Read this page
 before any host page; the per-host pages ([GitHub Actions](github.md),
 [GitLab CI/CD](gitlab.md), [Bitbucket Cloud](bitbucket.md)) encode exactly these rules
 in that host's vocabulary and never restate them. The CLI itself is git-host agnostic:
-`pocket-lock check --base <ref>` is the authoritative gate on every host, and the
+`pocket-zipper check --base <ref>` is the authoritative gate on every host, and the
 wiring is what differs.
 
 The six sections below are the contract a new host page must honor. Adding a fourth
@@ -23,7 +23,7 @@ host's full-depth switch — GitHub's `fetch-depth: 0`, GitLab's `GIT_DEPTH: 0` 
 checkout still cannot be trusted to carry the target ref, an explicit fetch of that
 ref before `--base` (Bitbucket).
 
-Pocket Lock also defends itself: it detects a shallow clone and auto-unshallows before
+Pocket Zipper also defends itself: it detects a shallow clone and auto-unshallows before
 resolving any ref, and fails closed (`GIT_ERROR`, exit 2) when it cannot. Partial
 (promisor) clones fail closed. Treat the auto-unshallow as a safety net, not the
 config — full history is a prerequisite of a correct evaluation, not an option.
@@ -68,7 +68,7 @@ host's decision, but the rule is the same everywhere:
 
 ## 4. The evaluation record is the statistics artifact
 
-`pocket-lock check --json <path>` writes the full evaluation record — both tree ids,
+`pocket-zipper check --json <path>` writes the full evaluation record — both tree ids,
 the policy applied, per-suppression dispositions, exception matches, and granular
 errors. The record is the statistics artifact: persist it to the host's artifact store
 **on failure as well as success** (a failed gate is exactly when the numbers matter).
@@ -76,27 +76,27 @@ errors. The record is the statistics artifact: persist it to the host's artifact
 stdout, by contrast, stays human: it carries the report (verdict, dispositions,
 per-file NEW and MATERIALLY-CHANGED suppressions with copy-paste exception records),
 not the machine-readable detail. In CI the failed step's log is therefore the human
-report, and the artifact is the durable record. Pocket Lock writes nothing to the
+report, and the artifact is the durable record. Pocket Zipper writes nothing to the
 working tree beyond the file you point `--json` at.
 
-## 5. The `.pocket-lock/**` protection prerequisite
+## 5. The `.pocket-zipper/**` protection prerequisite
 
-The policy — `.pocket-lock/config.yml` (governed rules, enablement) and
-`.pocket-lock/exceptions.yml` (authorized new debt) — is the one thing a policy-weakening
+The policy — `.pocket-zipper/config.yml` (governed rules, enablement) and
+`.pocket-zipper/exceptions.yml` (authorized new debt) — is the one thing a policy-weakening
 change must not get to edit itself. Each host's protection wiring is where **human
 approval is counted**; the core is host-agnostic and never reads reviewers. Configure,
 per host, the equivalent of:
 
 - a **required check** named after the lock job (so no change merges with a failing
   or absent verdict), and
-- **path-gated code review** over `.pocket-lock/**` (so only approved policy owners
+- **path-gated code review** over `.pocket-zipper/**` (so only approved policy owners
   can touch the policy), protecting the code-owners file itself.
 
 Without this protection the exception registry is toothless — an author could weaken
 the gate and approve their own debt in one change.
 
 The policy is **baseline-authoritative**: the evaluation always reads the *baseline's*
-`.pocket-lock` files, never the head's. A head-side edit to `config.yml` or
+`.pocket-zipper` files, never the head's. A head-side edit to `config.yml` or
 `exceptions.yml` therefore never shapes the current evaluation — it records as a
 policy-change signal and takes effect from the next evaluation (one-merge lag). A
 policy-weakening edit *consumed by new debt in the same change* fails the gate
@@ -104,7 +104,7 @@ policy-weakening edit *consumed by new debt in the same change* fails the gate
 
 ## 6. The tool never calls host APIs
 
-Pocket Lock reads git and ESLint and nothing else. It posts no comments, sets no
+Pocket Zipper reads git and ESLint and nothing else. It posts no comments, sets no
 status or check statuses, uploads no Code Insights, sends no notifications. Those are
 host-side configuration — the trust and reporting wiring in section 5 and the record
 artifact in section 4 *are* the integration surface. If a team wants a PR comment or a

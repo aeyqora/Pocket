@@ -15,13 +15,13 @@ const repos: FixtureRepo[] = [];
 after(() => repos.forEach((r) => r.cleanup()));
 
 describe("package contract", () => {
-  it("ships the pocket-lock binary with only the YAML runtime dependency", () => {
+  it("ships the pocket-zipper binary with only the YAML runtime dependency", () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
       bin: Record<string, string>;
       dependencies: Record<string, string>;
       files: string[];
     };
-    assert.equal(pkg.bin["pocket-lock"], "dist/cli.js");
+    assert.equal(pkg.bin["pocket-zipper"], "dist/cli.js");
     assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["yaml"]);
     assert.ok(pkg.files.includes("dist"));
   });
@@ -34,7 +34,7 @@ describe("package contract", () => {
   });
 
   it("packs, unpacks and runs the packaged binary end to end", () => {
-    const tmp = mkdtempSync(join(tmpdir(), "pocket-lock-pack-"));
+    const tmp = mkdtempSync(join(tmpdir(), "pocket-zipper-pack-"));
     try {
       const packOut = execFileSync(
         "npm",

@@ -1,6 +1,6 @@
 # GitLab CI/CD quick start
 
-Run Pocket Lock on every merge request. Add the `workflow:rules` fragment and the job
+Run Pocket Zipper on every merge request. Add the `workflow:rules` fragment and the job
 from [`examples/gitlab-ci.yml`](../../ci/examples/gitlab-ci.yml) to your `.gitlab-ci.yml`:
 
 ```yaml
@@ -11,7 +11,7 @@ workflow:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - when: never
 
-pocket-lock:
+pocket-zipper:
   image: node:22
   before_script:
     - npm ci
@@ -19,10 +19,10 @@ pocket-lock:
     # absent locally, so fetch it before --base can resolve it.
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
   script:
-    - npx pocket-lock check --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --json pocket-lock.json
+    - npx pocket-zipper check --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --json pocket-zipper.json
   artifacts:
     paths:
-      - pocket-lock.json
+      - pocket-zipper.json
     when: always
     expire_in: 30 days
 ```
@@ -35,7 +35,7 @@ pocket-lock:
   requirement.
 - **`git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"`** — the runner clones
   shallow and fetches only the MR ref, so the target branch is absent locally. Fetch it
-  (or set `GIT_DEPTH: 0`) before `--base`. Pocket Lock then auto-unshallows.
+  (or set `GIT_DEPTH: 0`) before `--base`. Pocket Zipper then auto-unshallows.
 - **`artifacts: when: always`** — keeps the evaluation record when the check fails.
   `on_success` (the default) would drop it exactly then.
 
@@ -43,7 +43,7 @@ pocket-lock:
 
 - Protect the target branch with **"Require merge requests"** and **"Pipelines must
   succeed"** so a failing lock blocks the merge.
-- Enable **Code Owner approval** and add a rule matching `.pocket-lock/**`. Only direct
+- Enable **Code Owner approval** and add a rule matching `.pocket-zipper/**`. Only direct
   members of the eligible groups can approve, so keep the policy-owning group tight.
 
 ## Deep reference

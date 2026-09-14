@@ -22,7 +22,7 @@ describe("documented onboarding path", () => {
       "eslint.config.mjs",
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: false }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
     r.write("app.js", `${noConsole}console.log(1);\n`);
     r.commit("land disabled");
     r.branch("land");
@@ -34,7 +34,7 @@ describe("documented onboarding path", () => {
     assert.equal(massSuppress.status, 0);
     assert.equal(massSuppress.record?.verdict, "excluded");
 
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
     r.commit("flip");
     const flip = r.runCli(["check", "--base", "mass"]);
     assert.equal(flip.status, 0);
@@ -51,7 +51,7 @@ describe("documented onboarding path", () => {
     r.branch("after");
 
     r.write(
-      ".pocket-lock/config.yml",
+      ".pocket-zipper/config.yml",
       configYaml({ enabled: true, governedRules: ["no-debugger"] }),
     );
     r.write("app.js", `${noConsole}console.log(1);\n${noDebugger}debugger;\nconst a = 2;\n`);
@@ -62,7 +62,7 @@ describe("documented onboarding path", () => {
     r.branch("narrow");
 
     r.write(
-      ".pocket-lock/config.yml",
+      ".pocket-zipper/config.yml",
       configYaml({ enabled: true, governedRules: ["no-debugger", "no-console"] }),
     );
     r.write("app.js", `${noConsole}console.log(1);\n${noDebugger}debugger;\nconst a = 3;\n`);

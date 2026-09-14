@@ -5,7 +5,7 @@ feedback only** — the authoritative check is the CI run, because a hook is loc
 optional, and bypassable.
 
 ```sh
-npx pocket-lock pre-commit
+npx pocket-zipper pre-commit
 ```
 
 ## What it evaluates
@@ -19,7 +19,7 @@ npx pocket-lock pre-commit
 Add `--json <path>` if you want the evaluation record written to disk:
 
 ```sh
-npx pocket-lock pre-commit --json pocket-lock.json
+npx pocket-zipper pre-commit --json pocket-zipper.json
 ```
 
 ## Wiring it
@@ -30,7 +30,7 @@ Create `.git/hooks/pre-commit` (and make it executable):
 
 ```sh
 #!/bin/sh
-npx pocket-lock pre-commit
+npx pocket-zipper pre-commit
 ```
 
 ```sh
@@ -46,15 +46,15 @@ If your project uses [Husky](https://typicode.github.io/husky/), add the command
 pre-commit hook file:
 
 ```sh
-echo "npx pocket-lock pre-commit" > .husky/pre-commit
+echo "npx pocket-zipper pre-commit" > .husky/pre-commit
 ```
 
 ### lint-staged
 
-Call `pocket-lock pre-commit` **directly**, not through lint-staged. Pocket Lock reads the
+Call `pocket-zipper pre-commit` **directly**, not through lint-staged. Pocket Zipper reads the
 staged index itself and needs no filename list; lint-staged stashes partially-staged
 changes while it runs, which would change the index underneath the evaluation. If you
-already use lint-staged, keep Pocket Lock as a separate pre-commit step.
+already use lint-staged, keep Pocket Zipper as a separate pre-commit step.
 
 ## Relationship to the CI check
 

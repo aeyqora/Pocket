@@ -22,19 +22,19 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
 
   if (record.verdict === "excluded") {
     if (record.mode === "check" || verbose) {
-      lines.push(color("pocket-lock: EXCLUDED (policy disabled)", YELLOW, tty));
+      lines.push(color("pocket-zipper: EXCLUDED (policy disabled)", YELLOW, tty));
     }
     return joinLines(lines);
   }
 
   if (record.verdict === "pass") {
     if (record.mode === "check" || verbose) {
-      lines.push(color("pocket-lock: PASS", GREEN, tty));
+      lines.push(color("pocket-zipper: PASS", GREEN, tty));
     }
     return joinLines(lines);
   }
 
-  lines.push(color("pocket-lock: FAIL", RED, tty));
+  lines.push(color("pocket-zipper: FAIL", RED, tty));
   const dispositions = record.summary.dispositions;
   lines.push(
     `  existing: ${dispositions.existing}  moved-existing: ${dispositions.movedExisting}  removed: ${dispositions.removed}  new: ${dispositions.new}  materially-changed: ${dispositions.materiallyChanged}`,

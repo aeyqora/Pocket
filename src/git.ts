@@ -193,7 +193,7 @@ export class Git {
   materialize(commit: string): string {
     const dir = join(
       tmpdir(),
-      `pocket-lock-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      `pocket-zipper-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     mkdirSync(dir, { recursive: true });
     const tar = this.runBuffer(["archive", "--format=tar", commit]);

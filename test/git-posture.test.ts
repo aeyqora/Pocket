@@ -94,7 +94,7 @@ describe("bare repository", () => {
     src.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     src.commit("head");
 
-    const bareDir = mkdtempSync(join(tmpdir(), "pocket-lock-bare-"));
+    const bareDir = mkdtempSync(join(tmpdir(), "pocket-zipper-bare-"));
     rmSync(bareDir, { recursive: true, force: true });
     git(src.dir, ["clone", "-q", "--bare", src.dir, bareDir]);
     const res = runCliIn(bareDir, ["check", "--base", "base"]);
@@ -119,7 +119,7 @@ describe("git failure posture", () => {
   });
 
   it("fails closed with GIT_ERROR when run outside a repository", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pocket-lock-norepo-"));
+    const dir = mkdtempSync(join(tmpdir(), "pocket-zipper-norepo-"));
     const res = runCliIn(dir, ["check", "--base", "main"]);
     assert.equal(res.status, 2);
     assert.equal(res.record?.errors[0]?.code, "GIT_ERROR");
@@ -135,7 +135,7 @@ describe("git failure posture", () => {
     src.write("app.js", "export const a = 2;\n");
     src.commit("head");
 
-    const shallowDir = mkdtempSync(join(tmpdir(), "pocket-lock-shallow-"));
+    const shallowDir = mkdtempSync(join(tmpdir(), "pocket-zipper-shallow-"));
     rmSync(shallowDir, { recursive: true, force: true });
     git(src.dir, ["clone", "-q", "--depth", "1", `file://${src.dir}`, shallowDir]);
     git(shallowDir, ["remote", "set-url", "origin", "file:///nonexistent/repo.git"]);
@@ -156,7 +156,7 @@ describe("git failure posture", () => {
     src.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     src.commit("head");
 
-    const shallowDir = mkdtempSync(join(tmpdir(), "pocket-lock-deepen-"));
+    const shallowDir = mkdtempSync(join(tmpdir(), "pocket-zipper-deepen-"));
     rmSync(shallowDir, { recursive: true, force: true });
     git(src.dir, ["clone", "-q", "--depth", "1", `file://${src.dir}`, shallowDir]);
     const res = runCliIn(shallowDir, ["check", "--base", baseSha]);

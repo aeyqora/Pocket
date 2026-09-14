@@ -220,7 +220,7 @@ describe("pre-commit mode", () => {
   it("authorizes a staged suppression from the committed registry", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/exceptions.yml", noConsoleException());
+    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
@@ -235,7 +235,7 @@ describe("pre-commit mode", () => {
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
-    r.write(".pocket-lock/exceptions.yml", noConsoleException());
+    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.stage();
     const res = r.runCli(["pre-commit"]);

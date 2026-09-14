@@ -1,6 +1,6 @@
 # Handling a failure
 
-When `pocket-lock check` fails, the change introduces **new debt** — a suppression with no
+When `pocket-zipper check` fails, the change introduces **new debt** — a suppression with no
 continuous baseline counterpart, or a materially-changed one — of a governed rule that no
 exception covers. You have two honest options: remove the suppression by fixing the code,
 or authorize it with an exception record and get that record reviewed.
@@ -10,7 +10,7 @@ or authorize it with an exception record and get that record reviewed.
 A failing run looks like this (colors only on a terminal):
 
 ```text
-pocket-lock: FAIL
+pocket-zipper: FAIL
   existing: 3  moved-existing: 0  removed: 0  new: 1  materially-changed: 0
 
 New suppression debt requiring an exception:
@@ -52,7 +52,7 @@ debt.
 
 An **exception** is a committed record that authorizes exactly one logical suppression.
 The report prints a ready-to-fill template for each offending suppression; fill in the
-human fields and add it to `.pocket-lock/exceptions.yml`.
+human fields and add it to `.pocket-zipper/exceptions.yml`.
 
 ### Exception record fields
 
@@ -84,7 +84,7 @@ Exceptions are read from the **baseline** registry. An exception committed in th
 change as the suppression it authorizes authorizes nothing for that change. Land it in
 two steps:
 
-1. A protected policy PR adding the record to `.pocket-lock/exceptions.yml`.
+1. A protected policy PR adding the record to `.pocket-zipper/exceptions.yml`.
 2. A later ordinary PR that introduces the suppression.
 
 This is why the exception registry sits behind the same review path as the policy: human
