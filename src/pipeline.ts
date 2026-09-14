@@ -11,6 +11,7 @@ import {
 import { computeGovernedSet, parsePolicy } from "./policy.js";
 import { coverExceptions, parseRegistry } from "./registry.js";
 import { detectPolicyChange } from "./policy-change.js";
+import { buildRecord, excludedRecord, failureRecord, summarize } from "./record.js";
 import {
   canonicalCodeLine,
   canonicalMovementLine,
@@ -20,26 +21,15 @@ import {
 import { reconcile } from "./reconcile.js";
 import { PocketLockError, eslintError, gitError } from "./errors.js";
 import type {
-  Disposition,
   ErrorCode,
   EvaluationRecord,
-  EvaluationSummary,
-  ExceptionRecord,
-  ExceptionStatus,
-  InventoryEntry,
   LogicalSuppression,
   Mode,
-  Policy,
-  ReconciledSuppression,
   RecordError,
-  RecordExceptionEntry,
   SuppressionType,
-  Verdict,
 } from "./types.js";
 
-export const TOOL_NAME = "pocket-lock";
-export const TOOL_VERSION = "0.1.0";
-export const SCHEMA_VERSION = 1 as const;
+export { TOOL_NAME, TOOL_VERSION, SCHEMA_VERSION } from "./record.js";
 
 const PROTECTED_CONFIG = ".pocket-lock/config.yml";
 const PROTECTED_REGISTRY = ".pocket-lock/exceptions.yml";
@@ -74,7 +64,16 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
     const baselinePolicyRaw = git.fileAt(trees.baselineCommit, PROTECTED_CONFIG);
     const initialPolicy = parsePolicy(baselinePolicyRaw, new Set());
     if (!initialPolicy.enabled) {
-      return excludedResult(options, trees, initialPolicy);
+      return {
+        record: excludedRecord({
+          mode: options.mode,
+          baseline: { ref: trees.baselineRef, tree: trees.baselineTree },
+          proposedTree: trees.proposedTree,
+          policy: initialPolicy,
+        }),
+        exitCode: 0,
+        report: "",
+      };
     }
 
     const baselineDir = git.materialize(trees.baselineCommit);
@@ -134,11 +133,11 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         spent: coverage.counts.spent,
       };
 
+      const summary = summarize(coverage.head, baseline.length);
+      const consumedDebt = summary.newDebt.authorized + summary.newDebt.unauthorized;
+
       const touchesProtected =
         changeMap.files.has(PROTECTED_CONFIG) || changeMap.files.has(PROTECTED_REGISTRY);
-      const consumedDebt = coverage.head.filter(
-        (h) => h.disposition === "new" || h.disposition === "materially-changed",
-      ).length;
       const policyChange = touchesProtected
         ? detectPolicyChange({
             baselineConfig: git.fileAt(trees.baselineCommit, PROTECTED_CONFIG),
@@ -150,12 +149,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
           })
         : { weakening: false, failure: false };
 
-      const gateFailure =
-        coverage.head.some(
-          (h) =>
-            (h.disposition === "new" || h.disposition === "materially-changed") &&
-            h.exception === null,
-        ) || policyChange.failure;
+      const gateFailure = summary.newDebt.unauthorized > 0 || policyChange.failure;
 
       if (policyChange.weakening) {
         errors.push({
@@ -167,17 +161,18 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       }
 
       const record = buildRecord({
-        options,
-        trees,
+        mode: options.mode,
+        verdict: gateFailure ? "fail" : "pass",
+        baseline: { ref: trees.baselineRef, tree: trees.baselineTree },
+        proposedTree: trees.proposedTree,
         policy,
         governedRules: governedHead,
         head: coverage.head,
-        baseline,
+        removed: baseline,
         registry,
         cleanup,
         exceptionStatuses: coverage.statuses,
         errors,
-        verdict: gateFailure ? "fail" : "pass",
       });
 
       return {
@@ -191,13 +186,13 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
   } catch (err) {
     if (err instanceof PocketLockError) {
       errors.push({ code: err.code, message: err.message, detail: err.detail });
-      return { record: operationalFailureRecord(options, errors), exitCode: 2, report: "" };
+      return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "" };
     }
     errors.push({
       code: "INTERNAL_ERROR",
       message: err instanceof Error ? err.message : String(err),
     });
-    return { record: operationalFailureRecord(options, errors), exitCode: 2, report: "" };
+    return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "" };
   }
 }
 
@@ -455,157 +450,6 @@ function readTreeFile(dir: string, path: string): string | null {
 
 function isSkippedPath(path: string): boolean {
   return SKIP_PREFIXES.some((p) => path.startsWith(p));
-}
-
-interface BuildRecordInput {
-  options: EvaluateOptions;
-  trees: ResolvedTrees;
-  policy: Policy;
-  governedRules: string[];
-  head: ReconciledSuppression[];
-  baseline: LogicalSuppression[];
-  registry: ExceptionRecord[];
-  cleanup: { expired: number; dangling: number; spent: number };
-  exceptionStatuses: Map<ExceptionRecord, ExceptionStatus>;
-  errors: RecordError[];
-  verdict: Verdict;
-}
-
-function buildRecord(input: BuildRecordInput): EvaluationRecord {
-  const { options, trees, policy, governedRules, head, baseline, errors, verdict } = input;
-  const summary: EvaluationSummary = {
-    policy: { enabled: policy.enabled, allowlist: policy.governedRules },
-    governedRules,
-    dispositions: {
-      existing: head.filter((h) => h.disposition === "existing").length,
-      movedExisting: head.filter((h) => h.disposition === "moved-existing").length,
-      removed: baseline.length,
-      new: head.filter((h) => h.disposition === "new").length,
-      materiallyChanged: head.filter((h) => h.disposition === "materially-changed").length,
-    },
-    newDebt: {
-      authorized: head.filter(
-        (h) =>
-          (h.disposition === "new" || h.disposition === "materially-changed") &&
-          h.exception !== null,
-      ).length,
-      unauthorized: head.filter(
-        (h) =>
-          (h.disposition === "new" || h.disposition === "materially-changed") &&
-          h.exception === null,
-      ).length,
-    },
-    cleanup: {
-      danglingExceptions: input.cleanup.dangling,
-      spentExceptions: input.cleanup.spent,
-      expiredExceptions: input.cleanup.expired,
-    },
-  };
-
-  const inventory: InventoryEntry[] = [
-    ...head.map((h) => ({
-      fingerprint: h.fingerprint,
-      rule: h.rule,
-      suppressionType: h.suppressionType,
-      guardKind: h.guardKind,
-      disposition: h.disposition,
-      file: h.file,
-      lines: { baseline: h.baselineLine, head: h.line },
-      exception: h.exception,
-    })),
-    ...baseline.map((b) => ({
-      fingerprint: b.fingerprint,
-      rule: b.rule,
-      suppressionType: b.suppressionType,
-      guardKind: b.guardKind,
-      disposition: "removed" as Disposition,
-      file: b.file,
-      lines: { baseline: b.line, head: null },
-      exception: null,
-    })),
-  ];
-
-  const exceptionEntries: RecordExceptionEntry[] = input.registry.map((r) => ({
-    fingerprint: r.fingerprint,
-    suppressionType: r.suppression_type,
-    rule: r.rule,
-    file: r.file,
-    type: r.type,
-    status: input.exceptionStatuses.get(r) ?? "dangling",
-  }));
-
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    tool: { name: TOOL_NAME, version: TOOL_VERSION },
-    mode: options.mode,
-    verdict,
-    baseline: { ref: trees.baselineRef, tree: trees.baselineTree },
-    proposedChange: {
-      ref: options.mode === "check" ? "HEAD" : "index",
-      tree: trees.proposedTree,
-    },
-    summary,
-    inventory,
-    exceptions: exceptionEntries,
-    errors,
-  };
-}
-
-function excludedResult(
-  options: EvaluateOptions,
-  trees: ResolvedTrees,
-  policy: Policy,
-): EvaluateResult {
-  const record: EvaluationRecord = {
-    schemaVersion: SCHEMA_VERSION,
-    tool: { name: TOOL_NAME, version: TOOL_VERSION },
-    mode: options.mode,
-    verdict: "excluded",
-    baseline: { ref: trees.baselineRef, tree: trees.baselineTree },
-    proposedChange: {
-      ref: options.mode === "check" ? "HEAD" : "index",
-      tree: trees.proposedTree,
-    },
-    summary: {
-      policy: { enabled: policy.enabled, allowlist: policy.governedRules },
-      governedRules: [],
-      dispositions: { existing: 0, movedExisting: 0, removed: 0, new: 0, materiallyChanged: 0 },
-      newDebt: { authorized: 0, unauthorized: 0 },
-      cleanup: { danglingExceptions: 0, spentExceptions: 0, expiredExceptions: 0 },
-    },
-    inventory: [],
-    exceptions: [],
-    errors: [],
-  };
-  return { record, exitCode: 0, report: "" };
-}
-
-function operationalFailureRecord(
-  options: EvaluateOptions,
-  errors: RecordError[],
-): EvaluationRecord {
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    tool: { name: TOOL_NAME, version: TOOL_VERSION },
-    mode: options.mode,
-    verdict: "fail",
-    baseline: { ref: options.baseRef, tree: "" },
-    proposedChange: { ref: options.mode === "check" ? "HEAD" : "index", tree: "" },
-    summary: emptySummary(),
-    inventory: [],
-    exceptions: [],
-    errors,
-  };
-}
-
-function emptySummary(): EvaluationSummary {
-  return {
-    policy: { enabled: true, allowlist: null },
-    governedRules: [],
-    dispositions: { existing: 0, movedExisting: 0, removed: 0, new: 0, materiallyChanged: 0 },
-    newDebt: { authorized: 0, unauthorized: 0 },
-    cleanup: { danglingExceptions: 0, spentExceptions: 0, expiredExceptions: 0 },
-  };
 }
 
 function buildLineIndex(dir: string): Set<string> {

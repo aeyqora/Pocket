@@ -1,3 +1,4 @@
+import { remediationFields } from "./registry.js";
 import type { EvaluationRecord, InventoryEntry, RecordError } from "./types.js";
 
 export interface ReportOptions {
@@ -108,18 +109,7 @@ function renderProblem(entry: InventoryEntry, tty: boolean): string[] {
     `  ${color(`${entry.file}:${line}`, DIM, tty)}  ${entry.rule}  (${entry.suppressionType}, ${entry.guardKind}, ${entry.disposition})`,
   );
   out.push("    remediate with:");
-  const record: Array<[string, string]> = [
-    ["rule", entry.rule],
-    ["suppression_type", entry.suppressionType],
-    ["fingerprint", entry.fingerprint],
-    ["file", entry.file],
-    ["type", "temporary"],
-    ["reason", "<why this suppression is necessary>"],
-    ["owner", "<owning team>"],
-    ["reference", "<issue or PR link>"],
-    ["expires", "<YYYY-MM-DD>"],
-  ];
-  record.forEach(([key, value], i) => {
+  remediationFields(entry).forEach(([key, value], i) => {
     out.push(`    ${i === 0 ? "- " : "  "}${key}: ${value}`);
   });
   return out;

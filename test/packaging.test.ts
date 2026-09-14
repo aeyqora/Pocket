@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRepo, eslintConfig, type FixtureRepo } from "./harness.js";
 import { EMPTY_TREE } from "../src/git.js";
+import { TOOL_VERSION } from "../src/record.js";
 import type { EvaluationRecord } from "../src/types.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,6 +24,13 @@ describe("package contract", () => {
     assert.equal(pkg.bin["pocket-lock"], "dist/cli.js");
     assert.deepEqual(Object.keys(pkg.dependencies).sort(), ["yaml"]);
     assert.ok(pkg.files.includes("dist"));
+  });
+
+  it("pins the tool version to package.json", () => {
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+      version: string;
+    };
+    assert.equal(TOOL_VERSION, pkg.version);
   });
 
   it("packs, unpacks and runs the packaged binary end to end", () => {

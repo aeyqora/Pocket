@@ -4,6 +4,7 @@ import { matchKey } from "./identity.js";
 import type {
   ExceptionRecord,
   ExceptionStatus,
+  InventoryEntry,
   ReconciledSuppression,
   SuppressionType,
 } from "./types.js";
@@ -100,6 +101,25 @@ export function isValidThrough(expires: string, now: Date): boolean {
 export function isExpired(expires: string | undefined, now: Date): boolean {
   if (!expires) return false;
   return !isValidThrough(expires, now);
+}
+
+/**
+ * The ordered fields of the exception record that would remediate a flagged
+ * suppression, with defaults for the human-authored ones. The single source of
+ * the record's field list for the human report.
+ */
+export function remediationFields(entry: InventoryEntry): Array<[string, string]> {
+  return [
+    ["rule", entry.rule],
+    ["suppression_type", entry.suppressionType],
+    ["fingerprint", entry.fingerprint],
+    ["file", entry.file],
+    ["type", "temporary"],
+    ["reason", "<why this suppression is necessary>"],
+    ["owner", "<owning team>"],
+    ["reference", "<issue or PR link>"],
+    ["expires", "<YYYY-MM-DD>"],
+  ];
 }
 
 /** The record's match key, hiding the registry's snake_case field spelling. */
