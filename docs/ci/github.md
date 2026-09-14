@@ -81,7 +81,7 @@ Two orthogonal controls, both configured on the base branch
 
 ## Provenance
 
-Every env-var and merge-commit claim above is verified against
-`.scratch/ci-integrations/research/github-actions-facts.md` (GitHub's own docs and the
-`actions/checkout` and `actions/upload-artifact` sources). Correct a fact there, then
-fix this page — [back to principles](principles.md), [README quick-start](../../README.md#ci-wiring).
+Every env-var and merge-commit claim above is verified against GitHub's own docs and the
+`actions/checkout` and `actions/upload-artifact` sources. If a host behavior changes,
+verify it against those primary sources and update this page —
+[back to principles](principles.md), [GitHub quick start](../guides/ci/github.md).

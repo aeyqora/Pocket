@@ -22,7 +22,7 @@ before it runs**, so HEAD is a merge commit. If the merge fails, the pipeline st
 before your step runs. Unlike GitHub, whose PR merge ref has the base as parent 1,
 Bitbucket's wording ("merges the destination branch *into* your working branch") points
 to the merge commit's **first parent being the source tip**, the destination tip the
-second parent — an inference, not a documented fact, and one the flag below tracks.
+second parent.
 
 That is the opposite of what Pocket Lock's merge-result-first rule expects: it
 shortcuts to HEAD's first parent as the baseline **only** when that first parent is the
@@ -35,7 +35,7 @@ never relies on first-parent semantics:
   — the destination head, a direct parent of the merge commit — and proposed change =
   `merge-base..HEAD`, exactly the PR's net change. Correct under either parent order.
 
-> **Confirmed (ticket 07):** Atlassian's docs state the pipeline "merges the destination
+> **Confirmed:** Atlassian's docs state the pipeline "merges the destination
 > branch into your working branch before it runs," and `git merge` semantics fix the
 > parent order: **first parent = source, second = destination**. The force-the-merge-base
 > spelling is correct under either ordering, and the example does not rely on parent order.
@@ -90,8 +90,7 @@ never calls host APIs).
 
 ## Provenance
 
-Every claim above is verified against
-`.scratch/ci-integrations/research/bitbucket-cloud-facts.md` (Atlassian's own docs).
-The parent-order claim is confirmed via Atlassian's wording plus `git merge` semantics
-and pinned by map ticket 07. Correct a fact there, then fix this page —
-[back to principles](principles.md), [README quick-start](../../README.md#ci-wiring).
+Every claim above is verified against Atlassian's own documentation and `git merge`
+semantics. If a host behavior changes, verify it against those primary sources and update
+this page — [back to principles](principles.md),
+[Bitbucket quick start](../guides/ci/bitbucket.md).

@@ -1,0 +1,121 @@
+# Troubleshooting
+
+## Exit codes
+
+| Exit | Verdict | Meaning |
+| --- | --- | --- |
+| `0` | pass | Nothing unauthorized. Also used when the policy is `enabled: false` (the record verdict is `excluded`). |
+| `1` | fail | Unauthorized new or materially-changed governed debt, or a policy-weakening edit consumed by new debt (`POLICY_CHANGE`). |
+| `2` | fail closed | An operational error: `GIT_ERROR`, `ESLINT_ERROR`, `CONFIG_ERROR`, or `INTERNAL_ERROR`. Nothing was approved. |
+
+Granular reasons live in the evaluation record's `errors[]`, not in the exit code.
+
+## Error codes
+
+| Code | Typical cause | Fix |
+| --- | --- | --- |
+| `GIT_ERROR` | Not a git repository; a shallow clone that cannot unshallow; a partial (promisor) clone; an unresolvable `--base`; no merge-base; pre-commit in a bare repo. | See [Git problems](#git-problems). |
+| `CONFIG_ERROR` | Malformed or invalid `.pocket-lock/config.yml` or `.pocket-lock/exceptions.yml`; an unrecognized rule in `governedRules`; an exception whose `file` does not match. | See [Config problems](#config-problems). |
+| `ESLINT_ERROR` | ESLint acknowledged a suppression Pocket Lock did not inventory. Fail-closed safety net. | Report it as a bug with the printed file and rule. |
+| `INTERNAL_ERROR` | An unexpected failure. | Re-run with `--json` and inspect `errors[]`. |
+
+## Git problems
+
+### "shallow repository and could not unshallow"
+
+Pocket Lock needs full history to resolve the baseline. It detects a shallow clone and
+tries `git fetch --unshallow` automatically; if that fails (offline, no network), it
+fails closed. In CI, configure a full clone: GitHub's `fetch-depth: 0`, GitLab's
+`GIT_DEPTH: 0`, or an explicit fetch of the target ref on Bitbucket. See
+[CI wiring principles §1](../ci/principles.md#1-a-full-depth-clone-is-mandatory).
+
+### "partial (promisor) clone detected"
+
+Promisor clones serve objects on demand and cannot guarantee the baseline is fully
+present. Pocket Lock fails closed. Use a regular full clone.
+
+### "cannot resolve ref '…' to a commit"
+
+The ref you passed to `--base` is not present in the local clone. CI clones often fetch
+only the refs the checkout needs. Fetch the target branch first:
+
+```sh
+git fetch origin "<target-branch>"
+npx pocket-lock check --base "origin/<target-branch>"
+```
+
+Each host's [CI guide](ci/github.md) spells the exact variable and fetch.
+
+### "no merge-base between the target ref and HEAD"
+
+The target and `HEAD` share no history — unrelated branches, or a rewritten history. Pass
+a pinned base SHA supplied by the host instead of a branch name.
+
+## Config problems
+
+### `enabled` must be a boolean
+
+`enabled` is `true` or `false`, not a string. An absent config file is allowed and means
+enabled with no allowlist.
+
+### "governedRules names an unrecognized ESLint rule"
+
+The rule id is misspelled, or the plugin that provides it is not installed and
+configured. This is a hard error (fail closed) so a typo cannot silently ungovern a rule.
+A real rule that does not currently apply anywhere is *not* an error — it is a forward
+declaration.
+
+### Exception record errors
+
+`.pocket-lock/exceptions.yml` must be a list of records. Each needs `rule`,
+`suppression_type`, `fingerprint`, `file`, `type`, `reason`, `owner`, and `reference`;
+`expires` is required for `temporary` and forbidden for `permanent`. `suppression_type`
+is one of `next-line`, `line`, `block`, or `file-level directive`. A record whose `file`
+does not match the suppression fails closed. See
+[Handling a failure](handling-a-failure.md#exception-record-fields).
+
+## Why is nothing being evaluated?
+
+- **`enabled: false`** — the check exits 0 with verdict `excluded` and validates nothing.
+- **An allowlist excludes the rule** — only rules in `governedRules` that ESLint makes
+  applicable are counted. Everything else is invisible.
+- **The path is skipped** — Pocket Lock ignores `.git/`, `node_modules/`, and
+  `.pocket-lock/` itself, and skips binary files.
+- **A stale suppression guards no current diagnostic** — it is still counted. Debt is
+  the directive, not the emitted diagnostic.
+
+## Everything is new debt right after enabling
+
+You enabled the gate cold on a repository with existing suppressions, so none of them
+have a baseline counterpart. Grandfather them instead of writing exceptions: follow
+[Onboarding an existing codebase](onboarding-existing-codebase.md).
+
+## Requirements
+
+- **Node.js** 20 or newer.
+- **ESLint** 8 or newer, installed and configured in the repository. It is the semantic
+  authority for which rules apply where.
+- **git** 2.43 or newer, with a full clone. Rename detection (`-M`) and NUL-delimited
+  output (`-z`) are spelled explicitly. No `user.name`/`user.email` is required.
+- Pocket Lock never writes to the working tree except the file you point `--json` at.
+
+## The evaluation record
+
+`check --json <path>` writes a versioned record (`schemaVersion: 1`) carrying both
+compared tree ids, the applied policy, per-suppression dispositions, exception matches,
+and granular errors. CI should persist it on failure as well as success — that is the
+durable statistics artifact. See
+[CI wiring principles §4](../ci/principles.md#4-the-evaluation-record-is-the-statistics-artifact).
+
+## Protecting the policy
+
+If you are worried an author can weaken the gate and approve their own debt in one
+change, that is the `.pocket-lock/**` protection prerequisite — a required check plus
+path-gated review on `.pocket-lock/**`. See
+[CI wiring principles §5](../ci/principles.md#5-the-pocket-lock-protection-prerequisite)
+and your host's [CI guide](ci/github.md).
+
+## Still stuck?
+
+Re-run with `--json <path>` and inspect `errors[]` in the record for the granular cause.
+The record and the exact command you ran are the two things a maintainer needs to help.

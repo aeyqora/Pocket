@@ -114,8 +114,9 @@ group tight.
 
 ## Provenance
 
-Every env-var, merge-commit, and shallow-fetch claim above is verified against
-`.scratch/ci-integrations/research/gitlab-ci-facts.md` (GitLab's own docs and server
-source). The runner shallow-fetch behavior is flagged there as doc-cited-not-reproduced
-and is flagged here too. Correct a fact there, then fix this page — [back to
-principles](principles.md), [README quick-start](../../README.md#ci-wiring).
+Every env-var, merge-commit, and shallow-fetch claim above is verified against GitLab's
+own docs and server source. The runner shallow-fetch behavior is documented but not
+reproduced against a live MR pipeline, so treat the fetch-before-`--base` spell as the
+robust default. If a host behavior changes, verify it against those primary sources and
+update this page — [back to principles](principles.md),
+[GitLab quick start](../guides/ci/gitlab.md).

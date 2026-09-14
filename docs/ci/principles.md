@@ -1,5 +1,8 @@
 # Pocket Lock CI wiring principles
 
+> New to Pocket Lock? Start with the [Guides](../guides/README.md). This page is the deep
+> reference for how CI must be wired, not a setup walkthrough.
+
 Every Pocket Lock CI integration encodes the same six ground rules. Read this page
 before any host page; the per-host pages ([GitHub Actions](github.md),
 [GitLab CI/CD](gitlab.md), [Bitbucket Cloud](bitbucket.md)) encode exactly these rules
@@ -114,11 +117,11 @@ Copy the example for your host, then read each section above and check the examp
 against it. The per-host pages ([GitHub](github.md), [GitLab](gitlab.md),
 [Bitbucket](bitbucket.md)) spell the same rules in host terms — what the pipeline
 checks out, which variable feeds `--base`, what must be fetched first, and how trust
-is wired. The README's [CI wiring](../../README.md#ci-wiring) section is the
-single-host quick-start.
+is wired. The [CI quick-start guides](../guides/README.md) are the copy-paste path for
+each host.
 
 ## Provenance
 
-The per-host pages are written against and cite the research fact files under
-`.scratch/ci-integrations/research/`. This principles page is host-agnostic by
-construction and is the seam a future host page slots into.
+The per-host pages are written against each host's own documentation and source. This
+principles page is host-agnostic by construction and is the seam a future host page slots
+into.

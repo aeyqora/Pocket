@@ -1,0 +1,56 @@
+# GitLab CI/CD quick start
+
+Run Pocket Lock on every merge request. Add the `workflow:rules` fragment and the job
+from [`examples/gitlab-ci.yml`](../../ci/examples/gitlab-ci.yml) to your `.gitlab-ci.yml`:
+
+```yaml
+workflow:
+  rules:
+    # Merge request pipelines only; the "when: never" branch stops a duplicate
+    # branch pipeline from also running the lock.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - when: never
+
+pocket-lock:
+  image: node:22
+  before_script:
+    - npm ci
+    # The runner's shallow clone fetched only the MR ref; the target branch is
+    # absent locally, so fetch it before --base can resolve it.
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+  script:
+    - npx pocket-lock check --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --json pocket-lock.json
+  artifacts:
+    paths:
+      - pocket-lock.json
+    when: always
+    expire_in: 30 days
+```
+
+## What makes it work
+
+- **`workflow:rules` selects MR pipelines** and its `when: never` branch prevents a
+  duplicate branch pipeline from also running. The matching rule must be written inline
+  in `.gitlab-ci.yml` — rules pulled in via `include:` do not satisfy GitLab's
+  requirement.
+- **`git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"`** — the runner clones
+  shallow and fetches only the MR ref, so the target branch is absent locally. Fetch it
+  (or set `GIT_DEPTH: 0`) before `--base`. Pocket Lock then auto-unshallows.
+- **`artifacts: when: always`** — keeps the evaluation record when the check fails.
+  `on_success` (the default) would drop it exactly then.
+
+## Make it required and protect the policy
+
+- Protect the target branch with **"Require merge requests"** and **"Pipelines must
+  succeed"** so a failing lock blocks the merge.
+- Enable **Code Owner approval** and add a rule matching `.pocket-lock/**`. Only direct
+  members of the eligible groups can approve, so keep the policy-owning group tight.
+
+## Deep reference
+
+This page is the copy-paste path. For detached vs merged-results pipelines, the MR-only
+variable table, and the empty `*_BRANCH_SHA` gotcha, see
+[docs/ci/gitlab.md](../../ci/gitlab.md). The host-agnostic ground rules are in
+[CI wiring principles](../../ci/principles.md).
+
+Back to [guides](../README.md) · [Troubleshooting](../troubleshooting.md)
