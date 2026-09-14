@@ -1,379 +1,177 @@
-import { after, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  createRepo,
-  configYaml,
-  eslintConfig,
-  exceptionYaml,
-  NEXT_LINE_NO_CONSOLE_FP,
-  NEXT_LINE_NO_DEBUGGER_FP,
-  type FixtureRepo,
-} from "./harness.js";
+import { detectPolicyChange, type PolicyChangeInput } from "../src/policy-change.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
+function detect(overrides: Partial<PolicyChangeInput> = {}) {
+  return detectPolicyChange({
+    baselineConfig: null,
+    headConfig: null,
+    baselineRegistry: null,
+    headRegistry: null,
+    baselineGoverned: [],
+    consumedDebt: 0,
+    ...overrides,
+  });
 }
 
-const disabled = "// eslint-disable-next-line no-console\n";
-const noDebugger = "// eslint-disable-next-line no-debugger\n";
+const enabled = (value: boolean) => `enabled: ${value}\n`;
+const allowlist = (...rules: string[]) =>
+  `governedRules:\n${rules.map((r) => `  - ${r}`).join("\n")}\n`;
 
-function hasPolicyChange(record: { errors: Array<{ code: string }> } | null): boolean {
-  return record?.errors.some((e) => e.code === "POLICY_CHANGE") ?? false;
+function record(overrides: Record<string, string> = {}): string {
+  const fields: Record<string, string> = {
+    rule: "no-console",
+    suppression_type: "next-line",
+    fingerprint: "v1:fp",
+    file: "app.js",
+    type: "permanent",
+    reason: "r",
+    owner: "o",
+    reference: "ref",
+    ...overrides,
+  };
+  return (
+    Object.entries(fields)
+      .map(([k, v], i) => `${i === 0 ? "- " : "  "}${k}: ${v}`)
+      .join("\n") + "\n"
+  );
 }
 
-describe("policy-change detection", () => {
-  it("fails when a weakening edit is consumed by new debt in the same change", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: false }));
-    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+describe("policy-change: config weakening", () => {
+  it("flags enabled true -> false", () => {
+    assert.equal(detect({ baselineConfig: enabled(true), headConfig: enabled(false) }).weakening, true);
   });
 
-  it("records but does not fail a pure weakening edit", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: false }));
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 0);
-    assert.ok(hasPolicyChange(res.record));
+  it("flags removal of an explicitly-true enabled key", () => {
+    assert.equal(detect({ baselineConfig: enabled(true), headConfig: "# gone\n" }).weakening, true);
   });
 
-  it("does not fire on a policy strengthening", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(
-      ".pocket-lock/config.yml",
-      configYaml({ governedRules: ["no-debugger", "no-console"] }),
-    );
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 0);
-    assert.equal(hasPolicyChange(res.record), false);
+  it("does not flag enabled false -> true", () => {
+    assert.equal(detect({ baselineConfig: enabled(false), headConfig: enabled(true) }).weakening, false);
   });
 
-  it("records a lone exception addition as a pure policy edit", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(
-      ".pocket-lock/exceptions.yml",
-      exceptionYaml({
-        rule: "no-console",
-        suppressionType: "next-line",
-        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
-        file: "app.js",
-        expires: "2099-01-01",
-      }),
+  it("flags an allowlist introduced that drops a governed rule", () => {
+    assert.equal(
+      detect({
+        baselineGoverned: ["no-console", "no-debugger"],
+        headConfig: allowlist("no-debugger"),
+      }).weakening,
+      true,
     );
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 0);
-    assert.ok(hasPolicyChange(res.record));
   });
 
-  it("records removal of an explicitly-true enabled key as weakening", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    // Drop the `enabled` key entirely.
-    r.write(".pocket-lock/config.yml", "# policy unchanged beyond removing the flag\n");
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 0);
-    assert.ok(hasPolicyChange(res.record));
+  it("does not flag an allowlist that covers every governed rule", () => {
+    assert.equal(
+      detect({
+        baselineGoverned: ["no-console"],
+        headConfig: allowlist("no-console"),
+      }).weakening,
+      false,
+    );
   });
 
-  it("fails when removal of an explicitly-true enabled key is consumed", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(".pocket-lock/config.yml", "# policy unchanged beyond removing the flag\n");
-    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+  it("flags an allowlist narrowing", () => {
+    assert.equal(
+      detect({
+        baselineConfig: allowlist("no-console", "no-debugger"),
+        headConfig: allowlist("no-debugger"),
+      }).weakening,
+      true,
+    );
   });
 
-  it("does not fire when no protected file is touched", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 1);
-    assert.equal(hasPolicyChange(res.record), false);
+  it("does not flag an allowlist widening", () => {
+    assert.equal(
+      detect({
+        baselineConfig: allowlist("no-debugger"),
+        headConfig: allowlist("no-debugger", "no-console"),
+      }).weakening,
+      false,
+    );
   });
 
-  it("fires even when the consumed debt is authorized by an exception", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
-    r.write(
-      ".pocket-lock/exceptions.yml",
-      exceptionYaml({
-        rule: "no-console",
-        suppressionType: "next-line",
-        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
-        file: "app.js",
-        expires: "2099-01-01",
-      }),
+  it("ignores allowlist order and formatting", () => {
+    assert.equal(
+      detect({
+        baselineConfig: allowlist("no-console", "no-debugger"),
+        headConfig: "governedRules:\n  - 'no-debugger'\n  - \"no-console\"\n",
+      }).weakening,
+      false,
     );
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: false }));
-    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
-    assert.equal(res.record?.summary.newDebt.authorized, 1);
   });
 
-  it("fails a membership loss consumed even when the debt is authorized", () => {
-    const r = repo();
-    r.write(
-      "eslint.config.mjs",
-      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
-    );
-    r.write(
-      ".pocket-lock/config.yml",
-      configYaml({ governedRules: ["no-console", "no-debugger"] }),
-    );
-    r.write(
-      ".pocket-lock/exceptions.yml",
-      exceptionYaml({
-        rule: "no-debugger",
-        suppressionType: "next-line",
-        fingerprint: NEXT_LINE_NO_DEBUGGER_FP,
-        file: "app.js",
-        expires: "2099-01-01",
-      }),
-    );
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
-    r.write("app.js", `export const a = 1;\n${noDebugger}\ndebugger;\n`);
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 1);
-    assert.equal(res.record?.summary.newDebt.authorized, 1);
-    assert.ok(hasPolicyChange(res.record));
+  it("does not flag identical documents", () => {
+    assert.equal(detect({ baselineConfig: enabled(true), headConfig: enabled(true) }).weakening, false);
+  });
+});
+
+describe("policy-change: registry broadening", () => {
+  it("flags a head that adds a record", () => {
+    assert.equal(detect({ headRegistry: record() }).weakening, true);
   });
 
-  it("fails an absent-to-narrower allowlist consumed even when the debt is authorized", () => {
-    const r = repo();
-    r.write(
-      "eslint.config.mjs",
-      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+  it("flags a change to an identity-critical field", () => {
+    assert.equal(
+      detect({
+        baselineRegistry: record({ rule: "no-debugger", fingerprint: "v1:fp2" }),
+        headRegistry: record(),
+      }).weakening,
+      true,
     );
-    r.write(
-      ".pocket-lock/exceptions.yml",
-      exceptionYaml({
-        rule: "no-debugger",
-        suppressionType: "next-line",
-        fingerprint: NEXT_LINE_NO_DEBUGGER_FP,
-        file: "app.js",
-        expires: "2099-01-01",
-      }),
-    );
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
-    r.write("app.js", `export const a = 1;\n${noDebugger}\ndebugger;\n`);
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 1);
-    assert.equal(res.record?.summary.newDebt.authorized, 1);
-    assert.ok(hasPolicyChange(res.record));
   });
 
-  it("does not fire when a new allowlist still covers every governed rule", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-debugger": "error" }));
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
-    r.write("app.js", "export const a = 2;\n");
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 0);
-    assert.equal(hasPolicyChange(res.record), false);
+  it("does not flag a non-identity-only change", () => {
+    assert.equal(
+      detect({
+        baselineRegistry: record({ type: "temporary", expires: "2099-01-01" }),
+        headRegistry: record({ type: "temporary", expires: "2098-01-01" }),
+      }).weakening,
+      false,
+    );
   });
 
-  it("fires when the exception registry broadens and is consumed", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(
-      ".pocket-lock/exceptions.yml",
-      exceptionYaml({
-        rule: "no-console",
-        suppressionType: "next-line",
-        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
-        file: "app.js",
-        expires: "2099-01-01",
-      }),
-    );
-    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+  it("ignores record order and formatting", () => {
+    const a = record();
+    const b = record({ rule: "no-debugger", fingerprint: "v1:fp2" });
+    assert.equal(detect({ baselineRegistry: a + b, headRegistry: b + a }).weakening, false);
   });
 
-  it("fires when a record's identity-critical field changes and is consumed", () => {
-    const r = repo();
-    r.write(
-      "eslint.config.mjs",
-      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
-    );
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
-    r.write(
-      ".pocket-lock/exceptions.yml",
-      exceptionYaml({
-        rule: "no-debugger",
-        suppressionType: "next-line",
-        fingerprint: NEXT_LINE_NO_DEBUGGER_FP,
-        file: "app.js",
-        expires: "2099-01-01",
-      }),
-    );
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(
-      ".pocket-lock/exceptions.yml",
-      exceptionYaml({
-        rule: "no-console",
-        suppressionType: "next-line",
-        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
-        file: "app.js",
-        expires: "2099-01-01",
-      }),
-    );
-    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+  it("treats a malformed head registry as broadened", () => {
+    assert.equal(detect({ headRegistry: "- rule: no-console\n" }).weakening, true);
   });
 
-  it("stays silent when only non-identity registry fields change", () => {
-    const r = repo();
-    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-lock/config.yml", configYaml({ enabled: true }));
-    r.write(
-      ".pocket-lock/exceptions.yml",
-      exceptionYaml({
-        rule: "no-console",
-        suppressionType: "next-line",
-        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
-        file: "app.js",
-        expires: "2099-01-01",
-      }),
+  it("treats a malformed baseline against a valid head as broadened", () => {
+    assert.equal(
+      detect({ baselineRegistry: "- rule: no-console\n", headRegistry: record() }).weakening,
+      true,
     );
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(
-      ".pocket-lock/exceptions.yml",
-      exceptionYaml({
-        rule: "no-console",
-        suppressionType: "next-line",
-        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
-        file: "app.js",
-        expires: "2098-01-01",
-      }),
-    );
-    r.write("app.js", "export const a = 2;\n");
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 0);
-    assert.equal(hasPolicyChange(res.record), false);
   });
 
-  it("ignores order and formatting changes to the allowlist", () => {
-    const r = repo();
-    r.write(
-      "eslint.config.mjs",
-      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+  it("treats identical malformed registries as unchanged", () => {
+    assert.equal(
+      detect({ baselineRegistry: "- rule: no-console\n", headRegistry: "- rule: no-console\n" })
+        .weakening,
+      false,
     );
-    r.write(
-      ".pocket-lock/config.yml",
-      configYaml({ governedRules: ["no-console", "no-debugger"] }),
-    );
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(
-      ".pocket-lock/config.yml",
-      "governedRules:\n  - 'no-debugger'\n  - \"no-console\"\n",
-    );
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 0);
-    assert.equal(hasPolicyChange(res.record), false);
+  });
+});
+
+describe("policy-change: consumption coupling", () => {
+  it("does not fire failure without a weakening delta", () => {
+    assert.deepEqual(detect({ consumedDebt: 5 }), { weakening: false, failure: false });
   });
 
-  it("records a membership loss without consumption as a pure policy edit", () => {
-    const r = repo();
-    r.write(
-      "eslint.config.mjs",
-      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+  it("records weakening without consumption as a pure policy edit", () => {
+    assert.deepEqual(
+      detect({ baselineConfig: enabled(true), headConfig: enabled(false), consumedDebt: 0 }),
+      { weakening: true, failure: false },
     );
-    r.write(
-      ".pocket-lock/config.yml",
-      configYaml({ governedRules: ["no-console", "no-debugger"] }),
+  });
+
+  it("fails a weakening delta consumed by new debt", () => {
+    assert.deepEqual(
+      detect({ baselineConfig: enabled(true), headConfig: enabled(false), consumedDebt: 3 }),
+      { weakening: true, failure: true },
     );
-    r.write("app.js", "export const a = 1;\n");
-    r.commit("base");
-    r.branch("base");
-    r.write(".pocket-lock/config.yml", configYaml({ governedRules: ["no-debugger"] }));
-    r.commit("head");
-    const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 0);
-    assert.ok(hasPolicyChange(res.record));
   });
 });

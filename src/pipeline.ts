@@ -8,8 +8,9 @@ import {
   recognizeDirectives,
   applicableRules,
 } from "./recognize.js";
-import { computeGovernedSet, parsePolicy, viewPolicy } from "./policy.js";
-import { coverExceptions, parseRegistry, recordMatchKey } from "./registry.js";
+import { computeGovernedSet, parsePolicy } from "./policy.js";
+import { coverExceptions, parseRegistry } from "./registry.js";
+import { detectPolicyChange } from "./policy-change.js";
 import {
   canonicalCodeLine,
   canonicalMovementLine,
@@ -133,17 +134,21 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         spent: coverage.counts.spent,
       };
 
-      const policyChange = detectPolicyChange({
-        git,
-        options,
-        trees,
-        headDir,
-        changeMap,
-        consumedDebt: coverage.head.filter(
-          (h) => h.disposition === "new" || h.disposition === "materially-changed",
-        ).length,
-        baselineGoverned: governedBaseline,
-      });
+      const touchesProtected =
+        changeMap.files.has(PROTECTED_CONFIG) || changeMap.files.has(PROTECTED_REGISTRY);
+      const consumedDebt = coverage.head.filter(
+        (h) => h.disposition === "new" || h.disposition === "materially-changed",
+      ).length;
+      const policyChange = touchesProtected
+        ? detectPolicyChange({
+            baselineConfig: git.fileAt(trees.baselineCommit, PROTECTED_CONFIG),
+            headConfig: readHeadContent(git, trees, options, headDir, PROTECTED_CONFIG),
+            baselineRegistry: git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY),
+            headRegistry: readHeadContent(git, trees, options, headDir, PROTECTED_REGISTRY),
+            baselineGoverned: governedBaseline,
+            consumedDebt,
+          })
+        : { weakening: false, failure: false };
 
       const gateFailure =
         coverage.head.some(
@@ -450,81 +455,6 @@ function readTreeFile(dir: string, path: string): string | null {
 
 function isSkippedPath(path: string): boolean {
   return SKIP_PREFIXES.some((p) => path.startsWith(p));
-}
-
-interface PolicyChangeInput {
-  git: Git;
-  options: EvaluateOptions;
-  trees: ResolvedTrees;
-  headDir: string;
-  changeMap: ReturnType<Git["changeMap"]>;
-  consumedDebt: number;
-  /** Rules governed under the baseline policy — used to judge allowlist narrowing. */
-  baselineGoverned: string[];
-}
-
-interface PolicyChangeResult {
-  weakening: boolean;
-  failure: boolean;
-}
-
-function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult {
-  const { git, options, trees, headDir, changeMap, consumedDebt, baselineGoverned } = input;
-  const touchesProtected =
-    changeMap.files.has(PROTECTED_CONFIG) || changeMap.files.has(PROTECTED_REGISTRY);
-  if (!touchesProtected) return { weakening: false, failure: false };
-
-  const baselineConfig = git.fileAt(trees.baselineCommit, PROTECTED_CONFIG);
-  const headConfig = readHeadContent(git, trees, options, headDir, PROTECTED_CONFIG);
-  const baselineRegistry = git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY);
-  const headRegistry = readHeadContent(git, trees, options, headDir, PROTECTED_REGISTRY);
-
-  const weakening =
-    configWeakened(baselineConfig, headConfig, baselineGoverned) ||
-    registryBroadened(baselineRegistry, headRegistry);
-
-  if (!weakening) return { weakening: false, failure: false };
-  return { weakening: true, failure: consumedDebt > 0 };
-}
-
-function configWeakened(
-  baselineRaw: string | null,
-  headRaw: string | null,
-  baselineGoverned: string[],
-): boolean {
-  const base = viewPolicy(baselineRaw);
-  const head = viewPolicy(headRaw);
-  // `enabled` flips true -> false, or is removed while the baseline declared it true.
-  if (base.enabled && (!head.enabled || (base.enabledPresent && !head.enabledPresent))) {
-    return true;
-  }
-  if (base.governedRules === null && head.governedRules !== null) {
-    // Introducing an allowlist only weakens if it drops a rule the baseline
-    // actually governed; a list covering every governed rule changes nothing.
-    const headSet = new Set(head.governedRules);
-    if (baselineGoverned.some((r) => !headSet.has(r))) return true;
-  }
-  if (base.governedRules !== null && head.governedRules !== null) {
-    const headSet = new Set(head.governedRules);
-    if (base.governedRules.some((r) => !headSet.has(r))) return true;
-  }
-  return false;
-}
-
-function registryBroadened(baselineRaw: string | null, headRaw: string | null): boolean {
-  const keys = (raw: string | null): Set<string> => {
-    if (raw === null || raw.trim() === "") return new Set();
-    try {
-      const records = parseRegistry(raw);
-      return new Set(records.map((r) => recordMatchKey(r)));
-    } catch {
-      return new Set(["<malformed>"]);
-    }
-  };
-  const base = keys(baselineRaw);
-  const head = keys(headRaw);
-  for (const k of head) if (!base.has(k)) return true;
-  return false;
 }
 
 interface BuildRecordInput {
