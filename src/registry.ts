@@ -1,6 +1,12 @@
 import { parse as parseYaml } from "yaml";
 import { configError } from "./errors.js";
-import type { ExceptionRecord, SuppressionType } from "./types.js";
+import { matchKey } from "./identity.js";
+import type {
+  ExceptionRecord,
+  ExceptionStatus,
+  ReconciledSuppression,
+  SuppressionType,
+} from "./types.js";
 
 const DIRECTIVE_TYPES: SuppressionType[] = [
   "next-line",
@@ -94,4 +100,77 @@ export function isValidThrough(expires: string, now: Date): boolean {
 export function isExpired(expires: string | undefined, now: Date): boolean {
   if (!expires) return false;
   return !isValidThrough(expires, now);
+}
+
+/** The record's match key, hiding the registry's snake_case field spelling. */
+export function recordMatchKey(record: ExceptionRecord): string {
+  return matchKey({
+    fingerprint: record.fingerprint,
+    suppressionType: record.suppression_type,
+    rule: record.rule,
+  });
+}
+
+export interface ExceptionCoverage {
+  head: ReconciledSuppression[];
+  statuses: Map<ExceptionRecord, ExceptionStatus>;
+  counts: { used: number; expired: number; dangling: number; spent: number };
+}
+
+export interface CoverExceptionsInput {
+  head: ReconciledSuppression[];
+  records: ExceptionRecord[];
+  now: Date;
+}
+
+/**
+ * Authorize new/materially-changed debt against the registry and classify every
+ * record's utilization. Returns a head whose authorized entries carry their
+ * record, the per-record status, and the status tally.
+ */
+export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage {
+  const { head, records, now } = input;
+  const statuses = new Map<ExceptionRecord, ExceptionStatus>();
+
+  // Authorize new/materially-changed debt, or mark the record expired.
+  const covered = head.map((h) => {
+    if (h.disposition !== "new" && h.disposition !== "materially-changed") return h;
+    const record = records.find((r) => recordMatchKey(r) === matchKey(h));
+    if (!record) return h;
+    if (record.file !== h.file) {
+      throw configError(
+        `exception for ${h.rule} names file '${record.file}' but the suppression is at '${h.file}'`,
+      );
+    }
+    if (isExpired(record.expires, now)) {
+      statuses.set(record, "expired");
+      return h;
+    }
+    statuses.set(record, "used");
+    return {
+      ...h,
+      exception: {
+        fingerprint: record.fingerprint,
+        suppressionType: record.suppression_type,
+        rule: record.rule,
+      },
+    };
+  });
+
+  // Classify the rest: expired is reported distinctly, then spent, then dangling.
+  for (const record of records) {
+    if (statuses.has(record)) continue;
+    const matchesExisting = head.some(
+      (h) =>
+        (h.disposition === "existing" || h.disposition === "moved-existing") &&
+        recordMatchKey(record) === matchKey(h),
+    );
+    if (isExpired(record.expires, now)) statuses.set(record, "expired");
+    else if (matchesExisting) statuses.set(record, "spent");
+    else statuses.set(record, "dangling");
+  }
+
+  const counts = { used: 0, expired: 0, dangling: 0, spent: 0 };
+  for (const status of statuses.values()) counts[status]++;
+  return { head: covered, statuses, counts };
 }

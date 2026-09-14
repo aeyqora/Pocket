@@ -25,6 +25,8 @@ export type Mode = "check" | "pre-commit";
 
 export type Verdict = "pass" | "fail" | "excluded";
 
+export type ExceptionStatus = "used" | "dangling" | "spent" | "expired";
+
 /** A directive / config-off expressed as a logical unit before reconciliation. */
 export interface LogicalSuppression {
   fingerprint: string;
@@ -125,7 +127,7 @@ export interface RecordExceptionEntry {
   rule: string;
   file: string;
   type: "temporary" | "permanent";
-  status: "used" | "dangling" | "spent" | "expired";
+  status: ExceptionStatus;
 }
 
 export interface RecordError {

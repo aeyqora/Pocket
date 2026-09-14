@@ -1,4 +1,4 @@
-import { driftDisposition, pairPools, type LineDiff } from "./identity.js";
+import { driftDisposition, matchKey, pairPools, type LineDiff } from "./identity.js";
 import type {
   Disposition,
   LogicalSuppression,
@@ -28,16 +28,14 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
     input;
 
   const groups = new Map<string, { head: LogicalSuppression[]; baseline: LogicalSuppression[] }>();
-  const keyOf = (s: LogicalSuppression) =>
-    `${s.fingerprint}\u0000${s.rule}\u0000${s.suppressionType}`;
   for (const s of baselineSuppressions) {
-    const k = keyOf(s);
+    const k = matchKey(s);
     const g = groups.get(k) ?? { head: [], baseline: [] };
     g.baseline.push(s);
     groups.set(k, g);
   }
   for (const s of headSuppressions) {
-    const k = keyOf(s);
+    const k = matchKey(s);
     const g = groups.get(k) ?? { head: [], baseline: [] };
     g.head.push(s);
     groups.set(k, g);

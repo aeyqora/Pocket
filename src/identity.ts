@@ -45,6 +45,19 @@ export function canonicalConfigOffText(rule: string, scopeKey: string): string {
   return `config-off\n${rule}\n${scopeKey}`;
 }
 
+/**
+ * The suppression's match key: fingerprint + suppression type + rule, never
+ * position. One spelling shared by pool grouping, exception matching, and
+ * registry-broadening detection.
+ */
+export function matchKey(key: {
+  fingerprint: string;
+  suppressionType: SuppressionType;
+  rule: string;
+}): string {
+  return `${key.fingerprint}\u0000${key.suppressionType}\u0000${key.rule}`;
+}
+
 export function normalizedPatterns(
   patterns: string[] | null | undefined,
 ): string[] | null {

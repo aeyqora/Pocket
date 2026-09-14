@@ -9,7 +9,7 @@ import {
   applicableRules,
 } from "./recognize.js";
 import { computeGovernedSet, parsePolicy, viewPolicy } from "./policy.js";
-import { isExpired, parseRegistry } from "./registry.js";
+import { coverExceptions, parseRegistry, recordMatchKey } from "./registry.js";
 import {
   canonicalCodeLine,
   canonicalMovementLine,
@@ -17,14 +17,14 @@ import {
   type LineDiff,
 } from "./identity.js";
 import { reconcile } from "./reconcile.js";
-import { PocketLockError, configError, eslintError, gitError } from "./errors.js";
+import { PocketLockError, eslintError, gitError } from "./errors.js";
 import type {
   Disposition,
   ErrorCode,
   EvaluationRecord,
   EvaluationSummary,
   ExceptionRecord,
-  ExceptionRef,
+  ExceptionStatus,
   InventoryEntry,
   LogicalSuppression,
   Mode,
@@ -126,11 +126,12 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         headIndex: analysis.headIndex,
       });
 
-      const { counts: cleanup, statuses: exceptionStatuses } = applyExceptions({
-        head,
-        registry,
-        now,
-      });
+      const coverage = coverExceptions({ head, records: registry, now });
+      const cleanup = {
+        expired: coverage.counts.expired,
+        dangling: coverage.counts.dangling,
+        spent: coverage.counts.spent,
+      };
 
       const policyChange = detectPolicyChange({
         git,
@@ -138,14 +139,14 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         trees,
         headDir,
         changeMap,
-        consumedDebt: head.filter(
+        consumedDebt: coverage.head.filter(
           (h) => h.disposition === "new" || h.disposition === "materially-changed",
         ).length,
         baselineGoverned: governedBaseline,
       });
 
       const gateFailure =
-        head.some(
+        coverage.head.some(
           (h) =>
             (h.disposition === "new" || h.disposition === "materially-changed") &&
             h.exception === null,
@@ -165,11 +166,11 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         trees,
         policy,
         governedRules: governedHead,
-        head,
+        head: coverage.head,
         baseline,
         registry,
         cleanup,
-        exceptionStatuses,
+        exceptionStatuses: coverage.statuses,
         errors,
         verdict: gateFailure ? "fail" : "pass",
       });
@@ -451,79 +452,6 @@ function isSkippedPath(path: string): boolean {
   return SKIP_PREFIXES.some((p) => path.startsWith(p));
 }
 
-type ExceptionStatus = "used" | "dangling" | "spent" | "expired";
-
-/** Exception match key: fingerprint + suppression type + rule (never position). */
-function exceptionMatches(
-  record: ExceptionRecord,
-  suppression: { fingerprint: string; suppressionType: SuppressionType; rule: string },
-): boolean {
-  return (
-    record.fingerprint === suppression.fingerprint &&
-    record.suppression_type === suppression.suppressionType &&
-    record.rule === suppression.rule
-  );
-}
-
-interface ApplyExceptionsInput {
-  head: ReconciledSuppression[];
-  registry: ExceptionRecord[];
-  now: Date;
-}
-
-interface AppliedExceptions {
-  counts: { expired: number; dangling: number; spent: number };
-  statuses: Map<ExceptionRecord, ExceptionStatus>;
-}
-
-function applyExceptions(input: ApplyExceptionsInput): AppliedExceptions {
-  const { head, registry, now } = input;
-  const statuses = new Map<ExceptionRecord, ExceptionStatus>();
-
-  // Authorize new/materially-changed debt, or mark the record expired.
-  for (const h of head) {
-    if (h.disposition !== "new" && h.disposition !== "materially-changed") continue;
-    const record = registry.find((r) => exceptionMatches(r, h));
-    if (!record) continue;
-    if (record.file !== h.file) {
-      throw configError(
-        `exception for ${h.rule} names file '${record.file}' but the suppression is at '${h.file}'`,
-      );
-    }
-    if (isExpired(record.expires, now)) {
-      statuses.set(record, "expired");
-      continue;
-    }
-    h.exception = {
-      fingerprint: record.fingerprint,
-      suppressionType: record.suppression_type,
-      rule: record.rule,
-    };
-    statuses.set(record, "used");
-  }
-
-  // Classify the rest: expired is reported distinctly, then spent, then dangling.
-  for (const record of registry) {
-    if (statuses.has(record)) continue;
-    const matchesExisting = head.some(
-      (h) =>
-        (h.disposition === "existing" || h.disposition === "moved-existing") &&
-        exceptionMatches(record, h),
-    );
-    if (isExpired(record.expires, now)) statuses.set(record, "expired");
-    else if (matchesExisting) statuses.set(record, "spent");
-    else statuses.set(record, "dangling");
-  }
-
-  const counts = { expired: 0, dangling: 0, spent: 0 };
-  for (const status of statuses.values()) {
-    if (status === "expired") counts.expired++;
-    else if (status === "spent") counts.spent++;
-    else if (status === "dangling") counts.dangling++;
-  }
-  return { counts, statuses };
-}
-
 interface PolicyChangeInput {
   git: Git;
   options: EvaluateOptions;
@@ -584,18 +512,18 @@ function configWeakened(
 }
 
 function registryBroadened(baselineRaw: string | null, headRaw: string | null): boolean {
-  const triples = (raw: string | null): Set<string> => {
+  const keys = (raw: string | null): Set<string> => {
     if (raw === null || raw.trim() === "") return new Set();
     try {
       const records = parseRegistry(raw);
-      return new Set(records.map((r) => `${r.fingerprint}\u0000${r.suppression_type}\u0000${r.rule}`));
+      return new Set(records.map((r) => recordMatchKey(r)));
     } catch {
       return new Set(["<malformed>"]);
     }
   };
-  const base = triples(baselineRaw);
-  const head = triples(headRaw);
-  for (const t of head) if (!base.has(t)) return true;
+  const base = keys(baselineRaw);
+  const head = keys(headRaw);
+  for (const k of head) if (!base.has(k)) return true;
   return false;
 }
 
