@@ -27,19 +27,18 @@ second parent — an inference, not a documented fact, and one the flag below tr
 That is the opposite of what Pocket Lock's merge-result-first rule expects: it
 shortcuts to HEAD's first parent as the baseline **only** when that first parent is the
 resolved `--base` ([principles §2](principles.md#2-tree-resolution-is-merge-result-first)),
-and here, under that inference, the first parent is the change's own source tree. The
-explanation therefore never relies on first-parent semantics:
+and here the first parent is the change's own source tree. The explanation therefore
+never relies on first-parent semantics:
 
 - The example **always passes `--base origin/$BITBUCKET_PR_DESTINATION_BRANCH`**.
 - That forces the merge-base path: baseline = `git merge-base(origin/<dest>, HEAD)`
   — the destination head, a direct parent of the merge commit — and proposed change =
   `merge-base..HEAD`, exactly the PR's net change. Correct under either parent order.
 
-> **Flagged, not verified:** the "first parent is the source" ordering is inferred from
-> Atlassian's wording, which does not spell out parent order. It awaits a live pipeline
-> observation (wayfinding ticket 07). Until that is pinned, the force-the-merge-base
-> spelling above is the conservative default — it produces the correct evaluation under
-> either ordering, so the example does not block on the fact.
+> **Confirmed (ticket 07):** Atlassian's docs state the pipeline "merges the destination
+> branch into your working branch before it runs," and `git merge` semantics fix the
+> parent order: **first parent = source, second = destination**. The force-the-merge-base
+> spelling is correct under either ordering, and the example does not rely on parent order.
 
 ## Clone and fetch
 
@@ -93,6 +92,6 @@ never calls host APIs).
 
 Every claim above is verified against
 `.scratch/ci-integrations/research/bitbucket-cloud-facts.md` (Atlassian's own docs).
-The parent-order inference is flagged there and re-flagged here as pending ticket 07.
-Correct a fact there, then fix this page — [back to principles](principles.md),
-[README quick-start](../../README.md#ci-wiring).
+The parent-order claim is confirmed via Atlassian's wording plus `git merge` semantics
+and pinned by map ticket 07. Correct a fact there, then fix this page —
+[back to principles](principles.md), [README quick-start](../../README.md#ci-wiring).
