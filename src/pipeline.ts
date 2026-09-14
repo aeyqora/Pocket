@@ -10,12 +10,8 @@ import {
 } from "./recognize.js";
 import { computeGovernedSet, parsePolicy, viewPolicy } from "./policy.js";
 import { isExpired, parseRegistry } from "./registry.js";
-import {
-  diffLineIndices,
-  driftDisposition,
-  pairPools,
-  type LineDiff,
-} from "./identity.js";
+import { diffLineIndices, type LineDiff } from "./identity.js";
+import { reconcile } from "./reconcile.js";
 import { PocketLockError, configError, eslintError, gitError } from "./errors.js";
 import type {
   Disposition,
@@ -28,6 +24,7 @@ import type {
   LogicalSuppression,
   Mode,
   Policy,
+  ReconciledSuppression,
   RecordError,
   RecordExceptionEntry,
   SuppressionType,
@@ -53,17 +50,6 @@ export interface EvaluateResult {
   record: EvaluationRecord;
   exitCode: number;
   report: string;
-}
-
-interface HeadSuppression extends LogicalSuppression {
-  disposition: Disposition;
-  baselineLine: number | null;
-  matched?: LogicalSuppression;
-  exception: ExceptionRef | null;
-}
-
-interface BaselineSuppression extends LogicalSuppression {
-  removed: boolean;
 }
 
 export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult> {
@@ -127,7 +113,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         governedHead.includes(s.rule),
       );
 
-      const { head, baseline } = reconcileSuppressions({
+      const { head, removed: baseline } = reconcile({
         headSuppressions,
         baselineSuppressions,
         lineDiffs: analysis.lineDiffs,
@@ -488,114 +474,6 @@ function canonicalDiffLine(line: string): string {
   return canonicalLine(line);
 }
 
-interface ReconcileInput {
-  headSuppressions: LogicalSuppression[];
-  baselineSuppressions: LogicalSuppression[];
-  lineDiffs: Map<string, LineDiff>;
-  baselineIndex: Set<string>;
-  headIndex: Set<string>;
-}
-
-interface ReconcileOutput {
-  head: HeadSuppression[];
-  baseline: BaselineSuppression[];
-}
-
-function reconcileSuppressions(input: ReconcileInput): ReconcileOutput {
-  const { headSuppressions, baselineSuppressions, lineDiffs, baselineIndex, headIndex } =
-    input;
-
-  const groups = new Map<string, { head: LogicalSuppression[]; baseline: LogicalSuppression[] }>();
-  // Continuity is by fingerprint (§8.2): form + normalized rule tokens. Pools
-  // additionally separate by guarded rule and suppression type so multi-rule
-  // directives expand independently.
-  const keyOf = (s: LogicalSuppression) =>
-    `${s.fingerprint}\u0000${s.rule}\u0000${s.suppressionType}`;
-  for (const s of baselineSuppressions) {
-    const k = keyOf(s);
-    const g = groups.get(k) ?? { head: [], baseline: [] };
-    g.baseline.push(s);
-    groups.set(k, g);
-  }
-  for (const s of headSuppressions) {
-    const k = keyOf(s);
-    const g = groups.get(k) ?? { head: [], baseline: [] };
-    g.head.push(s);
-    groups.set(k, g);
-  }
-
-  const headOut: HeadSuppression[] = [];
-  const baselineOut: BaselineSuppression[] = [];
-  const matchedBaseline = new Set<LogicalSuppression>();
-
-  for (const [, group] of groups) {
-    const pairs = pairPools(group.head, group.baseline);
-    const pairedHead = new Set<LogicalSuppression>();
-    for (const p of pairs) {
-      pairedHead.add(p.head);
-      matchedBaseline.add(p.baseline);
-      const drift = driftDisposition(p.head, p.baseline);
-      let disposition: Disposition = drift;
-      const tomb = isTomb(p.head, p.baseline, lineDiffs, baselineIndex, headIndex);
-      if (tomb) disposition = "materially-changed";
-      headOut.push({
-        ...p.head,
-        disposition,
-        baselineLine: p.baseline.line,
-        matched: p.baseline,
-        exception: null,
-      });
-    }
-    for (const h of group.head) {
-      if (pairedHead.has(h)) continue;
-      headOut.push({ ...h, disposition: "new", baselineLine: null, exception: null });
-    }
-    for (const b of group.baseline) {
-      baselineOut.push({ ...b, removed: !matchedBaseline.has(b) });
-    }
-  }
-
-  headOut.sort(compareSuppressions);
-  const removed = baselineOut.filter((b) => b.removed);
-  removed.sort(compareSuppressions);
-  return { head: headOut, baseline: removed };
-}
-
-function isTomb(
-  head: LogicalSuppression,
-  baseline: LogicalSuppression,
-  lineDiffs: Map<string, LineDiff>,
-  baselineIndex: Set<string>,
-  headIndex: Set<string>,
-): boolean {
-  if (head.guardKind !== "directive") return false;
-  if (head.suppressionType !== "next-line" && head.suppressionType !== "line") return false;
-
-  // diffLineIndices uses 0-based line indices.
-  const diff = lineDiffs.get(head.file);
-  const commentAdded = diff ? diff.addedHead.has(head.line - 1) : false;
-  // Newborn: the comment is diff-added, or its guarded statement moved to a new
-  // position. A guarded statement rewritten at the same position is an in-place
-  // rewrite (existing debt), never a tomb.
-  const guardMoved = head.guardStart !== baseline.guardStart;
-  if (!commentAdded && !guardMoved) return false;
-
-  // Spec §8.3 condition 3: the twin's *guarded* line is diff-removed (for a
-  // `line` directive that coincides with the comment line).
-  const twinRemoved = diff ? diff.removedBase.has(baseline.guardStart - 1) : false;
-  if (!twinRemoved) return false;
-
-  const newStatement =
-    head.guardedContent.length > 0 && !baselineIndex.has(head.guardedContent);
-  const deadTwin =
-    baseline.guardedContent.length > 0 && !headIndex.has(baseline.guardedContent);
-  return newStatement && deadTwin;
-}
-
-function compareSuppressions(a: LogicalSuppression, b: LogicalSuppression): number {
-  return a.file.localeCompare(b.file) || a.line - b.line || a.rule.localeCompare(b.rule);
-}
-
 type ExceptionStatus = "used" | "dangling" | "spent" | "expired";
 
 /** Exception match key: fingerprint + suppression type + rule (never position). */
@@ -611,7 +489,7 @@ function exceptionMatches(
 }
 
 interface ApplyExceptionsInput {
-  head: HeadSuppression[];
+  head: ReconciledSuppression[];
   registry: ExceptionRecord[];
   now: Date;
 }
@@ -749,8 +627,8 @@ interface BuildRecordInput {
   trees: ResolvedTrees;
   policy: Policy;
   governedRules: string[];
-  head: HeadSuppression[];
-  baseline: BaselineSuppression[];
+  head: ReconciledSuppression[];
+  baseline: LogicalSuppression[];
   registry: ExceptionRecord[];
   cleanup: { expired: number; dangling: number; spent: number };
   exceptionStatuses: Map<ExceptionRecord, ExceptionStatus>;

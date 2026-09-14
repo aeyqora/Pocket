@@ -50,8 +50,6 @@ export interface LogicalSuppression {
 export interface ReconciledSuppression extends LogicalSuppression {
   disposition: Disposition;
   baselineLine: number | null;
-  /** Matched baseline fingerprint partner, when continuous. */
-  matchedBaseline?: LogicalSuppression;
   /** Exception fingerprint reference when authorized. */
   exception: ExceptionRef | null;
 }
