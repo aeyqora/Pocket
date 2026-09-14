@@ -88,6 +88,11 @@ governedRules:         # optional allowlist of exact rule ids
 
 ## CI wiring
 
+This snippet is the GitHub Actions quick-start. The full reference lives in
+[`docs/ci/`](docs/ci/): a host-agnostic [principles](docs/ci/principles.md) page plus
+one [GitHub Actions](docs/ci/github.md), [GitLab CI/CD](docs/ci/gitlab.md), and
+[Bitbucket Cloud](docs/ci/bitbucket.md) page, each with a copy-paste example.
+
 Run the authoritative check on a full-depth checkout:
 
 ```yaml

@@ -1,0 +1,35 @@
+name: pocket-lock
+
+on:
+  pull_request:
+  # The merge queue reports a separate check on its temporary merge commit;
+  # without this trigger the lock cannot be the required check for the queue.
+  merge_group:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pocket-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # full history: the --base ref must resolve
+      - run: npm ci
+      - name: Pocket Lock
+        run: |
+          npx pocket-lock check \
+            --base origin/${{ github.base_ref || 'main' }} \
+            --json pocket-lock.json
+      # Persist the evaluation record even when the check fails.
+      - name: Upload Pocket Lock evaluation record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-lock
+          path: pocket-lock.json

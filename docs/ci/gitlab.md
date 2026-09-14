@@ -1,0 +1,121 @@
+# GitLab CI/CD
+
+Drop the [`examples/gitlab-ci.yml`](examples/gitlab-ci.yml) `workflow:rules` fragment
+and job into your `.gitlab-ci.yml` and the lock runs on every merge request that could
+add new governed suppression debt. This page explains what the example encodes; the
+ground rules are the [CI wiring principles](principles.md).
+
+## Selecting the MR pipeline
+
+There is **no top-level `pipelines:` keyword**. The vocabulary is `workflow:rules`
+(gates the whole pipeline) versus job `rules:` (gates one job). Merge request
+pipelines are opt-in: they run only when a rule matches
+`$CI_PIPELINE_SOURCE == "merge_request_event"`, and the matching rule must be written
+inline in `.gitlab-ci.yml` — `rules:`/`workflow:` pulled in via `include:` do not
+satisfy the requirement.
+
+The example's `workflow:rules` runs the pipeline only for MR events and `when: never`
+otherwise. That `when: never` is what prevents the duplicate-pipeline footgun — when
+rules match both a branch pipeline and an MR pipeline, GitLab runs both.
+
+## What the runner checks out
+
+| Pipeline type | HEAD shape | Pocket Lock path | Tier |
+| --- | --- | --- | --- |
+| Branch pipeline (default) | single-parent commit on the branch | merge-base | — |
+| Detached MR pipeline (default MR pipeline) | single-parent commit (MR head `refs/merge-requests/<iid>/head`) | merge-base | Free |
+| Merged results pipeline | **two-parent merge commit** whose first parent is the target tip | merge-result first-parent | Premium |
+| Merge train pipeline | queue of MRs merged into target | does not compare `target..HEAD` as one MR's change | Premium |
+
+The **detached MR pipeline is the documented default** and what the example targets:
+HEAD is a single-parent commit, so the merge-base path runs
+([principles §2](principles.md#2-tree-resolution-is-merge-result-first)). The exact
+base is `$CI_MERGE_REQUEST_DIFF_BASE_SHA` — the base SHA of the MR diff, GitLab's own
+computed merge-base — and `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME` is the by-name
+alternative the example uses.
+
+The **merged results pipeline** (Premium) is the first-parent alternative: its HEAD is
+a temporary two-parent merge commit whose **first parent is the target branch tip** and
+whose second parent is the source head, so the first-parent path applies and the
+baseline is the target tip. It runs only when both the project setting and the MR
+pipeline config are enabled.
+
+## The `--base` resolver trap
+
+The runner clones **shallow by default** (`git depth` 20 for new projects, maximum
+1000) and fetches only the refs GitLab supplies — in a detached MR pipeline that is the
+MR ref, **not the target branch**. So `--base origin/<target>` fails with an
+unresolvable ref until the target is present locally. The example fetches it first:
+
+```sh
+git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+```
+
+and Pocket Lock's auto-unshallow completes the history
+([principles §1](principles.md#1-a-full-depth-clone-is-mandatory)). The simpler
+alternative is to disable shallow for the whole pipeline:
+
+```yaml
+variables:
+  GIT_DEPTH: 0    # fetch all branches and tags each run
+```
+
+Caveat: the runner's shallow-fetch and refspec behavior is doc- and source-cited from
+GitLab's own documentation, not yet reproduced in a live MR pipeline. Treat the spell
+above as the robust default, not a guarantee.
+
+## MR-only variables
+
+The whole `CI_MERGE_REQUEST_*` family is defined **only in merge request pipelines**
+— outside them the variables are unset, so conditionals must not assume they exist.
+
+| Variable | Available | Notes |
+| --- | --- | --- |
+| `CI_PIPELINE_SOURCE` | all pipelines | `merge_request_event` for MR pipelines, `push` for branch pipelines |
+| `CI_DEFAULT_BRANCH` | all pipelines | the project's default branch |
+| `CI_MERGE_REQUEST_IID` | MR pipelines only | the MR number |
+| `CI_MERGE_REQUEST_SOURCE_BRANCH_NAME` | MR pipelines only | source branch |
+| `CI_MERGE_REQUEST_TARGET_BRANCH_NAME` | MR pipelines only | target branch — what `--base` needs |
+| `CI_MERGE_REQUEST_DIFF_BASE_SHA` | MR pipelines only | base SHA of the MR diff (GitLab's computed merge-base) |
+| `CI_MERGE_REQUEST_EVENT_TYPE` | MR pipelines only | `detached`, `merged_result`, or `merge_train` |
+| `CI_MERGE_REQUEST_REF_PATH` | MR pipelines only | e.g. `refs/merge-requests/1/head` |
+| `CI_MERGE_REQUEST_TARGET_BRANCH_SHA` | **empty in MR pipelines** | present only in merged results pipelines |
+| `CI_MERGE_REQUEST_SOURCE_BRANCH_SHA` | **empty in MR pipelines** | same |
+
+The two empty `*_BRANCH_SHA` variables are the reason the example fetches **by branch
+name** (`$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`) and never by SHA — in a detached MR
+pipeline the SHAs are not there to resolve.
+
+## Evaluation record
+
+`--json pocket-lock.json` writes the record, and job `artifacts:` persists it. Use
+`when: always` (or `on_failure`): the default `on_success` would drop the artifact
+exactly when the gate fails ([principles §4](principles.md#4-the-evaluation-record-is-the-statistics-artifact)).
+`expire_in` defaults to 30 days (or the instance-wide setting).
+
+## Trust: protecting `.pocket-lock/**`
+
+Code Owner approval plus a protected branch
+([principles §5](principles.md#5-the-pocket-lock-protection-prerequisite)):
+
+- Protect the `main` branch with **"Require merge requests"** so no one can direct-push
+  past the review path — anyone allowed to push to a protected branch skips MR approval
+  rules, Code Owners included.
+- Enable **Code Owner approval** on the protected branch and add a rule matching
+  `.pocket-lock/**` to its owners. Code Owners are direct-group members only: group
+  approvers count only if they belong to the eligible group directly, not through an
+  inherited membership.
+- **"Pipelines must succeed"** on the MR makes a failing lock block the merge before
+  it ever gets to review; when both a branch pipeline and an MR pipeline run, the MR
+  pipeline's status is the one used for the merge request.
+
+Only direct members of the eligible groups can approve, so keep the policy-owning
+group tight.
+
+## Provenance
+
+Every env-var, merge-commit, and shallow-fetch claim above is verified against
+`.scratch/ci-integrations/research/gitlab-ci-facts.md` (GitLab's own docs and server
+source). The runner shallow-fetch behavior is flagged there as doc-cited-not-reproduced
+and is flagged here too. Correct a fact there, then fix this page — [back to
+principles](principles.md), [README quick-start](../../README.md#ci-wiring).

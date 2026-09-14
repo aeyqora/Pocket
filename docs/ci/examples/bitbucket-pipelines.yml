@@ -1,0 +1,15 @@
+pipelines:
+  pull-requests:
+    '**':        # matches the source branch of every PR; fork PRs do not trigger
+      - step:
+          name: Pocket Lock
+          script:
+            # PR pipelines merge the destination into the source, so HEAD's first
+            # parent is the source, not the baseline; always force the merge-base
+            # path with an explicit --base and never rely on parent order.
+            - git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"
+            - npm ci
+            - npx pocket-lock check --base "origin/$BITBUCKET_PR_DESTINATION_BRANCH" --json pocket-lock.json
+          artifacts:
+            # capture-on defaults to always, so this survives a failed check.
+            - pocket-lock.json
