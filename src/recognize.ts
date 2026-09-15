@@ -35,14 +35,6 @@ const FLAT_CONFIG_NAMES = [
   "eslint.config.cts",
 ];
 
-const LEGACY_CONFIG_NAMES = [
-  ".eslintrc.json",
-  ".eslintrc.yml",
-  ".eslintrc.yaml",
-  ".eslintrc.cjs",
-  ".eslintrc.js",
-];
-
 export function applicableRules(cfg: { rules?: Record<string, unknown> }): string[] {
   const out: string[] = [];
   for (const [rule, value] of Object.entries(cfg.rules ?? {})) {
@@ -276,46 +268,6 @@ function collectFlatDecls(config: unknown): ConfigDecl[] {
   return decls;
 }
 
-function legacyDecls(config: unknown): ConfigDecl[] {
-  const decls: ConfigDecl[] = [];
-  const root = (config ?? {}) as Record<string, unknown>;
-  const rootRules = root["rules"];
-  const rootFiles = normalizePatterns(root["files"]);
-  const rootIgnores = normalizePatterns(root["ignorePatterns"]);
-  if (rootRules && typeof rootRules === "object") {
-    for (const [rule, value] of Object.entries(rootRules as Record<string, unknown>)) {
-      decls.push({
-        rule,
-        files: rootFiles,
-        ignores: rootIgnores,
-        index: 0,
-        off: severityOf(value) === 0,
-      });
-    }
-  }
-  const overrides = root["overrides"];
-  if (Array.isArray(overrides)) {
-    overrides.forEach((ov, index) => {
-      if (!ov || typeof ov !== "object") return;
-      const o = ov as Record<string, unknown>;
-      const files = normalizePatterns(o["files"]);
-      const ignores = normalizePatterns(o["excludedFiles"]);
-      const rules = o["rules"];
-      if (!rules || typeof rules !== "object") return;
-      for (const [rule, value] of Object.entries(rules as Record<string, unknown>)) {
-        decls.push({
-          rule,
-          files,
-          ignores,
-          index: index + 1,
-          off: severityOf(value) === 0,
-        });
-      }
-    });
-  }
-  return decls;
-}
-
 function sameScope(a: ConfigDecl, b: ConfigDecl): boolean {
   const key = (v: string[] | null) => JSON.stringify(normalizedPatterns(v));
   return key(a.files) === key(b.files) && key(a.ignores) === key(b.ignores);
@@ -376,8 +328,7 @@ export async function recognizeConfigOffs(treeDir: string): Promise<ConfigOffRes
   } catch (err) {
     throw configError(`failed to load ESLint config '${configFile}'`, String(err));
   }
-  const isFlat = FLAT_CONFIG_NAMES.includes(configFile);
-  const decls = isFlat ? collectFlatDecls(raw) : legacyDecls(raw);
+  const decls = collectFlatDecls(raw);
   const suppressions: LogicalSuppression[] = [];
   for (const decl of decls) {
     if (!decl.off) continue;
@@ -404,7 +355,7 @@ export async function recognizeConfigOffs(treeDir: string): Promise<ConfigOffRes
 }
 
 function findConfigFile(treeDir: string): string | null {
-  for (const name of [...FLAT_CONFIG_NAMES, ...LEGACY_CONFIG_NAMES]) {
+  for (const name of FLAT_CONFIG_NAMES) {
     if (existsSync(join(treeDir, name))) return name;
   }
   return null;

@@ -5,3 +5,5 @@ dist/
 .scratch
 .agents
 CONTEXT.MD
+skills-lock.json
+

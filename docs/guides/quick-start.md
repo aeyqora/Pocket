@@ -11,8 +11,9 @@ enabling the gate cold would flag all of them as new debt.
 - Node.js 20 or newer.
 - `git` 2.43 or newer. The tool spells its git commands explicitly (including
   `git merge-base A B`).
-- ESLint installed and configured in the repository. Pocket Zipper uses *your* installed
-  ESLint as the semantic authority for which rules apply where.
+- ESLint 9 or newer (flat config only), installed and configured in the repository. Pocket
+  Zipper uses *your* installed ESLint as the semantic authority for which rules apply
+  where. Legacy `.eslintrc` configuration is not supported.
 - A full clone. Shallow clones are auto-unshallowed when possible; partial (promisor)
   clones fail closed. See [Troubleshooting](troubleshooting.md).
 

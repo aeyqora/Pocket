@@ -93,8 +93,8 @@ have a baseline counterpart. Grandfather them instead of writing exceptions: fol
 ## Requirements
 
 - **Node.js** 20 or newer.
-- **ESLint** 8 or newer, installed and configured in the repository. It is the semantic
-  authority for which rules apply where.
+- **ESLint** 9 or newer (flat config only), installed and configured in the repository. It
+  is the semantic authority for which rules apply where.
 - **git** 2.43 or newer, with a full clone. Rename detection (`-M`) and NUL-delimited
   output (`-z`) are spelled explicitly. No `user.name`/`user.email` is required.
 - Pocket Zipper never writes to the working tree except the file you point `--json` at.

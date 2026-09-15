@@ -81,7 +81,7 @@ Two rules are load-bearing enough to state here:
 - Node.js 20 or newer.
 - `git` 2.43 or newer, with a full clone. Shallow clones are auto-unshallowed when
   possible; partial (promisor) clones fail closed.
-- ESLint 8 or newer, installed and configured. No `user.name`/`user.email` is required.
+- ESLint 9 or newer (flat config only), installed and configured. No `user.name`/`user.email` is required.
 
 ## Development
 
