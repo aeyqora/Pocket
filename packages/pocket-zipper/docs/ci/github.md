@@ -73,10 +73,12 @@ Two orthogonal controls, both configured on the base branch
   absent lock blocks the merge. When a merge queue is used, the check must be required
   against **both** `pull_request` and `merge_group` — the queue re-reports the check on
   its own SHA and merging would otherwise proceed unreported.
-- **CODEOWNERS review** on `.pocket-zipper/**` (`/.pocket-zipper/ @org/lock-owners`
-  covers the directory and subdirectories, hence both `config.yml` and
-  `exceptions.yml`), with "Require review from Code Owners" and "Do not allow bypassing
-  the above settings" enabled. Protect the CODEOWNERS file itself
+- **CODEOWNERS review** on `.pocket-zipper/**` — copy
+  [`examples/github-CODEOWNERS`](examples/github-CODEOWNERS) to
+  `.github/CODEOWNERS` (`/.pocket-zipper/ @org/lock-owners` covers the directory
+  and subdirectories, hence both `config.yml` and `exceptions.yml`), with
+  "Require review from Code Owners" and "Do not allow bypassing the above
+  settings" enabled. Protect the CODEOWNERS file itself
   (`/.github/CODEOWNERS @repo-owner`) so the policy space cannot be rewired.
 
 ## Provenance

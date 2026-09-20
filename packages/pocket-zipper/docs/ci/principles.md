@@ -92,6 +92,12 @@ per host, the equivalent of:
 - **path-gated code review** over `.pocket-zipper/**` (so only approved policy owners
   can touch the policy), protecting the code-owners file itself.
 
+The concrete per-host spells live in the "Trust" section of each host page, and every
+[example pipeline](examples/) opens with them — ready-made code-owners files are
+provided for the hosts that support them (`examples/github-CODEOWNERS`,
+`examples/gitlab-CODEOWNERS`); where a host has no file-based control (Bitbucket), the
+example states the required UI settings instead.
+
 Without this protection the exception registry is toothless — an author could weaken
 the gate and approve their own debt in one change.
 

@@ -43,7 +43,9 @@ pocket-zipper:
 
 - Protect the target branch with **"Require merge requests"** and **"Pipelines must
   succeed"** so a failing lock blocks the merge.
-- Enable **Code Owner approval** and add a rule matching `.pocket-zipper/**`. Only direct
+- Enable **Code Owner approval** and add a rule matching `.pocket-zipper/**` — copy the
+  ready-made [`examples/gitlab-CODEOWNERS`](../../ci/examples/gitlab-CODEOWNERS) to
+  `.gitlab/CODEOWNERS` and replace the example owners. Only direct
   members of the eligible groups can approve, so keep the policy-owning group tight.
 
 ## Deep reference

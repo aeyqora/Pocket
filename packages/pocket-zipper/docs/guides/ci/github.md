@@ -60,7 +60,10 @@ jobs:
   merge queue, require it for both `pull_request` and `merge_group`.
 - Add a **CODEOWNERS** rule covering `.pocket-zipper/**` and enable "Require review from
   Code Owners". Protect the CODEOWNERS file itself. This is what gives the exception
-  registry teeth.
+  registry teeth — copy the ready-made
+  [`examples/github-CODEOWNERS`](../../ci/examples/github-CODEOWNERS) to
+  `.github/CODEOWNERS` and replace the example owners. The example pipeline file above
+  also opens with both required settings.
 
 ## Deep reference
 

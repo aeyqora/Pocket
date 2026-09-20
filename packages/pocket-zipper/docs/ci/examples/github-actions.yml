@@ -1,3 +1,12 @@
+# ---
+# Beyond this file, two base-branch repo settings are required or the exception
+# registry has no teeth (docs/ci/github.md, "Trust: protecting .pocket-zipper/**"):
+#   1. Make the `pocket-zipper` job a REQUIRED status check — and require it for
+#      both `pull_request` and `merge_group` when a merge queue is used.
+#   2. Require Code Owners review over .pocket-zipper/**: copy
+#      examples/github-CODEOWNERS to .github/CODEOWNERS, then enable "Require
+#      review from Code Owners" and "Do not allow bypassing the above settings".
+# ---
 name: pocket-zipper
 
 on:

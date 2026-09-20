@@ -102,7 +102,9 @@ Code Owner approval plus a protected branch
   past the review path — anyone allowed to push to a protected branch skips MR approval
   rules, Code Owners included.
 - Enable **Code Owner approval** on the protected branch and add a rule matching
-  `.pocket-zipper/**` to its owners. Code Owners are direct-group members only: group
+  `.pocket-zipper/**` to its owners — copy
+  [`examples/gitlab-CODEOWNERS`](examples/gitlab-CODEOWNERS) to
+  `.gitlab/CODEOWNERS`. Code Owners are direct-group members only: group
   approvers count only if they belong to the eligible group directly, not through an
   inherited membership.
 - **"Pipelines must succeed"** on the MR makes a failing lock block the merge before

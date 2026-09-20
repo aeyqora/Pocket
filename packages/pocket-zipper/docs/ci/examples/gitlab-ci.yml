@@ -1,3 +1,12 @@
+# ---
+# Beyond this file, protect the target branch and the policy or the exception
+# registry has no teeth (docs/ci/gitlab.md, "Trust: protecting .pocket-zipper/**"):
+#   1. Protect the branch with "Require merge requests" and "Pipelines must
+#      succeed" so a failing lock blocks the merge.
+#   2. Enable "Code Owner approval" on the protected branch and copy
+#      examples/gitlab-CODEOWNERS to .gitlab/CODEOWNERS so changes under
+#      .pocket-zipper/** require lock-owner approval.
+# ---
 workflow:
   rules:
     # Merge request pipelines only; the "when: never" branch stops a duplicate

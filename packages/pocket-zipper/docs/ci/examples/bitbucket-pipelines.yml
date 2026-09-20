@@ -1,3 +1,16 @@
+# ---
+# Beyond this file, protect the branch and the policy in Bitbucket's repository
+# settings or the exception registry has no teeth (docs/ci/bitbucket.md,
+# "Trust: protecting .pocket-zipper/**"). These are UI settings only — there is
+# no pipeline YAML that can express them:
+#   1. Branch restrictions on the target branch: restrict write access (no
+#      direct push, so changes must come through PRs) and restrict who may
+#      merge via PR.
+#   2. Merge check on the same branch: "Minimum number of successful builds for
+#      the last commit with no failed builds and no in progress builds".
+#      Note: hard blocking ("Prevent a merge with unresolved merge checks") is
+#      a Bitbucket Premium feature; on lower tiers unmet checks warn only.
+# ---
 pipelines:
   pull-requests:
     '**':        # matches the source branch of every PR; fork PRs do not trigger

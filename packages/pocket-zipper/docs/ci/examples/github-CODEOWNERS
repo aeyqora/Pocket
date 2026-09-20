@@ -1,0 +1,17 @@
+# Example CODEOWNERS — copy to .github/CODEOWNERS at the repo root.
+#
+# This file is what gives the exception registry teeth: only lock owners may
+# merge changes to the pocket-zipper policy. It works together with two repo
+# settings on the base branch (see docs/ci/github.md, "Trust: protecting
+# .pocket-zipper/**"):
+#   1. Make the `pocket-zipper` job a REQUIRED status check.
+#   2. Enable "Require review from Code Owners" and "Do not allow bypassing the
+#      above settings".
+#
+# Lock owners approve every change under .pocket-zipper/ — the leading and
+# trailing slashes cover the directory and all subdirectories, so this governs
+# both config.yml and exceptions.yml.
+/.pocket-zipper/ @org/lock-owners
+
+# Protect the CODEOWNERS file itself so the policy space cannot be rewired.
+/.github/CODEOWNERS @repo-owner

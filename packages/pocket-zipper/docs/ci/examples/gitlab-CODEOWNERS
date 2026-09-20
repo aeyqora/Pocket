@@ -1,0 +1,21 @@
+# Example .gitlab/CODEOWNERS — copy to .gitlab/CODEOWNERS at the repo root.
+#
+# This file is what gives the exception registry teeth: only lock owners may
+# merge changes to the pocket-zipper policy. It works together with protected
+# branch settings (see docs/ci/gitlab.md, "Trust: protecting
+# .pocket-zipper/**"):
+#   1. Protect the branch with "Require merge requests" (no direct pushes).
+#   2. Enable "Code Owner approval" on the protected branch.
+#   3. "Pipelines must succeed" so a failing lock blocks the merge.
+#
+# Only direct members of the listed groups count as approvers — inherited
+# membership is not enough, so keep the policy-owning group tight.
+
+[Lock policy]
+# Lock owners approve every change under .pocket-zipper/ (config.yml and
+# exceptions.yml).
+.pocket-zipper/** @group/lock-owners
+
+[Protect the code-owners file]
+# Protect the CODEOWNERS file itself so the policy space cannot be rewired.
+.gitlab/CODEOWNERS @group/repo-owners
