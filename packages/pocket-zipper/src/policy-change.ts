@@ -24,8 +24,8 @@ export interface PolicyChangeResult {
 const MALFORMED_REGISTRY = "<malformed>";
 
 /**
- * The self-authorization rule (spec §12): a protected-file weakening delta that
- * is consumed by new debt in the same change fails the gate. Pure: callers
+ * The self-authorization rule: a protected-file weakening delta that is
+ * consumed by new debt in the same change fails the gate. Pure: callers
  * supply the two documents from each tree.
  */
 export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult {

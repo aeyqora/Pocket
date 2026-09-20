@@ -19,7 +19,7 @@ export interface ReconcileOutput {
 }
 
 /**
- * Continuity is by fingerprint (§8.2): form + normalized rule tokens. Pools
+ * Continuity is by fingerprint: form + normalized rule tokens. Pools
  * additionally separate by guarded rule and suppression type so multi-rule
  * directives expand independently.
  */
@@ -97,7 +97,7 @@ function isTomb(
   const guardMoved = head.guardStart !== baseline.guardStart;
   if (!commentIsNewborn(head, lineDiffs) && !guardMoved) return false;
 
-  // Spec §8.3 condition 3: the twin's *guarded* line is diff-removed (for a
+  // Tomb condition: the twin's *guarded* line is diff-removed (for a
   // `line` directive that coincides with the comment line).
   if (!twinStatementIsRemoved(head, baseline, lineDiffs)) return false;
 
