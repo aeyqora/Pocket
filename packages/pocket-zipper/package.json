@@ -2,8 +2,28 @@
   "name": "pocket-zipper",
   "version": "0.1.0",
   "description": "Gate a proposed change from adding new ESLint suppression debt.",
+  "keywords": [
+    "eslint",
+    "suppression",
+    "debt",
+    "ratchet",
+    "ci",
+    "quality-gate"
+  ],
+  "author": {
+    "name": "aeyqora",
+    "email": "git@aeyqora.com"
+  },
   "type": "module",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/aeyqora/Pocket#readme",
+  "bugs": {
+    "url": "https://github.com/aeyqora/Pocket/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aeyqora/Pocket.git"
+  },
   "bin": {
     "pocket-zipper": "dist/cli.js"
   },
@@ -26,7 +46,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --import tsx --test \"test/**/*.test.ts\"",
-    "test:one": "node --import tsx --test"
+    "test:one": "node --import tsx --test",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "yaml": "^2.6.0"
