@@ -92,8 +92,9 @@ function sameRealPath(a: string, b: string): boolean {
 }
 
 // Compare resolved paths: an installed binary is often invoked through a
-// symlinked path (macOS `/var` and `/tmp`, npm bin shims), which would
-// otherwise make the entry check fail and exit silently.
+// symlinked path — npm bin shims, a symlinked install directory, or OS
+// temp-dir symlinks such as macOS `/tmp` and `/var` — which would otherwise
+// make the entry check fail and exit silently.
 const invokedDirectly =
   process.argv[1] !== undefined &&
   sameRealPath(fileURLToPath(import.meta.url), process.argv[1]);

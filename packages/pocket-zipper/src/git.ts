@@ -54,20 +54,6 @@ export class Git {
     return { status: res.status ?? 1, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
   }
 
-  runBuffer(args: string[], opts: { allowFail?: boolean } = {}): Buffer {
-    const res = spawnSync("git", ["-C", this.root, ...args], {
-      maxBuffer: 512 * 1024 * 1024,
-    });
-    if (res.error) throw gitError(`git ${args[0]} failed: ${res.error.message}`);
-    if (res.status !== 0 && !opts.allowFail) {
-      throw gitError(
-        `git ${args[0]} failed: ${res.stderr.toString().trim()}`,
-        { args },
-      );
-    }
-    return res.stdout;
-  }
-
   isBare(): boolean {
     return this.run(["rev-parse", "--is-bare-repository"]).stdout.trim() === "true";
   }
@@ -133,10 +119,6 @@ export class Git {
     return this.run(["rev-parse", `${commit}^{tree}`]).stdout.trim();
   }
 
-  emptyTree(): string {
-    return this.run(["hash-object", "-t", "tree", "/dev/null"]).stdout.trim();
-  }
-
   /** changed files + rename map + binary set between two tree-ish endpoints. */
   changeMap(baseCommit: string, headCommit: string): ChangeMap {
     return this.buildChangeMap([
@@ -159,7 +141,7 @@ export class Git {
   }
 
   stagedChangeMap(): ChangeMap {
-    const base = this.hasCommit("HEAD") ? "HEAD" : this.emptyTree();
+    const base = this.hasCommit("HEAD") ? "HEAD" : EMPTY_TREE;
     return this.buildChangeMap(
       ["diff", "--cached", "--name-status", "-z", "-M", base, "--"],
       ["diff", "--cached", "--numstat", "-z", "-M", base, "--"],
@@ -196,11 +178,40 @@ export class Git {
       `pocket-zipper-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
     mkdirSync(dir, { recursive: true });
-    const tar = this.runBuffer(["archive", "--format=tar", commit]);
-    const res = spawnSync("tar", ["-x", "-C", dir], { input: tar });
-    if (res.status !== 0) {
+    // Materialize with git alone (read-tree into a throwaway index, then
+    // checkout-index) so the only external runtime binary is git — no tar.
+    // Works for commits and raw tree hashes alike, in normal, bare, and
+    // linked-worktree repositories, on every OS.
+    const gitDir = this.run(["rev-parse", "--absolute-git-dir"]).stdout.trim();
+    const index = `${dir}.idx`;
+    const env = { ...process.env, GIT_INDEX_FILE: index, LC_ALL: "C", LANG: "C" };
+    try {
+      const readTree = spawnSync("git", ["-C", this.root, "read-tree", commit], {
+        env,
+        maxBuffer: 512 * 1024 * 1024,
+      });
+      if (readTree.status !== 0) {
+        throw gitError(
+          "failed to read baseline tree",
+          (readTree.stderr || readTree.stdout).toString().trim(),
+        );
+      }
+      const checkout = spawnSync(
+        "git",
+        ["--git-dir=" + gitDir, "--work-tree=" + dir, "checkout-index", "-a", "-f"],
+        { env, maxBuffer: 512 * 1024 * 1024 },
+      );
+      if (checkout.status !== 0) {
+        throw gitError(
+          "failed to materialize baseline tree",
+          (checkout.stderr || checkout.stdout).toString().trim(),
+        );
+      }
+    } catch (err) {
       rmSync(dir, { recursive: true, force: true });
-      throw gitError("failed to materialize baseline tree", res.stderr.toString());
+      throw err;
+    } finally {
+      rmSync(index, { force: true });
     }
     linkNodeModules(this.root, dir);
     return dir;
