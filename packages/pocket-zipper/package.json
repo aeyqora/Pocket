@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Gate a proposed change from adding new ESLint suppression debt.",
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "bin": {
     "pocket-zipper": "dist/cli.js"
   },
