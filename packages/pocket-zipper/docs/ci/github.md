@@ -81,6 +81,10 @@ Two orthogonal controls, both configured on the base branch
   settings" enabled. Protect the CODEOWNERS file itself
   (`/.github/CODEOWNERS @repo-owner`) so the policy space cannot be rewired.
 
+Designating approvers: for team ownership (`@org/team`) the team's members are the
+approvers — edit membership in the org, not this file. A bare `@username` entry also
+works, but that person must have write access to the repository.
+
 ## Provenance
 
 Every env-var and merge-commit claim above is verified against GitHub's own docs and the

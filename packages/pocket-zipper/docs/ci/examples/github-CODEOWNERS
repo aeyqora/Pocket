@@ -13,5 +13,11 @@
 # both config.yml and exceptions.yml.
 /.pocket-zipper/ @org/lock-owners
 
+# Designating approvers: `@org/lock-owners` is a team in your organization — its
+# members ARE the approvers, and editing team membership in the org settings
+# adds or removes approvers without touching this file. A bare `@username`
+# entry also works, but that person must have write access to the repository.
+# Prefer team ownership so the roster can change without a CODEOWNERS edit.
+
 # Protect the CODEOWNERS file itself so the policy space cannot be rewired.
 /.github/CODEOWNERS @repo-owner

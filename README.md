@@ -1,6 +1,6 @@
 # Pocket
 
-A suite of small developer tools, each living in its own directory under
+A suite of small developer tools for ESLINT, each living in its own directory under
 [`packages/`](packages/). Every tool is a separate npm package and can be
 installed on its own.
 

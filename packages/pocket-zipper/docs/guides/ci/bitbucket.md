@@ -36,8 +36,15 @@ pipelines:
 
 ## Make it required and protect the policy
 
+- **Name the approvers**: copy
+  [`examples/bitbucket-CODEOWNERS`](../../ci/examples/bitbucket-CODEOWNERS) to
+  `.bitbucket/CODEOWNERS` and
+  [`examples/bitbucket-teams.yaml`](../../ci/examples/bitbucket-teams.yaml) to
+  `.bitbucket/teams.yaml`, editing the `contributors` to your lock owners. PRs
+  touching `.pocket-zipper/**` then auto-add every lock owner as a reviewer —
+  advisory only, it cannot block a merge.
 - Apply **branch restrictions** to the protected branch: restrict write access (so
-  changes must come through PRs) and restrict who may merge.
+  changes must come through PRs) and restrict who may merge (only the lock owners).
 - Add a **merge check** requiring the last commit's build to succeed. Note that hard
   blocking ("Prevent a merge with unresolved merge checks") is a Bitbucket Premium
   feature; on lower tiers unmet checks warn but do not block.

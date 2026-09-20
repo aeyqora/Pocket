@@ -13,7 +13,10 @@
 
 [Lock policy]
 # Lock owners approve every change under .pocket-zipper/ (config.yml and
-# exceptions.yml).
+# exceptions.yml). `@group/lock-owners` is a GitLab group: only its DIRECT
+# members with Developer role or higher are eligible to approve, so editing
+# group membership in GitLab is how you add or remove approvers — inherited
+# membership into nested groups never counts.
 .pocket-zipper/** @group/lock-owners
 
 [Protect the code-owners file]

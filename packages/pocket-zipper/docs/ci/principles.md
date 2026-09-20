@@ -93,10 +93,13 @@ per host, the equivalent of:
   can touch the policy), protecting the code-owners file itself.
 
 The concrete per-host spells live in the "Trust" section of each host page, and every
-[example pipeline](examples/) opens with them — ready-made code-owners files are
-provided for the hosts that support them (`examples/github-CODEOWNERS`,
-`examples/gitlab-CODEOWNERS`); where a host has no file-based control (Bitbucket), the
-example states the required UI settings instead.
+[example pipeline](examples/) opens with them. Each host also ships a ready-made file
+that names the authorized approvers (`examples/github-CODEOWNERS`,
+`examples/gitlab-CODEOWNERS`, and `examples/bitbucket-CODEOWNERS` with
+`examples/bitbucket-teams.yaml`). On GitHub and GitLab code-owner approval is
+enforceable; on Bitbucket the code-owners file is advisory reviewer assignment only,
+so the example pairs it with the enforced UI settings (branch restrictions plus a
+merge check).
 
 Without this protection the exception registry is toothless — an author could weaken
 the gate and approve their own debt in one change.

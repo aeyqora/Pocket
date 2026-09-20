@@ -1,0 +1,30 @@
+# Example .bitbucket/CODEOWNERS — copy to .bitbucket/CODEOWNERS at the repo root.
+#
+# Bitbucket code owners are ADVISORY: this file chooses who is added as a
+# reviewer on PRs touching the listed paths, but it never gates a merge (unlike
+# GitHub and GitLab, where code-owner approval is enforceable). The hard stop on
+# Bitbucket is branch restrictions plus a merge check — see the trust block at
+# the top of examples/bitbucket-pipelines.yml and the "Trust" section of
+# docs/ci/bitbucket.md.
+#
+# Designating approvers: the `lock-owners` team below is defined in
+# examples/bitbucket-teams.yaml — copy that to .bitbucket/teams.yaml (same
+# directory) and edit its `contributors` to add or remove authorized
+# approvers. No workspace-admin rights needed. (Alternative: reference a
+# workspace group as @workspace-slug/group-slug if you manage groups in the
+# workspace UI.)
+#
+# Select reviewers with a strategy suffix on the LAST owner of a line:
+#   :all            ask every lock owner (strongest)
+#   :random(N)      ask N random members
+#   :least_busy(N)  ask the N members with the fewest open reviews
+# With no suffix a group/team picks one member at random.
+#
+# ORDER MATTERS: the last matching pattern wins.
+.pocket-zipper/** @teams/lock-owners:all
+
+# Who can edit these two files (.bitbucket/CODEOWNERS and .bitbucket/teams.yaml)
+# can rewire who is asked to review, so keep .bitbucket/* under the same
+# ownership. `.bitbucket/*` matches files directly under .bitbucket/ and is the
+# last rule, so it wins for those paths.
+.bitbucket/* @teams/lock-owners:all

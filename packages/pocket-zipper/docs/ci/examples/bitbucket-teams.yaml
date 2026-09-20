@@ -1,0 +1,17 @@
+# Example .bitbucket/teams.yaml — copy to .bitbucket/teams.yaml, adjacent to
+# .bitbucket/CODEOWNERS, so the `@teams/lock-owners` reference in the
+# bitbucket-CODEOWNERS example resolves.
+#
+# THIS file is where Bitbucket's authorized approvers are specified: every
+# `contributors` entry is a lock owner. List people by email address or by
+# "@username" (usernames in quotes, as Bitbucket's docs require).
+#
+# `strategy: all` asks EVERY lock owner to review every matching PR (the
+# strongest advisory setting). Alternatives: `strategy: least_busy` with a
+# `select: N`, or `strategy: random` with a `select: N`, to ask a subset.
+lock-owners:
+  contributors:
+    - alana@example.com
+    - "@harvey"
+  reviews:
+    strategy: all

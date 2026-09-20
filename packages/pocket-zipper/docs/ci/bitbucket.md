@@ -73,20 +73,43 @@ destination's current commit), `$BITBUCKET_BRANCH` (the PR's source branch).
 
 ## Trust: protecting `.pocket-zipper/**`
 
-Branch restrictions (branch permissions) plus a merge check
+Two layers, and only the second can stop a merge
 ([principles §5](principles.md#5-the-pocket-zipper-protection-prerequisite)):
 
-- **Branch restrictions** on the protected branch: restrict write access (no direct
-  write ⇒ changes must come through PRs) and restrict who may merge via PR. A branch
-  with unrestricted write lets members push straight to it, bypassing CI.
-- **Merge check** on the same branch: "Minimum number of successful builds for the last
-  commit with no failed builds and no in progress builds".
+**Who is asked to review — code owners (advisory).** Bitbucket Cloud supports a
+code-owners file ([copy the example](examples/bitbucket-CODEOWNERS)) that auto-adds
+reviewers to PRs touching the listed paths. The authorized approvers are the people
+named for `.pocket-zipper/**`:
+
+- **Repo-local team** — define `lock-owners` in `.bitbucket/teams.yaml`
+  ([copy the example](examples/bitbucket-teams.yaml)) with contributors by email or
+  `"@username"`, then reference it as `@teams/lock-owners`. This is config-as-code and
+  needs no workspace-admin rights — editing `contributors` is how approvers are added
+  or removed.
+- **Workspace group** — reference `@<workspace-slug>/<group-slug>` (managed in the
+  workspace UI). A strategy suffix picks who is asked: `:all` asks every member,
+  `:random(N)` and `:least_busy(N)` sample.
+
+Code owners are **strictly advisory**: approving happens via the PR's Approve button,
+but nothing in the CODEOWNERS file can block a merge. The file is read from the PR's
+destination branch.
+
+**The enforced stop — branch restrictions plus a merge check.** Both are UI settings
+on the protected branch (no pipeline YAML can express them):
+
+- **Branch restrictions**: restrict write access (no direct write ⇒ changes must come
+  through PRs) and restrict who may merge via PR to the lock owners. A branch with
+  unrestricted write lets members push straight to it, bypassing CI.
+- **Merge checks**: "Minimum number of successful builds for the last commit with no
+  failed builds and no in progress builds" (the lock's verdict), and optionally
+  "Minimum number of approvals" — the PR author's own approval never counts toward it.
 
 Hard blocking is honest about its tier: **"Prevent a merge with unresolved merge
-checks" is a Bitbucket Premium feature**. Without Premium, unmet merge checks only
-warn and users can still merge — enforcement is write-protection plus convention. The
-gate's build result is the PR's pipeline status; nothing else is reported (the tool
-never calls host APIs).
+checks" is a Bitbucket Premium feature**. On Premium it turns every configured merge
+check (builds, approvals) into a hard gate; without Premium, unmet merge checks only
+warn and users can still merge — enforcement is write/merge restriction plus
+convention. The gate's build result is the PR's pipeline status; nothing else is
+reported (the tool never calls host APIs).
 
 ## Provenance
 
