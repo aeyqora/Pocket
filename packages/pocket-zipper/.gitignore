@@ -6,4 +6,5 @@ dist/
 .agents
 CONTEXT.MD
 skills-lock.json
-
+AGENTS.md
+docs/agents
