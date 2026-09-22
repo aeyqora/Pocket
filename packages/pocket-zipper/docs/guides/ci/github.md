@@ -44,17 +44,21 @@ jobs:
 
 ## What makes it work
 
-- **`fetch-depth: 0`** — the baseline is recomputed from git, so the target branch must
-  be present locally. A shallow checkout makes `--base` unresolvable or the baseline
+- **`fetch-depth: 0`** — the baseline is recomputed from git, so the target branch has to
+  be present locally. A shallow checkout makes `--base` unresolvable, or the baseline
   wrong.
 - **`--base origin/${{ github.base_ref || 'main' }}`** — `github.base_ref` is set on
   `pull_request` and empty on `push`/`workflow_dispatch`, where the fallback targets the
   default branch. On `pull_request` and `merge_group` the checkout is a merge commit
   whose first parent is the target tip, so Pocket Zipper evaluates the merged result.
-- **`if: always()` on the upload** — the record is the statistics artifact and matters
+- **`if: always()` on the upload** — the record is the statistics artifact, and it matters
   most exactly when the check fails.
 
 ## Make it required and protect the policy
+
+This is where exception records get approved. Nothing in `.pocket-zipper/exceptions.yml`
+can land except through the review wired up here, so the controls below are what make an
+exception a review rather than a self-serve edit.
 
 - Add the `pocket-zipper` job as a **required status check** on the base branch. With a
   merge queue, require it for both `pull_request` and `merge_group`.

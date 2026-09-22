@@ -1,9 +1,9 @@
 # Handling a failure
 
-When `pocket-zipper check` fails, the change introduces **new debt** — a suppression with no
-continuous baseline counterpart, or a materially-changed one — of a governed rule that no
-exception covers. You have two honest options: remove the suppression by fixing the code,
-or authorize it with an exception record and get that record reviewed.
+When `pocket-zipper check` fails, the change introduces **new debt** — a suppression with
+no continuous baseline counterpart, or a materially-changed one — of a governed rule that
+no exception covers. You have two honest options: remove the suppression by fixing the
+code, or authorize it with an exception record and get that record reviewed.
 
 ## Reading the report
 
@@ -29,7 +29,7 @@ New suppression debt requiring an exception:
 
 - **`existing` / `moved-existing`** — the suppression was already in the baseline.
   Allowed. `moved-existing` just means its line or file changed; identity follows the
-  directive, not its position, so it is not new debt.
+  directive, not its position, so it isn't new debt.
 - **`removed`** — a baseline suppression the change deletes. Always fine.
 - **`new`** — a suppression with no continuous baseline counterpart. Blocked unless
   excepted.
@@ -70,13 +70,13 @@ human fields and add it to `.pocket-zipper/exceptions.yml`.
 
 - Matching is by **`fingerprint` + `suppression_type` + `rule`** — never by line number,
   so the exception survives the suppression moving around.
-- `file` is verification: if it does not match the suppression's file, the run fails
+- `file` is verification: if it doesn't match the suppression's file, the run fails
   closed. Copy it from the report rather than guessing.
 - `reason`, `owner`, and `reference` are required. `expires` is required for `temporary`
   and forbidden for `permanent`.
 - The `fingerprint` is `v1:` plus a hash of the directive's form and its normalized rule
   set. It is deliberately blind to justification, path, line, and the guarded code, so
-  editing any of those does not invalidate the exception.
+  editing any of those doesn't invalidate the exception.
 
 ### Land the exception first (two-step landing)
 
@@ -88,7 +88,9 @@ two steps:
 2. A later ordinary PR that introduces the suppression.
 
 This is why the exception registry sits behind the same review path as the policy: human
-approval is where the authorization is actually counted.
+approval is where the authorization is actually counted. Which people count as authorized
+approvers on your host is the `.pocket-zipper/**` protection prerequisite — see
+[CI wiring principles §5](../ci/principles.md#5-the-pocket-zipper-protection-prerequisite).
 
 ### Temporary and permanent
 
@@ -102,8 +104,15 @@ needs fresh authorization through the protected workflow.
 ### Config-level suppressions are not exceptable
 
 A rule disabled in ESLint config (`"no-console": "off"`) is a policy change, not a
-directive. It is reported on the policy track and cannot be authorized by an exception
-record. Change the config through the protected policy workflow instead.
+directive. No exception record can authorize it. A new `config-off` is recorded on the
+policy track (`POLICY_CHANGE`) and passes the gate on its own; it fails only when the
+*same change* also introduces new directive debt — a weakening consumed by debt. The
+config edit then goes through review like any policy edit. Lowering a governed rule to
+`"warn"` (say `"error"` → `"warn"`) is the same kind of policy change, recorded the same
+way — see
+[Severity drops](suppression-types.md#severity-drops--a-policy-change-with-no-suppression).
+The full set of shapes the gate counts — directives and config-offs — is in
+[What the gate counts](suppression-types.md).
 
 ## Cleanup: unused exceptions
 
@@ -123,5 +132,5 @@ renewed or the suppression removed.
 
 - [Pre-commit hook](pre-commit.md) — catch this locally before pushing.
 - [Troubleshooting](troubleshooting.md) — exit codes and errors.
-- [Onboarding an existing codebase](onboarding-existing-codebase.md) — if you are seeing
+- [Onboarding an existing codebase](onboarding-existing-codebase.md) — if you're seeing
   a wall of failures on first enable.

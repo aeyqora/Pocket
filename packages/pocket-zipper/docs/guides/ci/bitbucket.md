@@ -26,8 +26,8 @@ pipelines:
 
 - **Always pass `--base origin/$BITBUCKET_PR_DESTINATION_BRANCH`.** Bitbucket merges the
   destination branch into the source before the pipeline runs, so `HEAD` is a merge
-  commit and the generic first-parent shortcut does not apply. Passing `--base` forces
-  the merge-base path, which is correct regardless of parent order.
+  commit and the generic first-parent shortcut doesn't apply. Passing `--base` forces the
+  merge-base path, which is correct regardless of parent order.
 - **`git fetch origin "$BITBUCKET_PR_DESTINATION_BRANCH"`** — the default clone is
   shallow and the destination ref may be absent. Fetch it before `--base`; Pocket Zipper
   then auto-unshallows.
@@ -36,24 +36,27 @@ pipelines:
 
 ## Make it required and protect the policy
 
+Bitbucket's CODEOWNERS file is advisory, so the guardrail is two-tiered: name the
+approvers, then enforce who may merge. Together they keep the exception registry an
+approved log instead of a list anyone can edit.
+
 - **Name the approvers**: copy
   [`examples/bitbucket-CODEOWNERS`](../../ci/examples/bitbucket-CODEOWNERS) to
   `.bitbucket/CODEOWNERS` and
   [`examples/bitbucket-teams.yaml`](../../ci/examples/bitbucket-teams.yaml) to
-  `.bitbucket/teams.yaml`, editing the `contributors` to your lock owners. PRs
-  touching `.pocket-zipper/**` then auto-add every lock owner as a reviewer —
-  advisory only, it cannot block a merge.
+  `.bitbucket/teams.yaml`, editing the `contributors` to your lock owners. PRs touching
+  `.pocket-zipper/**` then auto-add every lock owner as a reviewer — advisory only, it
+  can't block a merge.
 - Apply **branch restrictions** to the protected branch: restrict write access (so
   changes must come through PRs) and restrict who may merge (only the lock owners).
 - Add a **merge check** requiring the last commit's build to succeed. Note that hard
   blocking ("Prevent a merge with unresolved merge checks") is a Bitbucket Premium
-  feature; on lower tiers unmet checks warn but do not block.
+  feature; on lower tiers unmet checks warn but don't block.
 
 ## Deep reference
 
 This page is the copy-paste path. For the merge-before-run semantics, fork-PR behavior,
 and artifact retention details, see [docs/ci/bitbucket.md](../../ci/bitbucket.md). The
-host-agnostic ground rules are in
-[CI wiring principles](../../ci/principles.md).
+host-agnostic ground rules are in [CI wiring principles](../../ci/principles.md).
 
 Back to [guides](../README.md) · [Troubleshooting](../troubleshooting.md)

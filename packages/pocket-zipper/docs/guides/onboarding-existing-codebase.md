@@ -27,8 +27,8 @@ validation entirely.
 
 ## Step 2 — mass-suppress in ordinary PRs
 
-With the gate off there is no pressure. Add the ESLint suppression directives you want
-the codebase to carry, or run whatever bulk-suppression tooling you prefer, in ordinary
+With the gate off there's no pressure. Add the ESLint suppression directives you want the
+codebase to carry — or run whatever bulk-suppression tooling you prefer — in ordinary
 pull requests. Prefer per-line directives (`// eslint-disable-next-line`) over broad
 file-level ones so the debt stays visible and local.
 
@@ -67,29 +67,36 @@ governedRules:
   - jsx-a11y/no-autofocus
 ```
 
-Two facts keep this safe:
+Four facts keep this safe:
 
 - **Narrowing a policy is recorded but not gate-failed on its own.** Adding a
   `governedRules` allowlist that excludes rules is a policy-change signal. If the *same
   change* also introduces new debt under the old, broader policy, it fails
   (`POLICY_CHANGE`, exit 1); a pure policy edit is recorded and lands through review.
-- **Baseline-authoritative means one merge of lag.** A head-side config edit never
-  shapes its own evaluation. Widen the allowlist in this change; its effect is felt from
-  the next one. This is deliberate — it stops a change from rewriting the policy and
+- **Turning a rule `"off"` in `eslint.config.*` is the same kind of policy change.** A
+  new `config-off` is recorded (`POLICY_CHANGE`) and passes on its own; consumed by new
+  directive debt in the same change, it fails the gate. It is never exceptable.
+- **Lowering a rule to `"warn"` counts too.** `"error"` → `"warn"` (and every step down
+  the off → warn → error ladder) is a recorded policy change, even though the rule still
+  runs. Same rule: pure edit passes and is recorded; paired with new debt it fails. See
+  [Severity drops](suppression-types.md#severity-drops--a-policy-change-with-no-suppression).
+- **Baseline-authoritative means one merge of lag.** A head-side config edit never shapes
+  its own evaluation. Widen the allowlist in this change; its effect is felt from the
+  next one. This is deliberate — it stops a change from rewriting the policy and
   consuming the result in the same breath.
 
 `governedRules` entries must be rules ESLint recognizes. An unrecognized id fails closed
-(`CONFIG_ERROR`, exit 2). A recognized rule that does not currently apply anywhere is a
+(`CONFIG_ERROR`, exit 2). A recognized rule that doesn't currently apply anywhere is a
 forward declaration and is fine.
 
 ## Protecting the policy
 
-`.pocket-zipper/config.yml` and `.pocket-zipper/exceptions.yml` are the policy surface: one
-shapes what debt exists, the other authorizes new debt. Keep both mergeable only through
-approved policy pull requests (required reviewers or CODEOWNERS on `.pocket-zipper/**`) and
-protect the code-owners file itself. Without that protection an author could weaken the
-gate and approve their own debt in one change — the exception registry would be
-toothless. The per-host
+`.pocket-zipper/config.yml` and `.pocket-zipper/exceptions.yml` are the policy surface:
+one shapes what debt exists, the other authorizes new debt. Keep both mergeable only
+through approved policy pull requests (required reviewers or CODEOWNERS on
+`.pocket-zipper/**`), and protect the code-owners file itself. Without that protection an
+author could weaken the gate and approve their own debt in one change — the exception
+registry would be toothless. The per-host
 [CI guides](ci/github.md) and [principles §5](../ci/principles.md#5-the-pocket-zipper-protection-prerequisite)
 cover the wiring.
 

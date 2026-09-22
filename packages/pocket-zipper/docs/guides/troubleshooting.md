@@ -5,10 +5,14 @@
 | Exit | Verdict | Meaning |
 | --- | --- | --- |
 | `0` | pass | Nothing unauthorized. Also used when the policy is `enabled: false` (the record verdict is `excluded`). |
-| `1` | fail | Unauthorized new or materially-changed governed debt, or a policy-weakening edit consumed by new debt (`POLICY_CHANGE`). |
+| `1` | fail | Unauthorized new or materially-changed governed directive debt, or a policy-weakening edit consumed by new debt (`POLICY_CHANGE`). |
 | `2` | fail closed | An operational error: `GIT_ERROR`, `ESLINT_ERROR`, `CONFIG_ERROR`, or `INTERNAL_ERROR`. Nothing was approved. |
 
 Granular reasons live in the evaluation record's `errors[]`, not in the exit code.
+
+A rule turned `"off"` in `eslint.config.*` — or lowered to `"warn"` — is a policy change,
+not debt: it records as `POLICY_CHANGE` and exits `0` on its own, and exits `1` only when
+the same change also adds new directive debt. See [What the gate counts](suppression-types.md).
 
 ## Error codes
 
@@ -31,13 +35,13 @@ fails closed. In CI, configure a full clone: GitHub's `fetch-depth: 0`, GitLab's
 
 ### "partial (promisor) clone detected"
 
-Promisor clones serve objects on demand and cannot guarantee the baseline is fully
-present. Pocket Zipper fails closed. Use a regular full clone.
+Promisor clones serve objects on demand and can't guarantee the baseline is fully present.
+Pocket Zipper fails closed. Use a regular full clone.
 
 ### "cannot resolve ref '…' to a commit"
 
-The ref you passed to `--base` is not present in the local clone. CI clones often fetch
-only the refs the checkout needs. Fetch the target branch first:
+The ref you passed to `--base` isn't in the local clone. CI clones often fetch only the
+refs the checkout needs. Fetch the target branch first:
 
 ```sh
 git fetch origin "<target-branch>"
@@ -60,10 +64,9 @@ enabled with no allowlist.
 
 ### "governedRules names an unrecognized ESLint rule"
 
-The rule id is misspelled, or the plugin that provides it is not installed and
-configured. This is a hard error (fail closed) so a typo cannot silently ungovern a rule.
-A real rule that does not currently apply anywhere is *not* an error — it is a forward
-declaration.
+The rule id is misspelled, or the plugin that provides it isn't installed and configured.
+This is a hard error (fail closed) so a typo can't silently ungovern a rule. A real rule
+that doesn't currently apply anywhere is *not* an error — it's a forward declaration.
 
 ### Exception record errors
 
@@ -72,7 +75,8 @@ declaration.
 `expires` is required for `temporary` and forbidden for `permanent`. `suppression_type`
 is one of `next-line`, `line`, `block`, or `file-level directive`. A record whose `file`
 does not match the suppression fails closed. See
-[Handling a failure](handling-a-failure.md#exception-record-fields).
+[Handling a failure](handling-a-failure.md#exception-record-fields) and
+[What the gate counts](suppression-types.md) for the shapes behind these types.
 
 ## Why is nothing being evaluated?
 
@@ -103,15 +107,15 @@ have a baseline counterpart. Grandfather them instead of writing exceptions: fol
 
 `check --json <path>` writes a versioned record (`schemaVersion: 1`) carrying both
 compared tree ids, the applied policy, per-suppression dispositions, exception matches,
-and granular errors. CI should persist it on failure as well as success — that is the
+and granular errors. CI should persist it on failure as well as success — that's the
 durable statistics artifact. See
 [CI wiring principles §4](../ci/principles.md#4-the-evaluation-record-is-the-statistics-artifact).
 
 ## Protecting the policy
 
-If you are worried an author can weaken the gate and approve their own debt in one
-change, that is the `.pocket-zipper/**` protection prerequisite — a required check plus
-path-gated review on `.pocket-zipper/**`. See
+Worried an author can weaken the gate and approve their own debt in one change? That's
+the `.pocket-zipper/**` protection prerequisite — a required check plus path-gated review
+on `.pocket-zipper/**`. See
 [CI wiring principles §5](../ci/principles.md#5-the-pocket-zipper-protection-prerequisite)
 and your host's [CI guide](ci/github.md).
 

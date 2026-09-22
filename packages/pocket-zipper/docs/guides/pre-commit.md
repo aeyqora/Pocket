@@ -10,7 +10,7 @@ npx pocket-zipper pre-commit
 
 ## What it evaluates
 
-- The **staged index only**. Unstaged worktree edits are ignored, so the verdict matches
+- **The staged index only.** Unstaged worktree edits are ignored, so the verdict matches
   what `git commit` would actually record.
 - The baseline is `HEAD`; in a repository with no commits yet, the baseline is the empty
   tree, so any governed suppression in your first commit is new debt.
@@ -51,8 +51,8 @@ echo "npx pocket-zipper pre-commit" > .husky/pre-commit
 
 ### lint-staged
 
-Call `pocket-zipper pre-commit` **directly**, not through lint-staged. Pocket Zipper reads the
-staged index itself and needs no filename list; lint-staged stashes partially-staged
+Call `pocket-zipper pre-commit` **directly**, not through lint-staged. Pocket Zipper reads
+the staged index itself and needs no filename list; lint-staged stashes partially-staged
 changes while it runs, which would change the index underneath the evaluation. If you
 already use lint-staged, keep Pocket Zipper as a separate pre-commit step.
 

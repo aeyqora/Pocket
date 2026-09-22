@@ -31,7 +31,7 @@ pocket-zipper:
 
 - **`workflow:rules` selects MR pipelines** and its `when: never` branch prevents a
   duplicate branch pipeline from also running. The matching rule must be written inline
-  in `.gitlab-ci.yml` — rules pulled in via `include:` do not satisfy GitLab's
+  in `.gitlab-ci.yml` — rules pulled in via `include:` don't satisfy GitLab's
   requirement.
 - **`git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"`** — the runner clones
   shallow and fetches only the MR ref, so the target branch is absent locally. Fetch it
@@ -40,6 +40,10 @@ pocket-zipper:
   `on_success` (the default) would drop it exactly then.
 
 ## Make it required and protect the policy
+
+Every exception record is a policy change, and every one of them lands through this
+review. Without it, an MR could add to `exceptions.yml` and approve its own debt in one
+change; with it, only your named Code Owners decide.
 
 - Protect the target branch with **"Require merge requests"** and **"Pipelines must
   succeed"** so a failing lock blocks the merge.

@@ -1,14 +1,13 @@
 # Pocket
 
-A suite of small developer tools for ESLINT, each living in its own directory under
-[`packages/`](packages/). Every tool is a separate npm package and can be
-installed on its own.
+A suite of small developer tools for ESLint, each living in its own directory under
+[`packages/`](packages/). Every tool is a separate npm package, installable on its own.
 
 ## Layout
 
 ```
 packages/
-  pocket-zipper/   # Gate a proposed change from adding new ESLint suppression debt.
+  pocket-zipper/   # Gate a proposed change from adding new ESLint suppression debt; exceptions require approver review.
 ```
 
 ## Working on a tool

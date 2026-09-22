@@ -2,19 +2,19 @@
 
 Get Pocket Zipper running against a repository in about five minutes.
 
-If your repository already has a lot of ESLint suppressions you do not want to block
-on, read [Onboarding an existing codebase](onboarding-existing-codebase.md) instead —
-enabling the gate cold would flag all of them as new debt.
+Does your repository already carry a lot of ESLint suppressions that you don't want to
+block on? Read [Onboarding an existing codebase](onboarding-existing-codebase.md)
+instead — enabling the gate cold would flag every one of them as new debt.
 
 ## Prerequisites
 
-- Node.js 20 or newer.
-- `git` 2.43 or newer. The tool spells its git commands explicitly (including
+- **Node.js** 20 or newer.
+- **git** 2.43 or newer. The tool spells its git commands explicitly (including
   `git merge-base A B`).
-- ESLint 9 or newer (flat config only), installed and configured in the repository. Pocket
-  Zipper uses *your* installed ESLint as the semantic authority for which rules apply
-  where. Legacy `.eslintrc` configuration is not supported.
-- A full clone. Shallow clones are auto-unshallowed when possible; partial (promisor)
+- **ESLint** 9 or newer (flat config only), installed and configured in the repository.
+  Pocket Zipper uses *your* installed ESLint as the semantic authority for which rules
+  apply where. Legacy `.eslintrc` configuration is not supported.
+- **A full clone.** Shallow clones are auto-unshallowed when possible; partial (promisor)
   clones fail closed. See [Troubleshooting](troubleshooting.md).
 
 ## 1. Install
@@ -31,7 +31,7 @@ Create `.pocket-zipper/config.yml`. The smallest useful config is:
 enabled: true
 ```
 
-This governs every rule that your ESLint configuration makes applicable, and counts a
+That governs every rule your ESLint configuration makes applicable, and counts a
 suppression of any of them as debt.
 
 To onboard rules gradually, add an allowlist:
@@ -45,9 +45,9 @@ governedRules:
 
 `governedRules` is an allowlist of exact rule ids, intersected with the rules ESLint
 actually makes applicable. Anything outside the allowlist is not counted, reported, or
-matched. Naming a rule ESLint does not recognize at all fails closed
-(`CONFIG_ERROR`, exit 2); naming a real rule that does not currently apply anywhere is a
-forward declaration, not an error.
+matched. Naming a rule ESLint doesn't recognize at all fails closed (`CONFIG_ERROR`,
+exit 2); naming a real rule that doesn't currently apply anywhere is a forward
+declaration, not an error.
 
 An absent config file means the same as `enabled: true` with no allowlist.
 
@@ -57,9 +57,9 @@ An absent config file means the same as `enabled: true` with no allowlist.
 npx pocket-zipper check --base main
 ```
 
-`--base` is the target you compare against — here, the local `main` branch. Pocket Zipper
-resolves the baseline from git and compares it against your current `HEAD` (the proposed
-change). It never uses a two-point `git diff`.
+`--base` is the target you compare against — here, the local `main` branch. Pocket
+Zipper resolves the baseline from git and compares it against your current `HEAD` (the
+proposed change). It never uses a two-point `git diff`.
 
 To also write the machine-readable evaluation record:
 
@@ -72,11 +72,12 @@ npx pocket-zipper check --base main --json pocket-zipper.json
 - **PASS** (exit 0) — no unauthorized new suppression debt.
 - **FAIL** (exit 1) — the change introduces new or materially-changed debt of a governed
   rule that no exception covers. The report prints a copy-paste exception record for
-  each offending suppression; see [Handling a failure](handling-a-failure.md).
+  each offending suppression; landing one means getting it reviewed by your authorized
+  approvers. See [Handling a failure](handling-a-failure.md).
 - **Exit 2** — an operational failure (`GIT_ERROR`, `ESLINT_ERROR`, `CONFIG_ERROR`,
   `INTERNAL_ERROR`). Nothing was approved. See [Troubleshooting](troubleshooting.md).
 
-A passing or failing `check` also prints only what you need: the verdict, per-disposition
+A passing or failing `check` prints only what you need: the verdict, per-disposition
 counts, and the offending suppressions. Colors appear only when stdout is a terminal.
 
 ## Commands
