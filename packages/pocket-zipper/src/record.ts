@@ -23,8 +23,16 @@ export interface Summary {
   newDebt: EvaluationSummary["newDebt"];
 }
 
+/**
+ * New debt is a property of directives only. A config-off (a rule disabled in
+ * the flat config) is a policy change, not debt: it can never be excepted and
+ * it never fails the gate on its own.
+ */
 function isNewDebt(suppression: ReconciledSuppression): boolean {
-  return suppression.disposition === "new" || suppression.disposition === "materially-changed";
+  return (
+    suppression.guardKind === "directive" &&
+    (suppression.disposition === "new" || suppression.disposition === "materially-changed")
+  );
 }
 
 /**

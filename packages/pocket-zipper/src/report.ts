@@ -31,6 +31,13 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
     if (record.mode === "check" || verbose) {
       lines.push(color("pocket-zipper: PASS", GREEN, tty));
     }
+    // A pass can still carry recorded signals, such as a config-off policy
+    // change that was routed to review. Buried in the JSON record it would be
+    // invisible; surface it.
+    if (record.errors.length > 0) {
+      lines.push("");
+      for (const err of record.errors) lines.push(renderError(err));
+    }
     return joinLines(lines);
   }
 
@@ -61,7 +68,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
   }
   if (flaggedConfig.length > 0) {
     lines.push("");
-    lines.push("New config-level suppression debt (policy track; not exceptable):");
+    lines.push("New config-level suppressions (policy change; not exceptable):");
     for (const entry of flaggedConfig) {
       lines.push(
         `  ${entry.file}:${entry.lines.head ?? "?"}  ${entry.rule}  (${entry.suppressionType})`,

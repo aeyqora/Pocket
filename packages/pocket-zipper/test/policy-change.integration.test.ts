@@ -218,3 +218,136 @@ describe("policy-change detection through the pipeline", () => {
     assert.ok(hasPolicyChange(res.record));
   });
 });
+
+describe("config-level severity weakenings as policy changes", () => {
+  it("records a pure config-level off addition as a policy change that passes", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "off" }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.ok(hasPolicyChange(res.record));
+    assert.equal(res.record?.summary.newDebt.unauthorized, 0);
+    assert.match(res.stdout, /PASS/);
+    assert.match(res.stdout, /POLICY_CHANGE/);
+  });
+
+  it("fails when a config-level off weakening is consumed by new directive debt", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "off", "no-debugger": "error" }));
+    r.write("app.js", `${noDebugger}\ndebugger;\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.ok(hasPolicyChange(res.record));
+    assert.equal(res.record?.verdict, "fail");
+  });
+
+  it("does not fire a policy change for an off of a rule the allowlist never governed", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "off", "no-debugger": "error" }));
+    r.write("app.js", "export const a = 2;\n");
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(hasPolicyChange(res.record), false);
+  });
+
+  it("records an off that hides a same-change directive as a policy change, not debt", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "off" }));
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.ok(hasPolicyChange(res.record));
+    assert.equal(res.record?.summary.newDebt.unauthorized, 0);
+  });
+
+  it("records lowering a governed rule from error to warn as a policy change that passes", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "warn" }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.ok(hasPolicyChange(res.record));
+    assert.equal(res.record?.summary.newDebt.unauthorized, 0);
+    assert.match(res.stdout, /POLICY_CHANGE/);
+  });
+
+  it("does not fire for a warn-to-error strengthening", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "warn" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(hasPolicyChange(res.record), false);
+  });
+
+  it("fails when a severity drop is paired with new directive debt for the same rule", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "warn" }));
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.ok(hasPolicyChange(res.record));
+    assert.equal(res.record?.verdict, "fail");
+  });
+
+  it("fails when a warn drop is consumed by new debt for another governed rule", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      eslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(
+      "eslint.config.mjs",
+      eslintConfig({ "no-console": "warn", "no-debugger": "error" }),
+    );
+    r.write("app.js", `${noDebugger}\ndebugger;\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.ok(hasPolicyChange(res.record));
+    assert.equal(res.record?.verdict, "fail");
+  });
+});

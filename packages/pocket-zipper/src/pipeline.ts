@@ -4,9 +4,11 @@ import { Git, EMPTY_TREE } from "./git.js";
 import { EslintSession } from "./eslint.js";
 import {
   configPluginRuleNames,
+  configSeverityLevels,
   recognizeConfigOffs,
   recognizeDirectives,
   applicableRules,
+  type ConfigSeverityLevel,
 } from "./recognize.js";
 import { computeGovernedSet, parsePolicy } from "./policy.js";
 import { coverExceptions, parseRegistry } from "./registry.js";
@@ -136,18 +138,21 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       const summary = summarize(coverage.head, baseline.length);
       const consumedDebt = summary.newDebt.authorized + summary.newDebt.unauthorized;
 
-      const touchesProtected =
-        changeMap.files.has(PROTECTED_CONFIG) || changeMap.files.has(PROTECTED_REGISTRY);
-      const policyChange = touchesProtected
-        ? detectPolicyChange({
-            baselineConfig: git.fileAt(trees.baselineCommit, PROTECTED_CONFIG),
-            headConfig: readHeadContent(git, trees, options, headDir, PROTECTED_CONFIG),
-            baselineRegistry: git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY),
-            headRegistry: readHeadContent(git, trees, options, headDir, PROTECTED_REGISTRY),
-            baselineGoverned: governedBaseline,
-            consumedDebt,
-          })
-        : { weakening: false, failure: false };
+      // Weakening is judged against both protected surfaces: the
+      // `.pocket-zipper` policy documents and the ESLint flat config's own rule
+      // severities (lowering a governed rule to `"warn"` or `"off"` is a policy
+      // change, not debt). The detection runs on every evaluation; it reports
+      // nothing when nothing weakened.
+      const policyChange = detectPolicyChange({
+        baselineConfig: baselinePolicyRaw,
+        headConfig: readHeadContent(git, trees, options, headDir, PROTECTED_CONFIG),
+        baselineRegistry: git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY),
+        headRegistry: readHeadContent(git, trees, options, headDir, PROTECTED_REGISTRY),
+        baselineGoverned: governedBaseline,
+        consumedDebt,
+        baselineLevels: analysis.baselineLevels,
+        headLevels: analysis.headLevels,
+      });
 
       const gateFailure = summary.newDebt.unauthorized > 0 || policyChange.failure;
 
@@ -156,7 +161,9 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
           code: "POLICY_CHANGE",
           message: policyChange.failure
             ? "policy weakening consumed by new suppression debt in the same change"
-            : "policy weakening detected (routed through protected-branch review)",
+            : policyChange.source === "eslint-config"
+              ? "rule weakened in ESLint config: policy change recorded (review the config edit; not exceptable)"
+              : "policy weakening detected (routed through protected-branch review)",
         });
       }
 
@@ -299,6 +306,8 @@ interface Analysis {
   headSuppressions: LogicalSuppression[];
   applicableBaseline: string[];
   applicableHead: string[];
+  baselineLevels: ConfigSeverityLevel[];
+  headLevels: ConfigSeverityLevel[];
   lineDiffs: Map<string, LineDiff>;
   baselineIndex: Set<string>;
   headIndex: Set<string>;
@@ -373,11 +382,16 @@ async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
   for (const s of baseOffs.suppressions) applicableBaselineSet.add(s.rule);
   for (const s of headOffs.suppressions) applicableHeadSet.add(s.rule);
 
+  const baselineLevels = await configSeverityLevels(baselineDir);
+  const headLevels = await configSeverityLevels(headDir);
+
   return {
     baselineSuppressions,
     headSuppressions,
     applicableBaseline: [...applicableBaselineSet],
     applicableHead: [...applicableHeadSet],
+    baselineLevels,
+    headLevels,
     lineDiffs,
     baselineIndex: buildLineIndex(baselineDir),
     headIndex: buildLineIndex(headDir),

@@ -137,7 +137,7 @@ describe("governed scope and lock enablement", () => {
 });
 
 describe("config-level off recognition", () => {
-  it("counts a newly added config-level off as new debt", () => {
+  it("records a newly added config-level off as a policy change, not debt", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write("app.js", "export const a = 1;\n");
@@ -146,11 +146,12 @@ describe("config-level off recognition", () => {
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "off" }));
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 1);
+    assert.equal(res.status, 0);
     const entry = res.record?.inventory.find((e) => e.disposition === "new");
     assert.equal(entry?.guardKind, "config-level");
     assert.equal(entry?.suppressionType, "config-off");
-    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 0);
+    assert.ok(res.record?.errors.some((e) => e.code === "POLICY_CHANGE"));
   });
 
   it("reconciles a pre-existing config-level off as existing debt", () => {
@@ -203,7 +204,7 @@ describe("config-level off recognition", () => {
     }
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 1);
+    assert.equal(res.status, 0);
     const configOffs = res.record?.inventory.filter((e) => e.guardKind === "config-level");
     assert.equal(configOffs?.length, 1);
     assert.equal(res.record?.summary.dispositions.new, 1);

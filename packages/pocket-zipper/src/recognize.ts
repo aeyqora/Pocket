@@ -237,6 +237,8 @@ interface ConfigDecl {
   ignores: string[] | null;
   index: number;
   off: boolean;
+  /** Configured severity: 0 off, 1 warn, 2 error. */
+  sev: number;
 }
 
 export interface ConfigOffDeclaration {
@@ -262,7 +264,14 @@ function collectFlatDecls(config: unknown): ConfigDecl[] {
     const files = normalizePatterns(obj["files"]);
     const ignores = normalizePatterns(obj["ignores"]);
     for (const [rule, value] of Object.entries(rules as Record<string, unknown>)) {
-      decls.push({ rule, files, ignores, index, off: severityOf(value) === 0 });
+      decls.push({
+        rule,
+        files,
+        ignores,
+        index,
+        off: severityOf(value) === 0,
+        sev: severityOf(value),
+      });
     }
   });
   return decls;
@@ -352,6 +361,79 @@ export async function recognizeConfigOffs(treeDir: string): Promise<ConfigOffRes
     });
   }
   return { suppressions, configFile };
+}
+
+/**
+ * A rule's configured severity (0 off, 1 warn, 2 error) at a config scope, as
+ * it *effectively* applies once later declarations have had their say. Scopes
+ * are identified by their exact `files`/`ignores` patterns (the same identity
+ * the config-off inventory uses), so severity can be compared across trees.
+ */
+export interface ConfigSeverityLevel {
+  rule: string;
+  files: string[] | null;
+  ignores: string[] | null;
+  band: number;
+}
+
+/**
+ * Every severity band currently in effect in the flat config. Used by
+ * policy-change detection: a band that drops (error -> warn, warn -> off,
+ * error -> off) is a weakening of the governed surface — not just a literal
+ * `"off"`, which is why this reads bands rather than reusing the config-off
+ * inventory.
+ *
+ * Override semantics match the flat config's own merge order: a later
+ * declaration replaces an earlier one that covers the same files. A global
+ * declaration (no `files`) covers every scope; a scoped declaration covers
+ * only its own — so a later global absorbs every older scoped declaration,
+ * and a later scoped declaration only absorbs older same-scope ones.
+ */
+export async function configSeverityLevels(treeDir: string): Promise<ConfigSeverityLevel[]> {
+  const configFile = findConfigFile(treeDir);
+  if (!configFile) return [];
+  let raw: unknown;
+  try {
+    raw = await loadConfigValue(treeDir, configFile);
+  } catch (err) {
+    throw configError(`failed to load ESLint config '${configFile}'`, String(err));
+  }
+  const decls = collectFlatDecls(raw);
+  const byRule = new Map<string, ConfigDecl[]>();
+  for (const d of decls) {
+    const list = byRule.get(d.rule);
+    if (list) list.push(d);
+    else byRule.set(d.rule, [d]);
+  }
+  const levels: ConfigSeverityLevel[] = [];
+  for (const entries of byRule.values()) {
+    const globals = entries.filter((d) => d.files === null);
+    if (globals.length > 0) {
+      const last = globals.reduce((a, b) => (b.index > a.index ? b : a));
+      levels.push({ rule: last.rule, files: last.files, ignores: last.ignores, band: last.sev });
+    }
+    const latestAtScope = new Map<string, ConfigDecl>();
+    for (const d of entries) {
+      if (d.files === null) continue;
+      const scope = scopeKey(d.files, d.ignores);
+      const prior = latestAtScope.get(scope);
+      if (!prior || d.index > prior.index) latestAtScope.set(scope, d);
+    }
+    for (const d of latestAtScope.values()) {
+      // A later global covers this scope too; the global level above already
+      // represents it, so the scoped declaration is absorbed.
+      if (globals.some((g) => g.index > d.index)) continue;
+      levels.push({ rule: d.rule, files: d.files, ignores: d.ignores, band: d.sev });
+    }
+  }
+  return levels;
+}
+
+function scopeKey(files: string[] | null, ignores: string[] | null): string {
+  return JSON.stringify({
+    files: normalizedPatterns(files),
+    ignores: normalizedPatterns(ignores),
+  });
 }
 
 function findConfigFile(treeDir: string): string | null {
