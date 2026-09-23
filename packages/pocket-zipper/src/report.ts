@@ -1,5 +1,10 @@
 import { remediationFields } from "./registry.js";
-import type { EvaluationRecord, InventoryEntry, RecordError } from "./types.js";
+import type {
+  EvaluationRecord,
+  EvaluationSummary,
+  InventoryEntry,
+  RecordError,
+} from "./types.js";
 
 export interface ReportOptions {
   verbose: boolean;
@@ -31,33 +36,30 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
     if (record.mode === "check" || verbose) {
       lines.push(color("pocket-zipper: PASS", GREEN, tty));
     }
+    // Verbose is symmetric across modes: the pass path mirrors the fail
+    // summary (dispositions, authorized new debt, exception cleanup) so the
+    // recorded state is readable without parsing JSON. The default pass path
+    // stays one verdict line in CI and silent in pre-commit.
+    if (verbose) {
+      lines.push(renderDispositionSummary(record.summary.dispositions));
+      lines.push(...renderAuthorizedDebt(record.inventory));
+      lines.push(...renderCleanup(record.summary.cleanup));
+    }
     // A pass can still carry recorded signals, such as a config-off policy
     // change that was routed to review. Buried in the JSON record it would be
     // invisible; surface it.
-    if (record.errors.length > 0) {
-      lines.push("");
-      for (const err of record.errors) lines.push(renderError(err));
-    }
+    lines.push(...renderErrors(record.errors));
     return joinLines(lines);
   }
 
   lines.push(color("pocket-zipper: FAIL", RED, tty));
-  const dispositions = record.summary.dispositions;
-  lines.push(
-    `  existing: ${dispositions.existing}  moved-existing: ${dispositions.movedExisting}  removed: ${dispositions.removed}  new: ${dispositions.new}  materially-changed: ${dispositions.materiallyChanged}`,
-  );
+  lines.push(renderDispositionSummary(record.summary.dispositions));
 
   const flagged = record.inventory.filter(
-    (e) =>
-      (e.disposition === "new" || e.disposition === "materially-changed") &&
-      e.exception === null &&
-      e.guardKind === "directive",
+    (e) => isNewOrChanged(e) && e.exception === null && e.guardKind === "directive",
   );
   const flaggedConfig = record.inventory.filter(
-    (e) =>
-      (e.disposition === "new" || e.disposition === "materially-changed") &&
-      e.exception === null &&
-      e.guardKind === "config-level",
+    (e) => isNewOrChanged(e) && e.exception === null && e.guardKind === "config-level",
   );
   if (flagged.length > 0) {
     lines.push("");
@@ -70,43 +72,58 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
     lines.push("");
     lines.push("New config-level suppressions (policy change; not exceptable):");
     for (const entry of flaggedConfig) {
-      lines.push(
-        `  ${entry.file}:${entry.lines.head ?? "?"}  ${entry.rule}  (${entry.suppressionType})`,
-      );
+      lines.push(entryLine(entry));
     }
   }
 
-  const authorized = record.inventory.filter(
-    (e) =>
-      (e.disposition === "new" || e.disposition === "materially-changed") &&
-      e.exception !== null,
-  );
-  if (authorized.length > 0) {
-    lines.push("");
-    lines.push("New suppression debt authorized by exception:");
-    for (const entry of authorized) {
-      lines.push(`  ${entry.file}:${entry.lines.head ?? "?"}  ${entry.rule}  (${entry.suppressionType})`);
-    }
-  }
-
-  const cleanup = record.summary.cleanup;
-  if (
-    cleanup.danglingExceptions > 0 ||
-    cleanup.spentExceptions > 0 ||
-    cleanup.expiredExceptions > 0
-  ) {
-    lines.push("");
-    lines.push(
-      `Unused exceptions: dangling ${cleanup.danglingExceptions}, spent ${cleanup.spentExceptions}, expired ${cleanup.expiredExceptions}`,
-    );
-  }
-
-  if (record.errors.length > 0) {
-    lines.push("");
-    for (const err of record.errors) lines.push(renderError(err));
-  }
+  lines.push(...renderAuthorizedDebt(record.inventory));
+  lines.push(...renderCleanup(record.summary.cleanup));
+  lines.push(...renderErrors(record.errors));
 
   return joinLines(lines);
+}
+
+function isNewOrChanged(entry: InventoryEntry): boolean {
+  return entry.disposition === "new" || entry.disposition === "materially-changed";
+}
+
+function entryLine(entry: InventoryEntry): string {
+  return `  ${entry.file}:${entry.lines.head ?? "?"}  ${entry.rule}  (${entry.suppressionType})`;
+}
+
+function renderErrors(errors: RecordError[]): string[] {
+  if (errors.length === 0) return [];
+  return ["", ...errors.map(renderError)];
+}
+
+function renderDispositionSummary(dispositions: EvaluationSummary["dispositions"]): string {
+  return `  existing: ${dispositions.existing}  moved-existing: ${dispositions.movedExisting}  removed: ${dispositions.removed}  new: ${dispositions.new}  materially-changed: ${dispositions.materiallyChanged}`;
+}
+
+function renderAuthorizedDebt(inventory: InventoryEntry[]): string[] {
+  const authorized = inventory.filter(
+    (e) => isNewOrChanged(e) && e.exception !== null,
+  );
+  if (authorized.length === 0) return [];
+  const out: string[] = ["", "New suppression debt authorized by exception:"];
+  for (const entry of authorized) {
+    out.push(entryLine(entry));
+  }
+  return out;
+}
+
+function renderCleanup(cleanup: EvaluationSummary["cleanup"]): string[] {
+  if (
+    cleanup.danglingExceptions === 0 &&
+    cleanup.spentExceptions === 0 &&
+    cleanup.expiredExceptions === 0
+  ) {
+    return [];
+  }
+  return [
+    "",
+    `Unused exceptions: dangling ${cleanup.danglingExceptions}, spent ${cleanup.spentExceptions}, expired ${cleanup.expiredExceptions}`,
+  ];
 }
 
 function renderProblem(entry: InventoryEntry, tty: boolean): string[] {

@@ -73,6 +73,11 @@ pocket-zipper pre-commit [--json <path>] [--verbose]           # staged index, l
 
 `--json <path>` writes the versioned evaluation record; stdout stays for the human report.
 
+A passing run is quiet by design: one verdict line from `check`, silence from `pre-commit`.
+Add `--verbose` (either mode) and the pass report shows what was recorded — the disposition
+summary, any new debt an exception authorized, and unused-exception cleanup — the same
+vocabulary the fail report uses, so you never have to parse the JSON to see the state.
+
 ## Documentation
 
 - **[Guides](docs/guides/README.md)** — task-oriented, start here:

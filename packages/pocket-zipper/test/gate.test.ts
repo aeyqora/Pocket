@@ -1,6 +1,12 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRepo, eslintConfig, type FixtureRepo } from "./harness.js";
+import {
+  createRepo,
+  eslintConfig,
+  exceptionYaml,
+  NEXT_LINE_NO_CONSOLE_FP,
+  type FixtureRepo,
+} from "./harness.js";
 
 const repos: FixtureRepo[] = [];
 after(() => repos.forEach((r) => r.cleanup()));
@@ -66,6 +72,31 @@ describe("recognition and the first gate verdict", () => {
     assert.equal(res.status, 0);
     assert.equal(res.record?.summary.dispositions.removed, 1);
     assert.equal(res.record?.summary.dispositions.new, 0);
+  });
+
+  it("surfaces authorized debt on a verbose check pass, one line by default", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", exceptionYaml({
+      rule: "no-console",
+      suppressionType: "next-line",
+      fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+      file: "app.js",
+      expires: "2099-01-01",
+    }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    r.commit("add");
+    const plain = r.runCli(["check", "--base", "base"]);
+    assert.equal(plain.status, 0);
+    assert.equal(plain.stdout, "pocket-zipper: PASS\n");
+    const verbose = r.runCli(["check", "--base", "base", "--verbose"]);
+    assert.equal(verbose.status, 0);
+    assert.match(verbose.stdout, /new: 1/);
+    assert.match(verbose.stdout, /New suppression debt authorized by exception:/);
+    assert.match(verbose.stdout, /app\.js:\d+\s+no-console\s+\(next-line\)/);
   });
 
   it("expands a multi-rule directive to one logical suppression per rule", () => {

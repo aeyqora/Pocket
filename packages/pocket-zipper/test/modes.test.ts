@@ -230,6 +230,22 @@ describe("pre-commit mode", () => {
     assert.equal(res.record?.summary.newDebt.authorized, 1);
   });
 
+  it("surfaces authorized debt and dispositions on a verbose pass", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    r.stage("app.js");
+    const res = r.runCli(["pre-commit", "--verbose"]);
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /PASS/);
+    assert.match(res.stdout, /new: 1/);
+    assert.match(res.stdout, /New suppression debt authorized by exception:/);
+    assert.match(res.stdout, /app\.js:\d+\s+no-console\s+\(next-line\)/);
+  });
+
   it("does not authorize a staged exception and suppression in the same change", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));

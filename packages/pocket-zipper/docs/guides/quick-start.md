@@ -77,8 +77,9 @@ npx pocket-zipper check --base main --json pocket-zipper.json
 - **Exit 2** — an operational failure (`GIT_ERROR`, `ESLINT_ERROR`, `CONFIG_ERROR`,
   `INTERNAL_ERROR`). Nothing was approved. See [Troubleshooting](troubleshooting.md).
 
-A passing or failing `check` prints only what you need: the verdict, per-disposition
-counts, and the offending suppressions. Colors appear only when stdout is a terminal.
+A failing `check` prints only what you need: the verdict, per-disposition counts, and the
+offending suppressions. A passing one prints just the verdict. Colors appear only when
+stdout is a terminal.
 
 ## Commands
 
@@ -91,7 +92,8 @@ pocket-zipper pre-commit [--json <path>] [--verbose]
 - `pre-commit` evaluates the staged index for local early feedback. See
   [Pre-commit hook](pre-commit.md).
 - `--json <path>` writes the evaluation record and leaves stdout for the human report.
-- `--verbose` reports even on pass.
+- `--verbose` reports even on pass: the disposition summary, new debt authorized by an
+  exception, and unused-exception cleanup (dangling, spent, expired) — in both modes.
 
 ## Next steps
 
