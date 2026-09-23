@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { coverExceptions, recordMatchKey } from "../src/registry.js";
-import { PocketZipperError } from "../src/errors.js";
 import type { ExceptionRecord, ReconciledSuppression } from "../src/types.js";
 
 const NOW = new Date("2026-09-14T12:00:00Z");
@@ -53,16 +52,41 @@ describe("registry: coverExceptions matching", () => {
     assert.equal(out.counts.used, 1);
   });
 
-  it("does not authorize on a mismatched fingerprint, rule, or type", () => {
+  it("does not authorize on a mismatched fingerprint, rule, type, or file", () => {
     for (const r of [
       record({ fingerprint: `v1:sha256:${"0".repeat(64)}` }),
       record({ rule: "no-debugger" }),
       record({ suppression_type: "line" }),
+      record({ file: "other.js" }),
     ]) {
       const out = coverExceptions({ head: [suppression()], records: [r], now: NOW });
       assert.equal(out.head[0]!.exception, null);
       assert.equal(out.statuses.get(r), "dangling");
     }
+  });
+
+  it("leaves a materially-changed suppression in another file unauthorized", () => {
+    const r = record({ file: "other.js" });
+    const out = coverExceptions({
+      head: [suppression({ disposition: "materially-changed" })],
+      records: [r],
+      now: NOW,
+    });
+    assert.equal(out.head[0]!.exception, null);
+    assert.equal(out.statuses.get(r), "dangling");
+  });
+
+  it("authorizes from the record scoped to the suppression's file among lookalikes", () => {
+    const elsewhere = record({ file: "other.js" });
+    const here = record();
+    const out = coverExceptions({
+      head: [suppression()],
+      records: [elsewhere, here],
+      now: NOW,
+    });
+    assert.equal(out.head[0]!.exception?.fingerprint, FP_NC);
+    assert.equal(out.statuses.get(here), "used");
+    assert.equal(out.statuses.get(elsewhere), "dangling");
   });
 
   it("keys records on fingerprint, type, and rule only", () => {
@@ -181,6 +205,14 @@ describe("registry: lifecycle classification", () => {
     assert.equal(out.statuses.get(r), "expired");
   });
 
+  it("keeps an expired record expired when its lookalike lands in another file", () => {
+    const r = record({ type: "temporary", expires: "2000-01-01", file: "other.js" });
+    const out = coverExceptions({ head: [suppression()], records: [r], now: NOW });
+    assert.equal(out.head[0]!.exception, null);
+    assert.equal(out.statuses.get(r), "expired");
+    assert.equal(out.counts.expired, 1);
+  });
+
   it("lets the first matching record win and classifies the rest", () => {
     const first = record();
     const second = record();
@@ -208,19 +240,5 @@ describe("registry: lifecycle classification", () => {
     assert.equal(out.counts.spent, 1);
     assert.equal(out.counts.dangling, 1);
     assert.equal(out.counts.expired, 1);
-  });
-});
-
-describe("registry: verification", () => {
-  it("fails closed when the record's file does not match the suppression", () => {
-    assert.throws(
-      () =>
-        coverExceptions({
-          head: [suppression()],
-          records: [record({ file: "other.js" })],
-          now: NOW,
-        }),
-      (err) => err instanceof PocketZipperError && err.code === "CONFIG_ERROR",
-    );
   });
 });

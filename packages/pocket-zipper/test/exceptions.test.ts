@@ -87,7 +87,7 @@ describe("the exception registry, resolved against the baseline", () => {
     assert.equal(res.record?.summary.newDebt.unauthorized, 1);
   });
 
-  it("fails closed when the record's file does not match the suppression", () => {
+  it("reports a matching suppression in another file as unauthorized debt", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write(".pocket-zipper/exceptions.yml", baseRecord({ file: "other.js" }));
@@ -97,8 +97,53 @@ describe("the exception registry, resolved against the baseline", () => {
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
-    assert.equal(res.status, 2);
-    assert.equal(res.record?.errors[0]?.code, "CONFIG_ERROR");
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.authorized, 0);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+    assert.equal(res.record?.inventory.find((e) => e.disposition === "new")?.exception, null);
+    assert.equal(res.record?.summary.cleanup.danglingExceptions, 1);
+    assert.equal(res.record?.exceptions[0]?.status, "dangling");
+  });
+
+  it("keeps an expired record expired when its lookalike is in another file", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(
+      ".pocket-zipper/exceptions.yml",
+      baseRecord({ file: "other.js", expires: "2000-01-01" }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+    assert.equal(res.record?.summary.cleanup.expiredExceptions, 1);
+    assert.equal(res.record?.exceptions[0]?.status, "expired");
+  });
+
+  it("reports a tomb in another file as debt, not a registry configuration error", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", baseRecord());
+    r.write("app.js", "export const a = 1;\n");
+    r.write("legacy.js", `${disabled}console.log("dead");\n`);
+    r.commit("base");
+    r.branch("base");
+    r.write("legacy.js", `work();\nfeature();\n${disabled}console.log("brand-new");\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.dispositions.materiallyChanged, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+    assert.equal(
+      res.record?.inventory.find((e) => e.disposition === "materially-changed")?.exception,
+      null,
+    );
+    assert.equal(res.record?.summary.cleanup.danglingExceptions, 1);
+    assert.equal(res.record?.errors.length, 0);
   });
 
   it("does not spend a record on an existing suppression in another file", () => {

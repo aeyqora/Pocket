@@ -19,7 +19,7 @@ the same change also adds new directive debt. See [What the gate counts](suppres
 | Code | Typical cause | Fix |
 | --- | --- | --- |
 | `GIT_ERROR` | Not a git repository; a shallow clone that cannot unshallow; a partial (promisor) clone; an unresolvable `--base`; no merge-base; pre-commit in a bare repo. | See [Git problems](#git-problems). |
-| `CONFIG_ERROR` | Malformed or invalid `.pocket-zipper/config.yml` or `.pocket-zipper/exceptions.yml`; an unrecognized rule in `governedRules`; an exception whose `file` does not match. | See [Config problems](#config-problems). |
+| `CONFIG_ERROR` | Malformed or invalid `.pocket-zipper/config.yml` or `.pocket-zipper/exceptions.yml`; an unrecognized rule in `governedRules`. | See [Config problems](#config-problems). |
 | `ESLINT_ERROR` | ESLint acknowledged a suppression Pocket Zipper did not inventory. Fail-closed safety net. | Report it as a bug with the printed file and rule. |
 | `INTERNAL_ERROR` | An unexpected failure. | Re-run with `--json` and inspect `errors[]`. |
 
@@ -74,7 +74,8 @@ that doesn't currently apply anywhere is *not* an error — it's a forward decla
 `suppression_type`, `fingerprint`, `file`, `type`, `reason`, `owner`, and `reference`;
 `expires` is required for `temporary` and forbidden for `permanent`. `suppression_type`
 is one of `next-line`, `line`, `block`, or `file-level directive`. A record whose `file`
-does not match the suppression fails closed. See
+differs from the suppression's location authorizes nothing — the suppression reads as
+unauthorized new debt and the record as dangling cleanup. See
 [Handling a failure](handling-a-failure.md#exception-record-fields) and
 [What the gate counts](suppression-types.md) for the shapes behind these types.
 

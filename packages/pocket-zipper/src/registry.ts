@@ -131,6 +131,16 @@ export function recordMatchKey(record: ExceptionRecord): string {
   });
 }
 
+/**
+ * A record covers a head suppression only in its scoped file: canonical
+ * identity (fingerprint + suppression type + rule) plus the record's `file`
+ * scope. A lookalike suppression in another file finds no record and stays
+ * unauthorized debt.
+ */
+function coversInScope(record: ExceptionRecord, h: ReconciledSuppression): boolean {
+  return record.file === h.file && recordMatchKey(record) === matchKey(h);
+}
+
 export interface ExceptionCoverage {
   head: ReconciledSuppression[];
   statuses: Map<ExceptionRecord, ExceptionStatus>;
@@ -145,23 +155,22 @@ export interface CoverExceptionsInput {
 
 /**
  * Authorize new/materially-changed debt against the registry and classify every
- * record's utilization. Returns a head whose authorized entries carry their
- * record, the per-record status, and the status tally.
+ * record's utilization. A record authorizes exactly the matching logical
+ * suppression in its scoped file; a lookalike elsewhere is unauthorized debt
+ * and leaves the record unused.
  */
 export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage {
   const { head, records, now } = input;
   const statuses = new Map<ExceptionRecord, ExceptionStatus>();
 
   // Authorize new/materially-changed debt, or mark the record expired.
+  // Authorization is file-scoped: a record covers only the matching
+  // suppression in its own file, so a lookalike in another file finds no
+  // record and is reported as unauthorized debt.
   const covered = head.map((h) => {
     if (h.disposition !== "new" && h.disposition !== "materially-changed") return h;
-    const record = records.find((r) => recordMatchKey(r) === matchKey(h));
+    const record = records.find((r) => coversInScope(r, h));
     if (!record) return h;
-    if (record.file !== h.file) {
-      throw configError(
-        `exception for ${h.rule} names file '${record.file}' but the suppression is at '${h.file}'`,
-      );
-    }
     if (isExpired(record.expires, now)) {
       statuses.set(record, "expired");
       return h;
@@ -185,8 +194,7 @@ export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage 
     const matchesExistingInRecordFile = head.some(
       (h) =>
         (h.disposition === "existing" || h.disposition === "moved-existing") &&
-        recordMatchKey(record) === matchKey(h) &&
-        record.file === h.file,
+        coversInScope(record, h),
     );
     if (isExpired(record.expires, now)) statuses.set(record, "expired");
     else if (matchesExistingInRecordFile) statuses.set(record, "spent");

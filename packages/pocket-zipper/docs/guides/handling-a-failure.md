@@ -60,7 +60,7 @@ human fields and add it to `.pocket-zipper/exceptions.yml`.
 - rule: no-console
   suppression_type: next-line     # next-line | line | block | file-level directive
   fingerprint: v1:sha256:6f1c…    # copied verbatim from the report
-  file: src/api.ts                # the record's file scope; a mismatch fails closed
+  file: src/api.ts                # the record's file scope
   type: temporary                 # temporary | permanent
   reason: Console output is the intended UX for this CLI command.
   owner: "@platform-team"
@@ -68,11 +68,11 @@ human fields and add it to `.pocket-zipper/exceptions.yml`.
   expires: 2026-10-31             # required iff type: temporary (UTC, end of day)
 ```
 
-- Matching is by **`fingerprint` + `suppression_type` + `rule`** — never by line number,
-  so the exception survives the suppression moving around.
-- `file` is the record's scope. If it doesn't match the suppression's file, the run
-  fails closed — and a matching suppression in some *other* file never spends the
-  record. Copy it from the report rather than guessing.
+- Matching is by **`fingerprint` + `suppression_type` + `rule` + `file`** — never by
+  line number, so the exception survives the suppression moving around.
+- `file` is the record's scope. A matching suppression in some *other* file is not
+  covered: it reads as unauthorized new debt, and the record as dangling cleanup.
+  Copy the value from the report rather than guessing.
 - `reason`, `owner`, and `reference` are required. `expires` is required for `temporary`
   and forbidden for `permanent`.
 - The `fingerprint` is `v1:` plus a hash of the directive's form and its normalized rule
