@@ -60,7 +60,7 @@ human fields and add it to `.pocket-zipper/exceptions.yml`.
 - rule: no-console
   suppression_type: next-line     # next-line | line | block | file-level directive
   fingerprint: v1:sha256:6f1c…    # copied verbatim from the report
-  file: src/api.ts                # verification only; a mismatch fails closed
+  file: src/api.ts                # the record's file scope; a mismatch fails closed
   type: temporary                 # temporary | permanent
   reason: Console output is the intended UX for this CLI command.
   owner: "@platform-team"
@@ -70,8 +70,9 @@ human fields and add it to `.pocket-zipper/exceptions.yml`.
 
 - Matching is by **`fingerprint` + `suppression_type` + `rule`** — never by line number,
   so the exception survives the suppression moving around.
-- `file` is verification: if it doesn't match the suppression's file, the run fails
-  closed. Copy it from the report rather than guessing.
+- `file` is the record's scope. If it doesn't match the suppression's file, the run
+  fails closed — and a matching suppression in some *other* file never spends the
+  record. Copy it from the report rather than guessing.
 - `reason`, `owner`, and `reference` are required. `expires` is required for `temporary`
   and forbidden for `permanent`.
 - The `fingerprint` is `v1:` plus a hash of the directive's form and its normalized rule
@@ -118,11 +119,15 @@ The full set of shapes the gate counts — directives and config-offs — is in
 
 An exception record that authorizes nothing is **unused**. Two shapes:
 
-- **dangling** — its suppression no longer exists anywhere.
-- **spent** — its suppression has become existing debt (it landed in the baseline), so
-  the record is no longer doing work.
-- **expired** — a temporary exception past its date. Unlike the other two, an expired
-  record does not authorize, so its suppression counts as unexcepted new debt.
+- **dangling** — its suppression no longer exists: nothing matching its fingerprint,
+  suppression type, and rule remains in the record's file. A lookalike directive in
+  another file doesn't count — the record's `file` field scopes it.
+- **spent** — its suppression has become existing debt in the record's file (it landed
+  in the baseline), so the record is no longer doing work.
+
+A third status is reported alongside them: **expired** — a temporary exception past
+its date. Unlike the other two, an expired record does not authorize, so its
+suppression counts as unexcepted new debt.
 
 Unused exceptions are reported as cleanup debt and **never fail the gate on their own**.
 Delete dangling and spent records when you notice them. Expired records should either be

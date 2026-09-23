@@ -108,6 +108,69 @@ describe("registry: lifecycle classification", () => {
     assert.equal(out.counts.spent, 1);
   });
 
+  it("reports a record whose suppression moved within its file as spent", () => {
+    const r = record();
+    const out = coverExceptions({
+      head: [suppression({ disposition: "moved-existing", line: 12 })],
+      records: [r],
+      now: NOW,
+    });
+    assert.equal(out.statuses.get(r), "spent");
+    assert.equal(out.counts.spent, 1);
+  });
+
+  it("does not let an existing suppression in another file spend the record", () => {
+    const r = record();
+    const out = coverExceptions({
+      head: [suppression({ disposition: "existing", file: "legacy.js" })],
+      records: [r],
+      now: NOW,
+    });
+    assert.equal(out.statuses.get(r), "dangling");
+    assert.equal(out.counts.dangling, 1);
+    assert.equal(out.counts.spent, 0);
+  });
+
+  it("does not let a moved-existing suppression in another file spend the record", () => {
+    const r = record();
+    const out = coverExceptions({
+      head: [suppression({ disposition: "moved-existing", file: "legacy.js" })],
+      records: [r],
+      now: NOW,
+    });
+    assert.equal(out.statuses.get(r), "dangling");
+    assert.equal(out.counts.dangling, 1);
+    assert.equal(out.counts.spent, 0);
+  });
+
+  it("spends a record when a same-file match exists alongside one in another file", () => {
+    const r = record();
+    const out = coverExceptions({
+      head: [
+        suppression({ disposition: "existing", file: "legacy.js" }),
+        suppression({ disposition: "moved-existing", line: 12 }),
+      ],
+      records: [r],
+      now: NOW,
+    });
+    assert.equal(out.statuses.get(r), "spent");
+    assert.equal(out.counts.spent, 1);
+  });
+
+  it("reports expired ahead of dangling or spent regardless of file match", () => {
+    for (const disposition of ["existing", "moved-existing"] as const) {
+      for (const file of ["app.js", "legacy.js"]) {
+        const r = record({ type: "temporary", expires: "2000-01-01" });
+        const out = coverExceptions({
+          head: [suppression({ disposition, file })],
+          records: [r],
+          now: NOW,
+        });
+        assert.equal(out.statuses.get(r), "expired", `${disposition} in ${file}`);
+      }
+    }
+  });
+
   it("reports expired ahead of spent for an expired record on existing debt", () => {
     const r = record({ type: "temporary", expires: "2000-01-01" });
     const out = coverExceptions({

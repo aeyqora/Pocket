@@ -178,15 +178,18 @@ export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage 
   });
 
   // Classify the rest: expired is reported distinctly, then spent, then dangling.
+  // Utilization is file-scoped: only a suppression in the record's own file can
+  // spend it — a lookalike directive elsewhere never consumes the record.
   for (const record of records) {
     if (statuses.has(record)) continue;
-    const matchesExisting = head.some(
+    const matchesExistingInRecordFile = head.some(
       (h) =>
         (h.disposition === "existing" || h.disposition === "moved-existing") &&
-        recordMatchKey(record) === matchKey(h),
+        recordMatchKey(record) === matchKey(h) &&
+        record.file === h.file,
     );
     if (isExpired(record.expires, now)) statuses.set(record, "expired");
-    else if (matchesExisting) statuses.set(record, "spent");
+    else if (matchesExistingInRecordFile) statuses.set(record, "spent");
     else statuses.set(record, "dangling");
   }
 

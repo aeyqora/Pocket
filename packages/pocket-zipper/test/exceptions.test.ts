@@ -101,6 +101,51 @@ describe("the exception registry, resolved against the baseline", () => {
     assert.equal(res.record?.errors[0]?.code, "CONFIG_ERROR");
   });
 
+  it("does not spend a record on an existing suppression in another file", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", baseRecord());
+    r.write("app.js", "export const a = 1;\n");
+    r.write("legacy.js", `${disabled}console.log("legacy");\n`);
+    r.commit("base");
+    r.branch("base");
+    r.write("legacy.js", `${disabled}console.log("legacy");\nexport const tail = 1;\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(
+      res.record?.inventory.find((e) => e.file === "legacy.js")?.disposition,
+      "existing",
+    );
+    assert.equal(res.record?.summary.cleanup.danglingExceptions, 1);
+    assert.equal(res.record?.summary.cleanup.spentExceptions, 0);
+    assert.equal(res.record?.exceptions[0]?.status, "dangling");
+  });
+
+  it("does not spend a record when another file's matching suppression merely moved", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", baseRecord());
+    r.write("app.js", "export const a = 1;\n");
+    r.write("legacy.js", `export const l = 1;\n${disabled}console.log("legacy");\n`);
+    r.commit("base");
+    r.branch("base");
+    r.write(
+      "legacy.js",
+      `export const l = 1;\nexport const m = 2;\n${disabled}console.log("legacy");\n`,
+    );
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(
+      res.record?.inventory.find((e) => e.file === "legacy.js")?.disposition,
+      "moved-existing",
+    );
+    assert.equal(res.record?.summary.cleanup.danglingExceptions, 1);
+    assert.equal(res.record?.summary.cleanup.spentExceptions, 0);
+    assert.equal(res.record?.exceptions[0]?.status, "dangling");
+  });
+
   it("fails closed on a malformed registry", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
