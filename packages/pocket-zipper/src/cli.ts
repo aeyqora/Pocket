@@ -78,6 +78,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const report = renderReport(result.record, {
     verbose: parsed.verbose,
     tty: process.stdout.isTTY === true,
+    suggestedExpiry: result.suggestedExpiry,
   });
   if (report.length > 0) process.stdout.write(report);
   return result.exitCode;

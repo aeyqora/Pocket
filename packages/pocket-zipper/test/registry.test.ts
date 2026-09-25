@@ -1,10 +1,32 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { coverExceptions, recordMatchKey } from "../src/registry.js";
+import { coverExceptions, parseRegistry, recordMatchKey } from "../src/registry.js";
 import type { ExceptionRecord, ReconciledSuppression } from "../src/types.js";
 
 const NOW = new Date("2026-09-14T12:00:00Z");
 const FP_NC = "v1:fp:no-console";
+
+/** A temporary v2 record with every optional field absent. */
+const MINIMAL_TEMPORARY = [
+  "- rule: no-console",
+  "  suppression_type: next-line",
+  `  fingerprint: ${FP_NC}`,
+  "  file: app.js",
+  "  type: temporary",
+  "  reason: needed",
+  "  expires: 2099-01-01",
+  "",
+].join("\n");
+
+/** `parseRegistry`'s diagnostic for the named field, or the thrown shape. */
+function defectMessage(raw: string): string {
+  try {
+    parseRegistry(raw);
+  } catch (err) {
+    return (err as Error).message;
+  }
+  return assert.fail(`expected ${raw} to be a defect`);
+}
 
 function suppression(overrides: Partial<ReconciledSuppression> = {}): ReconciledSuppression {
   return {
@@ -35,11 +57,93 @@ function record(overrides: Partial<ExceptionRecord> = {}): ExceptionRecord {
     file: "app.js",
     type: "permanent",
     reason: "needed",
-    owner: "@team",
     reference: "#1",
     ...overrides,
   };
 }
+
+describe("registry: v2 record shape", () => {
+  it("reads a permanent record carrying no owner", () => {
+    const [r] = parseRegistry(
+      [
+        "- rule: no-console",
+        "  suppression_type: next-line",
+        `  fingerprint: ${FP_NC}`,
+        "  file: app.js",
+        "  type: permanent",
+        "  reason: needed",
+        "  reference: '#1'",
+        "",
+      ].join("\n"),
+    );
+    assert.ok(r);
+    assert.equal(r.type, "permanent");
+    assert.equal(r.reason, "needed");
+    assert.equal(r.reference, "#1");
+    assert.equal(r.expires, undefined);
+  });
+
+  it("fails closed on a stale owner, naming the removed field and the fix", () => {
+    const stale = MINIMAL_TEMPORARY.replace(
+      "  reason: needed",
+      "  reason: needed\n  owner: '@team'",
+    );
+    assert.match(
+      defectMessage(stale),
+      /unknown field 'owner' — removed from the registry format; delete this line/,
+    );
+  });
+
+  it("reads an optional integer line and keeps it out of the match key", () => {
+    const [r] = parseRegistry(MINIMAL_TEMPORARY + "  line: 7\n");
+    assert.equal(r?.line, 7);
+    assert.equal(recordMatchKey(r!), recordMatchKey(parseRegistry(MINIMAL_TEMPORARY)[0]!));
+  });
+
+  it("omits line entirely when undeclared", () => {
+    const [r] = parseRegistry(MINIMAL_TEMPORARY);
+    assert.equal(r?.line, undefined);
+  });
+
+  it("rejects a line that is not an integer of at least 1", () => {
+    for (const value of ["0", "-3", "2.5", "abc"]) {
+      assert.throws(
+        () => parseRegistry(MINIMAL_TEMPORARY + `  line: ${value}\n`),
+        /'line'/,
+        `line: ${value}`,
+      );
+    }
+  });
+
+  it("rejects an unknown field, naming the field and the known set", () => {
+    const message = defectMessage(MINIMAL_TEMPORARY + "  ticket: '#2'\n");
+    assert.match(message, /unknown field 'ticket'/);
+    assert.match(message, /known fields are rule, suppression_type, fingerprint/);
+  });
+
+  it("serializes a record without an owner key", () => {
+    const [r] = parseRegistry(MINIMAL_TEMPORARY);
+    assert.ok(r && !("owner" in r));
+  });
+
+  it("requires expires on a temporary and forbids it on a permanent", () => {
+    const permanent = [
+      "- rule: no-console",
+      "  suppression_type: next-line",
+      `  fingerprint: ${FP_NC}`,
+      "  file: app.js",
+      "  type: permanent",
+      "  reason: needed",
+      "",
+    ].join("\n");
+    assert.equal(parseRegistry(permanent)[0]?.type, "permanent");
+    assert.match(
+      defectMessage(MINIMAL_TEMPORARY.replace("  expires: 2099-01-01\n", "")),
+      /'expires'/,
+    );
+    assert.match(defectMessage(permanent + "  expires: 2099-01-01\n"), /'expires'/);
+  });
+});
 
 describe("registry: coverExceptions matching", () => {
   it("authorizes a matching new suppression without mutating the input", () => {

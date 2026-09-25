@@ -266,7 +266,7 @@ describe("the exception registry, resolved against the baseline", () => {
   });
 
   it("fails closed on invalid record fields", () => {
-    const valid = `- rule: no-console\n  suppression_type: next-line\n  fingerprint: ${NEXT_LINE_NO_CONSOLE_FP}\n  file: app.js\n  type: permanent\n  reason: r\n  owner: o\n  reference: ref\n`;
+    const valid = `- rule: no-console\n  suppression_type: next-line\n  fingerprint: ${NEXT_LINE_NO_CONSOLE_FP}\n  file: app.js\n  type: permanent\n  reason: r\n  reference: ref\n`;
     const without = (line: string) => valid.replace(line, "");
     const cases: Array<{ name: string; yaml: string; field: RegExp }> = [
       { name: "invalid type", yaml: valid.replace("type: permanent", "type: whenever"), field: /type/ },
@@ -282,8 +282,8 @@ describe("the exception registry, resolved against the baseline", () => {
       },
       { name: "permanent with expires", yaml: valid + "  expires: 2099-01-01\n", field: /expires/ },
       { name: "missing reason", yaml: without("  reason: r\n"), field: /reason/ },
-      { name: "missing owner", yaml: without("  owner: o\n"), field: /owner/ },
-      { name: "missing reference", yaml: without("  reference: ref\n"), field: /reference/ },
+      { name: "line below 1", yaml: valid + "  line: 0\n", field: /line/ },
+      { name: "non-integer line", yaml: valid + "  line: 4.5\n", field: /line/ },
       {
         name: "invalid expires date",
         yaml: valid.replace("type: permanent", "type: temporary") + "  expires: not-a-date\n",
@@ -302,5 +302,38 @@ describe("the exception registry, resolved against the baseline", () => {
       assert.equal(res.record?.errors[0]?.code, "CONFIG_ERROR", c.name);
       assert.match(res.record?.errors[0]?.message ?? "", c.field, c.name);
     }
+  });
+
+  it("fails closed on a stale owner, naming the removed field", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(
+      ".pocket-zipper/exceptions.yml",
+      baseRecord().replace('  reference: "#1"', '  reference: "#1"\n  owner: "@team"'),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 2);
+    assert.equal(res.record?.errors[0]?.code, "CONFIG_ERROR");
+    assert.match(
+      res.record?.errors[0]?.message ?? "",
+      /unknown field 'owner' — removed from the registry format; delete this line/,
+    );
+  });
+
+  it("authorizes a v2 record carrying a line", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ line: 2 }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(res.record?.summary.newDebt.authorized, 1);
   });
 });

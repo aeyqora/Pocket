@@ -10,7 +10,7 @@ import {
   applicableRules,
   type ConfigSeverityLevel,
 } from "./recognize.js";
-import { computeGovernedSet, parsePolicy } from "./policy.js";
+import { computeGovernedSet, parsePolicy, suggestedExpiry } from "./policy.js";
 import { coverExceptions, parseRegistry } from "./registry.js";
 import { detectPolicyChange } from "./policy-change.js";
 import { buildRecord, excludedRecord, failureRecord, summarize } from "./record.js";
@@ -48,6 +48,12 @@ export interface EvaluateResult {
   record: EvaluationRecord;
   exitCode: number;
   report: string;
+  /**
+   * The concrete `expires` a remediation block should suggest: this
+   * evaluation's date plus the baseline policy's `defaultExpiry`. Undefined
+   * when no policy was read (an operational error, where nothing is flagged).
+   */
+  suggestedExpiry: string | undefined;
 }
 
 export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult> {
@@ -75,6 +81,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         }),
         exitCode: 0,
         report: "",
+        suggestedExpiry: suggestedExpiry(now, initialPolicy.exceptions.defaultExpiry),
       };
     }
 
@@ -186,6 +193,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         record,
         exitCode: gateFailure ? 1 : 0,
         report: "",
+        suggestedExpiry: suggestedExpiry(now, policy.exceptions.defaultExpiry),
       };
     } finally {
       for (const dir of tmpDirs) git.cleanup(dir);
@@ -193,13 +201,13 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
   } catch (err) {
     if (err instanceof PocketZipperError) {
       errors.push({ code: err.code, message: err.message, detail: err.detail });
-      return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "" };
+      return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined };
     }
     errors.push({
       code: "INTERNAL_ERROR",
       message: err instanceof Error ? err.message : String(err),
     });
-    return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "" };
+    return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined };
   }
 }
 

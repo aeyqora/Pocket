@@ -9,6 +9,12 @@ import type {
 export interface ReportOptions {
   verbose: boolean;
   tty: boolean;
+  /**
+   * The concrete `expires` date a remediation block suggests — the evaluation's
+   * UTC date plus the baseline policy's `defaultExpiry`, resolved by the
+   * pipeline (the renderer prints, it never computes dates).
+   */
+  suggestedExpiry?: string;
 }
 
 const RED = "\u001b[31m";
@@ -22,7 +28,7 @@ function color(text: string, code: string, tty: boolean): string {
 }
 
 export function renderReport(record: EvaluationRecord, options: ReportOptions): string {
-  const { verbose, tty } = options;
+  const { verbose, tty, suggestedExpiry } = options;
   const lines: string[] = [];
 
   if (record.verdict === "excluded") {
@@ -65,7 +71,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
     lines.push("");
     lines.push("New suppression debt requiring an exception:");
     for (const entry of flagged) {
-      lines.push(...renderProblem(entry, tty));
+      lines.push(...renderProblem(entry, tty, suggestedExpiry));
     }
   }
   if (flaggedConfig.length > 0) {
@@ -126,14 +132,18 @@ function renderCleanup(cleanup: EvaluationSummary["cleanup"]): string[] {
   ];
 }
 
-function renderProblem(entry: InventoryEntry, tty: boolean): string[] {
+function renderProblem(
+  entry: InventoryEntry,
+  tty: boolean,
+  suggestedExpiry?: string,
+): string[] {
   const line = entry.lines.head ?? "?";
   const out: string[] = [];
   out.push(
     `  ${color(`${entry.file}:${line}`, DIM, tty)}  ${entry.rule}  (${entry.suppressionType}, ${entry.guardKind}, ${entry.disposition})`,
   );
   out.push("    remediate with:");
-  remediationFields(entry).forEach(([key, value], i) => {
+  remediationFields(entry, suggestedExpiry).forEach(([key, value], i) => {
     out.push(`    ${i === 0 ? "- " : "  "}${key}: ${value}`);
   });
   return out;

@@ -319,7 +319,6 @@ describe("config-level off recognition", () => {
         "  file: eslint.config.mjs",
         "  type: permanent",
         "  reason: r",
-        "  owner: o",
         "  reference: ref",
         "",
       ].join("\n"),

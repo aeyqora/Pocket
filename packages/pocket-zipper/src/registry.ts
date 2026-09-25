@@ -18,6 +18,46 @@ const DIRECTIVE_TYPES: SuppressionType[] = [
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * The registry's known field set, in canonical field order. A record carrying
+ * anything else is a defect, so the v2 format is unambiguous and a future field
+ * has to register here (or be deliberately removed and named in `REMOVED_FIELDS`).
+ */
+const KNOWN_FIELDS = [
+  "rule",
+  "suppression_type",
+  "fingerprint",
+  "file",
+  "type",
+  "reason",
+  "reference",
+  "expires",
+  "line",
+] as const;
+
+const KNOWN_FIELD_SET = new Set<string>(KNOWN_FIELDS);
+
+/**
+ * Fields removed from the registry format, each with the advice that replaces
+ * its diagnostic. `owner` was dropped in v2: attribution is git history, never
+ * re-derived in-tool, so a stale line is a defect naming the field to delete.
+ */
+const REMOVED_FIELDS = new Map<string, string>([
+  ["owner", "removed from the registry format; delete this line"],
+]);
+
+function rejectUnknownFields(obj: Record<string, unknown>, where: string): void {
+  for (const key of Object.keys(obj)) {
+    if (KNOWN_FIELD_SET.has(key)) continue;
+    const removed = REMOVED_FIELDS.get(key);
+    throw configError(
+      `${where}: unknown field '${key}' — ${
+        removed ?? `known fields are ${KNOWN_FIELDS.join(", ")}`
+      }`,
+    );
+  }
+}
+
 export function parseRegistry(raw: string | null): ExceptionRecord[] {
   if (raw === null || raw.trim().length === 0) return [];
   let doc: unknown;
@@ -39,6 +79,7 @@ function validateRecord(entry: unknown, index: number): ExceptionRecord {
     throw configError(`${where} must be a mapping`);
   }
   const obj = entry as Record<string, unknown>;
+  rejectUnknownFields(obj, where);
   const rule = requireString(obj, "rule", where);
   const suppressionType = requireString(obj, "suppression_type", where) as SuppressionType;
   if (!DIRECTIVE_TYPES.includes(suppressionType)) {
@@ -53,8 +94,7 @@ function validateRecord(entry: unknown, index: number): ExceptionRecord {
     throw configError(`${where}: 'type' must be 'temporary' or 'permanent'`);
   }
   const reason = requireString(obj, "reason", where);
-  const owner = requireString(obj, "owner", where);
-  const reference = requireString(obj, "reference", where);
+  const reference = optionalString(obj, "reference", where);
 
   const expiresRaw = obj["expires"];
   let expires: string | undefined;
@@ -68,6 +108,8 @@ function validateRecord(entry: unknown, index: number): ExceptionRecord {
     throw configError(`${where}: permanent records must not carry 'expires'`);
   }
 
+  const line = optionalLine(obj, where);
+
   return {
     rule,
     suppression_type: suppressionType,
@@ -75,9 +117,9 @@ function validateRecord(entry: unknown, index: number): ExceptionRecord {
     file,
     type,
     reason,
-    owner,
-    reference,
+    ...(reference ? { reference } : {}),
     ...(expires ? { expires } : {}),
+    ...(line === undefined ? {} : { line }),
   };
 }
 
@@ -89,6 +131,29 @@ function requireString(
   const value = obj[field];
   if (typeof value !== "string" || value.trim().length === 0) {
     throw configError(`${where}: '${field}' is required and must be a string`);
+  }
+  return value;
+}
+
+function optionalString(
+  obj: Record<string, unknown>,
+  field: string,
+  where: string,
+): string | undefined {
+  const value = obj[field];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw configError(`${where}: '${field}' must be a non-empty string when present`);
+  }
+  return value;
+}
+
+/** `line` is capture-time reference data: a 1-based integer, never a match input. */
+function optionalLine(obj: Record<string, unknown>, where: string): number | undefined {
+  const value = obj["line"];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw configError(`${where}: 'line' must be an integer of at least 1`);
   }
   return value;
 }
@@ -108,7 +173,10 @@ export function isExpired(expires: string | undefined, now: Date): boolean {
  * suppression, with defaults for the human-authored ones. The single source of
  * the record's field list for the human report.
  */
-export function remediationFields(entry: InventoryEntry): Array<[string, string]> {
+export function remediationFields(
+  entry: InventoryEntry,
+  suggestedExpiry?: string,
+): Array<[string, string]> {
   return [
     ["rule", entry.rule],
     ["suppression_type", entry.suppressionType],
@@ -116,9 +184,9 @@ export function remediationFields(entry: InventoryEntry): Array<[string, string]
     ["file", entry.file],
     ["type", "temporary"],
     ["reason", "<why this suppression is necessary>"],
-    ["owner", "<owning team>"],
     ["reference", "<issue or PR link>"],
-    ["expires", "<YYYY-MM-DD>"],
+    ["expires", suggestedExpiry ?? "<YYYY-MM-DD>"],
+    ["line", String(entry.lines.head ?? "?")],
   ];
 }
 

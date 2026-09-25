@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { renderReport } from "../src/report.js";
+import { renderReport, type ReportOptions } from "../src/report.js";
 import type {
   EvaluationRecord,
   InventoryEntry,
@@ -84,6 +84,37 @@ describe("TTY-aware human report", () => {
       renderReport(record({ verdict: "fail" }), { verbose: false, tty: false }),
       /\u001b\[/,
     );
+  });
+});
+
+describe("the fail report's remediation block", () => {
+  const flagged: InventoryEntry = { ...authorizedEntry, exception: null };
+
+  function block(options: Partial<ReportOptions> = {}): string {
+    return renderReport(
+      record({ verdict: "fail", newDebt: { unauthorized: 1 }, inventory: [flagged] }),
+      { verbose: false, tty: false, ...options },
+    );
+  }
+
+  it("prints the v2 field set with a machine-prefilled line", () => {
+    const out = block();
+    assert.match(out, /remediate with:/);
+    assert.match(out, /- rule: no-console/);
+    assert.match(out, /^ {6}suppression_type: next-line$/m);
+    assert.match(out, /^ {6}file: app\.js$/m);
+    assert.match(out, /^ {6}type: temporary$/m);
+    assert.match(out, /^ {6}reason: <why this suppression is necessary>$/m);
+    assert.match(out, /^ {6}reference: <issue or PR link>$/m);
+    assert.match(out, /^ {6}line: 2$/m);
+  });
+
+  it("no longer prints an owner field", () => {
+    assert.doesNotMatch(block(), /owner/);
+  });
+
+  it("suggests the concrete expiry the policy resolved", () => {
+    assert.match(block({ suggestedExpiry: "2026-10-14" }), /^ {6}expires: 2026-10-14$/m);
   });
 });
 

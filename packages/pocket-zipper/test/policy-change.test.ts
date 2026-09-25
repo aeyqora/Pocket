@@ -28,7 +28,6 @@ function record(overrides: Record<string, string> = {}): string {
     file: "app.js",
     type: "permanent",
     reason: "r",
-    owner: "o",
     reference: "ref",
     ...overrides,
   };

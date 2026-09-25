@@ -103,7 +103,6 @@ describe("record: buildRecord", () => {
     file: "app.js",
     type: "permanent",
     reason: "r",
-    owner: "o",
     reference: "ref",
   };
 

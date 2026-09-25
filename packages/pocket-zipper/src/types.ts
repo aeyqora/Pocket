@@ -99,9 +99,10 @@ export interface ExceptionRecord {
   file: string;
   type: "temporary" | "permanent";
   reason: string;
-  owner: string;
-  reference: string;
+  reference?: string;
   expires?: string;
+  /** Capture-time reference data: the directive's line when the record was written. Never a match input. */
+  line?: number;
 }
 
 export interface EvaluationRecord {

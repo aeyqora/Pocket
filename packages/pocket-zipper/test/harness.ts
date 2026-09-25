@@ -180,6 +180,7 @@ export function exceptionYaml(record: {
   file: string;
   type?: "temporary" | "permanent";
   expires?: string;
+  line?: number;
 }): string {
   const lines = [
     `- rule: ${record.rule}`,
@@ -188,10 +189,10 @@ export function exceptionYaml(record: {
     `  file: ${record.file}`,
     `  type: ${record.type ?? "temporary"}`,
     `  reason: needed`,
-    `  owner: "@team"`,
     `  reference: "#1"`,
   ];
   if (record.expires) lines.push(`  expires: ${record.expires}`);
+  if (record.line !== undefined) lines.push(`  line: ${record.line}`);
   return lines.join("\n") + "\n";
 }
 
