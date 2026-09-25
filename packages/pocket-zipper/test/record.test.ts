@@ -118,6 +118,7 @@ describe("record: buildRecord", () => {
       removed: [removed()],
       registry: [record],
       cleanup: { expired: 1, dangling: 2, spent: 3 },
+      poolCounts: [],
       exceptionStatuses: new Map([[record, "used"]]),
       errors: [{ code: "POLICY_CHANGE", message: "weakened" }],
       ...overrides,
@@ -141,6 +142,7 @@ describe("record: buildRecord", () => {
       danglingExceptions: 2,
       spentExceptions: 3,
       expiredExceptions: 1,
+      poolCounts: [],
     });
   });
 

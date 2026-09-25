@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { EslintSession } from "./eslint.js";
-import { matchKey } from "./identity.js";
 import { DEFAULT_POLICY, parsePolicy } from "./policy.js";
 import { configPluginRuleNames, recognizeFile, type RecognizeFileResult } from "./recognize.js";
-import { isExpired, recordMatchKey } from "./registry.js";
+import { allocateExceptions, isExpired, type UnclaimedRecord } from "./registry.js";
 import {
   PROTECTED_CONFIG,
   PROTECTED_REGISTRY,
   defectsOf,
   documentDefect,
+  poolHygiene,
   recordHygiene,
   renderFinding,
   statusHygiene,
@@ -18,7 +18,12 @@ import {
   type HygieneContext,
   type RegistryEntry,
 } from "./validate.js";
-import type { ExceptionRecord, ExceptionStatus, Policy } from "./types.js";
+import type {
+  ExceptionRecord,
+  ExceptionStatus,
+  LogicalSuppression,
+  Policy,
+} from "./types.js";
 
 export interface ValidateOptions {
   cwd: string;
@@ -63,8 +68,8 @@ export async function runValidate(options: ValidateOptions): Promise<ValidateRes
   const policy = readPolicy(configRaw, knownRules, findings);
   const { entries, findings: registryFindings } = validateRegistry(registryRaw);
   findings.push(...registryFindings);
-  const pool = await suppressionPool(entries, cwd, session);
-  const { live, statuses } = judge(entries, pool, now);
+  const scanned = await liveSuppressions(entries, cwd, session);
+  const { live, statuses, unclaimed } = judge(entries, scanned, now);
   const ctx: HygieneContext = {
     now,
     maxExpiry: policy.exceptions.maxExpiry,
@@ -72,6 +77,9 @@ export async function runValidate(options: ValidateOptions): Promise<ValidateRes
     liveLines: live,
   };
   findings.push(...recordHygiene(entries, ctx));
+  // The pool's arithmetic before the statuses it explains: the count line is the
+  // "why", and a per-record status is the detail it accounts for.
+  findings.push(...poolHygiene(entries, unclaimed));
   findings.push(...statusHygiene(entries, statuses, ctx));
 
   return { findings, report: renderValidateReport(findings), exitCode: exitCodeOf(findings) };
@@ -85,9 +93,9 @@ export function exitCodeOf(findings: readonly Finding[]): number {
 /**
  * Every finding, one diagnostic line each. Order is by pass, not by position:
  * the config's defect first, then the registry's defects in document order,
- * then what each record's own text says, then what each record's relationship to
- * the tree says. The verdict line carries both counts so CI can branch on the
- * two tiers without parsing them.
+ * then what each record's own text says, then what its pool's arithmetic says,
+ * then what each record's relationship to the tree says. The verdict line
+ * carries both counts so CI can branch on the two tiers without parsing them.
  */
 export function renderValidateReport(findings: readonly Finding[]): string {
   const defects = defectsOf(findings).length;
@@ -195,43 +203,39 @@ function configMessage(message: string): string {
 }
 
 /**
- * The working tree's live suppressions, addressed the way a record addresses
- * them: by file, then by match key. The lines behind one key are a pool rather
- * than a single hit because allocation is a consuming count — two records may
- * share a match key in one file, and each authorizes one of that key's live
- * suppressions, the first K in document order (`coverExceptions` allocates the
- * same way).
+ * The working tree's live suppressions, in the order the files a registry names
+ * yield them: by file, then by the tree's own document order within the file.
+ * That order is the allocator's, not a special case of it — allocation is a
+ * consuming count, and both callers hand their suppressions over in document
+ * order for it to consume.
  */
-interface SuppressionPool {
-  readonly byFile: ReadonlyMap<string, ReadonlyMap<string, PoolSlot>>;
+interface LiveSuppressions {
+  readonly live: LogicalSuppression[];
   /**
    * Records whose file could not be read, so the tree gave them no verdict. An
    * unreadable file is no evidence about its records: they are unjudged, never
-   * dangling.
+   * dangling, and take no part in allocation.
    */
   readonly unjudged: ReadonlySet<ExceptionRecord>;
-}
-
-/** The live suppressions one file carries under one match key, and the count of them claimed. */
-interface PoolSlot {
-  /** The live line of every suppression this slot covers, in document order. */
-  readonly lines: number[];
-  /** How many of them records have already claimed. */
-  claimed: number;
 }
 
 interface Judgement {
   /** The live line each `used` record's suppression sits on, for the stale note. */
   readonly live: Map<ExceptionRecord, number>;
   readonly statuses: Map<ExceptionRecord, ExceptionStatus>;
+  /** The records allocation left over, with each pool's arithmetic. */
+  readonly unclaimed: UnclaimedRecord[];
 }
 
 /**
- * Classify every record against the working tree's own suppressions. A record
- * matching a live suppression in its scoped file is in use; one past its expiry
- * is expired; the rest match nothing and are dangling. Expiry is judged first
- * and consumes nothing, so an expired record never takes a live suppression away
- * from a record that could still use it.
+ * Classify every record against the working tree's own suppressions, through the
+ * one allocator the evaluation uses. A record matching a live suppression in its
+ * scoped file is in use; one past its expiry is expired; the rest match nothing
+ * and are dangling. Expiry keeps precedence and consumes nothing, so an expired
+ * record never takes a live suppression away from a record that could still use
+ * it. A record the tree could not judge is left out of allocation entirely — an
+ * unreadable file is no evidence either way — but its date is still read, so
+ * expiry is reported even for a record nothing else could judge.
  *
  * `spent` is not derivable here — it is a change-relative judgment (the
  * suppression became pre-existing debt) that belongs to an evaluation, not to a
@@ -239,41 +243,48 @@ interface Judgement {
  */
 function judge(
   entries: readonly RegistryEntry[],
-  pool: SuppressionPool,
+  scanned: LiveSuppressions,
   now: Date,
 ): Judgement {
+  const judged = entries.filter(({ record }) => !scanned.unjudged.has(record));
+  const { pairs, unclaimed } = allocateExceptions({
+    records: judged.map((entry) => entry.record),
+    suppressions: scanned.live,
+    now,
+    claimable: () => true,
+  });
   const live = new Map<ExceptionRecord, number>();
   const statuses = new Map<ExceptionRecord, ExceptionStatus>();
-  for (const { record } of entries) {
-    if (isExpired(record.expires, now)) {
-      statuses.set(record, "expired");
-      continue;
-    }
-    if (pool.unjudged.has(record)) continue;
-    const slot = pool.byFile.get(record.file)?.get(recordMatchKey(record));
-    if (slot && slot.claimed < slot.lines.length) {
-      live.set(record, slot.lines[slot.claimed]!);
-      statuses.set(record, "used");
-      slot.claimed += 1;
-    } else {
-      statuses.set(record, "dangling");
-    }
+  for (const { record, suppression } of pairs) {
+    live.set(record, suppression.line);
+    statuses.set(record, "used");
   }
-  return { live, statuses };
+  for (const { record } of entries) {
+    if (statuses.has(record)) continue;
+    // Expiry is judged for every record, including one the tree could not read:
+    // a date is knowable without a tree, and an unreadable file is no reason to
+    // stop saying a record is out of date. Expiry also outranks allocation, so a
+    // record that expired and would have matched spends nothing on the question.
+    if (isExpired(record.expires, now)) statuses.set(record, "expired");
+    // Everything else the tree could not judge stays unjudged rather than
+    // dangling: an unreadable file is not evidence that its exception went unused.
+    else if (!scanned.unjudged.has(record)) statuses.set(record, "dangling");
+  }
+  return { live, statuses, unclaimed };
 }
 
 /**
- * The working tree's live suppressions, grouped into the pools `judge` consumes.
- * Only the files a record names are linted: a registry that excepts nothing in a
- * file has no claim on that file, and inventorying a whole repository to answer
- * "does this record still match?" would cost a repository-wide pass for every
+ * The working tree's live suppressions, for the allocator to consume. Only the
+ * files a record names are linted: a registry that excepts nothing in a file has
+ * no claim on that file, and inventorying a whole repository to answer "does
+ * this record still match?" would cost a repository-wide pass for every
  * question the registry asks.
  */
-async function suppressionPool(
+async function liveSuppressions(
   entries: readonly RegistryEntry[],
   cwd: string,
   session: EslintSession | null,
-): Promise<SuppressionPool> {
+): Promise<LiveSuppressions> {
   const entriesByFile = new Map<string, RegistryEntry[]>();
   for (const entry of entries) {
     const bucket = entriesByFile.get(entry.record.file);
@@ -282,10 +293,10 @@ async function suppressionPool(
   }
   // No usable ESLint: no file is readable, so no record is judged.
   if (session === null) {
-    return { byFile: new Map(), unjudged: new Set(entries.map((e) => e.record)) };
+    return { live: [], unjudged: new Set(entries.map((e) => e.record)) };
   }
 
-  const slots = new Map<string, Map<string, PoolSlot>>();
+  const live: LogicalSuppression[] = [];
   const unjudged = new Set<ExceptionRecord>();
   for (const [file, fileEntries] of entriesByFile) {
     // An unreadable scoped file is not a finding here — the two protected files
@@ -295,16 +306,9 @@ async function suppressionPool(
       for (const { record } of fileEntries) unjudged.add(record);
       continue;
     }
-    const byKey = slots.get(file) ?? new Map<string, PoolSlot>();
-    slots.set(file, byKey);
-    for (const suppression of recognized.suppressions) {
-      const key = matchKey(suppression);
-      const slot = byKey.get(key);
-      if (slot) slot.lines.push(suppression.line);
-      else byKey.set(key, { lines: [suppression.line], claimed: 0 });
-    }
+    live.push(...recognized.suppressions);
   }
-  return { byFile: slots, unjudged };
+  return { live, unjudged };
 }
 
 /** A file's text, or null when it is missing or unreadable. */

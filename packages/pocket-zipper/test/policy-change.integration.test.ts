@@ -181,6 +181,58 @@ describe("policy-change detection through the pipeline", () => {
     assert.ok(hasPolicyChange(res.record));
   });
 
+  it("does not fire when an appended record is a twin of one the registry already has", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write("app.js", "export const a = 1;\n");
+    r.write(
+      ".pocket-zipper/exceptions.yml",
+      exceptionYaml({
+        rule: "no-console",
+        suppressionType: "next-line",
+        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+        file: "app.js",
+        type: "permanent",
+        line: 2,
+      }),
+    );
+    r.commit("base");
+    r.branch("base");
+    // The appended record is a twin: the same match key, distinct only in the
+    // line a reader is helped by — which is not a match input. The authorized
+    // *set* of match keys has not grown, so this is a second record for debt the
+    // registry already permitted, not a widening of what it permits. Had
+    // broadening compared records rather than keys, this would read as a
+    // weakening and the same change would fail.
+    r.write(
+      ".pocket-zipper/exceptions.yml",
+      exceptionYaml({
+        rule: "no-console",
+        suppressionType: "next-line",
+        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+        file: "app.js",
+        type: "permanent",
+        line: 2,
+      }) +
+        exceptionYaml({
+          rule: "no-console",
+          suppressionType: "next-line",
+          fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+          file: "app.js",
+          type: "permanent",
+          line: 3,
+        }),
+    );
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(hasPolicyChange(res.record), false);
+    assert.equal(res.record?.summary.newDebt.authorized, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 0);
+  });
+
   it("fires when a record's identity-critical field changes and is consumed", () => {
     const r = repo();
     r.write(

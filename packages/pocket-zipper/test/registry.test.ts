@@ -76,6 +76,23 @@ function record(overrides: Partial<ExceptionRecord> = {}): ExceptionRecord {
   };
 }
 
+/**
+ * N same-file twin suppressions: one match key, N distinct places in the file.
+ * Two identical directives share a fingerprint, so a pool is a *count*, and
+ * these are the units it consumes. Lines are spaced so a reader can tell the
+ * twins apart at a glance — a line is never what makes one of them match.
+ */
+function twins(n: number): ReconciledSuppression[] {
+  return Array.from({ length: n }, (_, i) =>
+    suppression({ line: 10 + i * 2, guardStart: 11 + i * 2, guardEnd: 11 + i * 2 }),
+  );
+}
+
+/** N records for one twin pool, distinct objects so statuses key by identity. */
+function twinRecords(n: number, overrides: Partial<ExceptionRecord> = {}): ExceptionRecord[] {
+  return Array.from({ length: n }, () => record(overrides));
+}
+
 describe("registry: record shape", () => {
   it("reads a permanent record carrying no owner", () => {
     const [r] = loadRegistry(MINIMAL_PERMANENT + "  reference: '#1'\n");
@@ -353,5 +370,198 @@ describe("registry: lifecycle classification", () => {
     assert.equal(out.counts.spent, 1);
     assert.equal(out.counts.dangling, 1);
     assert.equal(out.counts.expired, 1);
+  });
+});
+
+/**
+ * Allocation as a consuming count. Every test here fixes N records and M
+ * suppressions and asserts what an author can observe — how many suppressions
+ * came out carrying an `exception`, what each record is classified as, and the
+ * pool's three counts. Which record authorized *which* twin is deliberately
+ * not asserted: that is the internal pairing order, and pinning it would make
+ * a correct re-pairing look like a regression.
+ */
+describe("registry: allocation as a consuming count", () => {
+  it("gives each twin its own record, and no record two twins", () => {
+    const [first, second] = twinRecords(2);
+    const out = coverExceptions({ head: twins(2), records: [first, second], now: NOW });
+    assert.deepEqual(out.head.map((h) => h.exception !== null), [true, true]);
+    assert.equal(out.statuses.get(first), "used");
+    assert.equal(out.statuses.get(second), "used");
+    assert.deepEqual(out.counts, { used: 2, expired: 0, dangling: 0, spent: 0 });
+    assert.deepEqual(out.pools, [
+      { rule: "no-console", file: "app.js", matched: 2, used: 2, leftover: 0 },
+    ]);
+    // Authorized twins carry the identical match-fields-only reference: the
+    // fields a record is matched on, and nothing else — no file, no line.
+    assert.deepEqual(out.head.map((h) => h.exception), [
+      { fingerprint: FP_NC, suppressionType: "next-line", rule: "no-console" },
+      { fingerprint: FP_NC, suppressionType: "next-line", rule: "no-console" },
+    ]);
+  });
+
+  it("authorizes at most one suppression per record", () => {
+    const [only] = twinRecords(1);
+    const out = coverExceptions({ head: twins(2), records: [only], now: NOW });
+    assert.deepEqual(out.head.map((h) => h.exception !== null), [true, false]);
+    assert.equal(out.statuses.get(only), "used");
+    assert.deepEqual(out.counts, { used: 1, expired: 0, dangling: 0, spent: 0 });
+    // The pool's arithmetic counts records, not suppressions: one record, one
+    // used, nothing surplus. The second twin's missing exception is not a leftover
+    // record — it is a suppression no record covers, and the head line above is
+    // what reports that, not this one.
+    assert.deepEqual(out.pools, [
+      { rule: "no-console", file: "app.js", matched: 1, used: 1, leftover: 0 },
+    ]);
+  });
+
+  it("reads a surplus record dangling, with the pool showing the leftover", () => {
+    const [used, surplus] = twinRecords(2);
+    const out = coverExceptions({ head: twins(1), records: [used, surplus], now: NOW });
+    assert.equal(out.statuses.get(used), "used");
+    assert.equal(out.statuses.get(surplus), "dangling");
+    assert.deepEqual(out.counts, { used: 1, expired: 0, dangling: 1, spent: 0 });
+    assert.deepEqual(out.pools, [
+      { rule: "no-console", file: "app.js", matched: 2, used: 1, leftover: 1 },
+    ]);
+  });
+
+  it("reads every surplus record dangling, not just the first one", () => {
+    // Dangling means no *unclaimed* matching suppression remains, so the claim
+    // itself is what orphans a sibling: the lone twin is covered, and both
+    // surplus records read dangling rather than spent or still in use.
+    const [used, ...surplus] = twinRecords(3);
+    const out = coverExceptions({ head: twins(1), records: [used, ...surplus], now: NOW });
+    assert.equal(out.statuses.get(used), "used");
+    for (const record of surplus) assert.equal(out.statuses.get(record), "dangling");
+    assert.deepEqual(out.counts, { used: 1, expired: 0, dangling: 2, spent: 0 });
+    assert.deepEqual(out.pools, [
+      { rule: "no-console", file: "app.js", matched: 3, used: 1, leftover: 2 },
+    ]);
+  });
+
+  it("allocates the same way whatever the twins' guarded content looks like", () => {
+    // Two twins guarding code that shares no tokens, so a content-similarity
+    // ranking would put one unambiguously first. The continuity matcher's
+    // guard-context tie-break is for baseline↔head continuity and never
+    // reorders record allocation, so which twin is "first" cannot change the
+    // outcome — asserted by running the pool in both orders.
+    const alpha = suppression({
+      line: 10,
+      guardStart: 11,
+      guardEnd: 11,
+      guardedContent: "render(window.location.href);",
+    });
+    const beta = suppression({
+      line: 12,
+      guardStart: 13,
+      guardEnd: 13,
+      guardedContent: "export const result = compute(alpha, beta);",
+    });
+    const [first, second] = twinRecords(2);
+    for (const head of [
+      [alpha, beta],
+      [beta, alpha],
+    ]) {
+      const out = coverExceptions({ head, records: [first, second], now: NOW });
+      assert.deepEqual(out.head.map((h) => h.exception !== null), [true, true]);
+      assert.equal(out.statuses.get(first), "used");
+      assert.equal(out.statuses.get(second), "used");
+      assert.deepEqual(out.pools, [
+        { rule: "no-console", file: "app.js", matched: 2, used: 2, leftover: 0 },
+      ]);
+    }
+  });
+
+  it("never lets YAML order decide whether an expired sibling costs a twin", () => {
+    const expired = record({ type: "temporary", expires: "2000-01-01" });
+    const valid = record();
+    // The pool holds one expired record and one valid one; which of them the
+    // document writes first is a formatting accident, so both orders must read
+    // the same. An expired record reserves no slot, so the valid sibling
+    // authorizes past it and the lone twin is covered either way — today the
+    // first order hands the twin to the expired record, which authorizes
+    // nothing, and loses it.
+    for (const records of [
+      [expired, valid],
+      [valid, expired],
+    ]) {
+      const out = coverExceptions({ head: twins(1), records, now: NOW });
+      assert.deepEqual(out.head.map((h) => h.exception !== null), [true], "the twin");
+      assert.equal(out.statuses.get(expired), "expired");
+      assert.equal(out.statuses.get(valid), "used");
+      assert.deepEqual(out.counts, { used: 1, expired: 1, dangling: 0, spent: 0 });
+      // The expired record is not in the pool's arithmetic: it could never
+      // reserve a slot, so the pool is one of one with nothing left over.
+      assert.deepEqual(out.pools, [
+        { rule: "no-console", file: "app.js", matched: 1, used: 1, leftover: 0 },
+      ]);
+    }
+  });
+
+  it("leaves every twin past the record count unauthorized", () => {
+    const [only] = twinRecords(1);
+    const out = coverExceptions({ head: twins(3), records: [only], now: NOW });
+    // The excess twins carry no exception reference, which is what the record's
+    // own summary reads as unauthorized new debt.
+    assert.deepEqual(out.head.map((h) => h.exception !== null), [true, false, false]);
+    assert.equal(out.statuses.get(only), "used");
+    assert.deepEqual(out.counts, { used: 1, expired: 0, dangling: 0, spent: 0 });
+    assert.deepEqual(out.pools, [
+      { rule: "no-console", file: "app.js", matched: 1, used: 1, leftover: 0 },
+    ]);
+  });
+
+  it("prefers a claimable twin over pre-existing debt, and reports no pool without one", () => {
+    const [claiming] = twinRecords(1);
+    const claimed = coverExceptions({
+      head: [suppression(), suppression({ disposition: "existing", line: 20 })],
+      records: [claiming],
+      now: NOW,
+    });
+    // The new twin is authorized, so the record is in use — a pool holding
+    // pre-existing debt as well is not a pool where the record reads spent.
+    assert.equal(claimed.statuses.get(claiming), "used");
+    assert.equal(claimed.counts.used, 1);
+    assert.equal(claimed.counts.spent, 0);
+    assert.deepEqual(claimed.pools, [
+      { rule: "no-console", file: "app.js", matched: 1, used: 1, leftover: 0 },
+    ]);
+
+    const [unclaimable] = twinRecords(1);
+    const spent = coverExceptions({
+      head: [suppression({ disposition: "existing" })],
+      records: [unclaimable],
+      now: NOW,
+    });
+    assert.equal(spent.statuses.get(unclaimable), "spent");
+    // Nothing here has new debt to allocate, so the pool is not reported at
+    // all: a count line about a record that is perfectly fine would only
+    // misdescribe it. The spent status is the whole story.
+    assert.deepEqual(spent.pools, []);
+  });
+
+  it("gives a next-line record and a block record a slot each", () => {
+    // Same rule, same file, two different suppression types: two match keys,
+    // so two slots. A pool keyed on (rule, file) alone would hand one of them
+    // nothing and leave its suppression unauthorized.
+    const nextLine = record({ suppression_type: "next-line" });
+    const block = record({ suppression_type: "block" });
+    const out = coverExceptions({
+      head: [
+        suppression({ suppressionType: "next-line" }),
+        suppression({ suppressionType: "block", line: 20, guardStart: 21, guardEnd: 24 }),
+      ],
+      records: [nextLine, block],
+      now: NOW,
+    });
+    assert.deepEqual(out.head.map((h) => h.exception !== null), [true, true]);
+    assert.equal(out.statuses.get(nextLine), "used");
+    assert.equal(out.statuses.get(block), "used");
+    // Allocation is per match key, but the bookkeeping is per (rule, file):
+    // two match keys under one rule and one file, aggregated into one count.
+    assert.deepEqual(out.pools, [
+      { rule: "no-console", file: "app.js", matched: 2, used: 2, leftover: 0 },
+    ]);
   });
 });

@@ -8,6 +8,7 @@ import type {
   LogicalSuppression,
   Mode,
   Policy,
+  PoolCount,
   ReconciledSuppression,
   RecordError,
   RecordExceptionEntry,
@@ -71,6 +72,8 @@ export interface BuildRecordInput {
   removed: LogicalSuppression[];
   registry: ExceptionRecord[];
   cleanup: { expired: number; dangling: number; spent: number };
+  /** The `(rule, file)` pools holding debt to allocate, ordered by rule then file. */
+  poolCounts: PoolCount[];
   exceptionStatuses: Map<ExceptionRecord, ExceptionStatus>;
   errors: RecordError[];
 }
@@ -108,6 +111,7 @@ export function buildRecord(input: BuildRecordInput): EvaluationRecord {
       danglingExceptions: input.cleanup.dangling,
       spentExceptions: input.cleanup.spent,
       expiredExceptions: input.cleanup.expired,
+      poolCounts: input.poolCounts,
     },
   };
   const exceptions: RecordExceptionEntry[] = input.registry.map((record) => ({
@@ -180,7 +184,12 @@ function emptySummary(policy: Policy = DEFAULT_POLICY): EvaluationSummary {
     governedRules: [],
     dispositions: { existing: 0, movedExisting: 0, removed: 0, new: 0, materiallyChanged: 0 },
     newDebt: { authorized: 0, unauthorized: 0 },
-    cleanup: { danglingExceptions: 0, spentExceptions: 0, expiredExceptions: 0 },
+    cleanup: {
+      danglingExceptions: 0,
+      spentExceptions: 0,
+      expiredExceptions: 0,
+      poolCounts: [],
+    },
   };
 }
 

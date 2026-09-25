@@ -105,6 +105,22 @@ export interface ExceptionRecord {
   line?: number;
 }
 
+/**
+ * One `(rule, file)` pool's authorization arithmetic, as the JSON record
+ * publishes it: how many records could have reserved a slot, how many did, and
+ * how many are left over. The three are an exact partition — `leftover` is
+ * `matched − used` — and an expired record is absent from `matched` because it
+ * never reserved a slot (it is reported as `EXPIRED_EXCEPTION` instead). Only a
+ * pool holding debt to allocate is published; see `allocateExceptions`.
+ */
+export interface PoolCount {
+  rule: string;
+  file: string;
+  matched: number;
+  used: number;
+  leftover: number;
+}
+
 export interface EvaluationRecord {
   schemaVersion: 1;
   tool: { name: string; version: string };
@@ -133,6 +149,7 @@ export interface EvaluationSummary {
     danglingExceptions: number;
     spentExceptions: number;
     expiredExceptions: number;
+    poolCounts: PoolCount[];
   };
 }
 

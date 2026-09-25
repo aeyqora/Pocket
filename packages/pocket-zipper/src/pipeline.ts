@@ -189,6 +189,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         removed: baseline,
         registry,
         cleanup,
+        poolCounts: coverage.pools,
         exceptionStatuses: coverage.statuses,
         errors,
       });

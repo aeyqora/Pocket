@@ -1,8 +1,9 @@
-import { remediationFields } from "./registry.js";
+import { poolCountLine, remediationFields } from "./registry.js";
 import type {
   EvaluationRecord,
   EvaluationSummary,
   InventoryEntry,
+  PoolCount,
   RecordError,
 } from "./types.js";
 
@@ -48,6 +49,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
     // stays one verdict line in CI and silent in pre-commit.
     if (verbose) {
       lines.push(renderDispositionSummary(record.summary.dispositions));
+      lines.push(...renderPoolCounts(record.summary.cleanup.poolCounts));
       lines.push(...renderAuthorizedDebt(record.inventory));
       lines.push(...renderCleanup(record.summary.cleanup));
     }
@@ -60,6 +62,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
 
   lines.push(color("pocket-zipper: FAIL", RED, tty));
   lines.push(renderDispositionSummary(record.summary.dispositions));
+  lines.push(...renderPoolCounts(record.summary.cleanup.poolCounts));
 
   const flagged = record.inventory.filter(
     (e) => isNewOrChanged(e) && e.exception === null && e.guardKind === "directive",
@@ -116,6 +119,17 @@ function renderAuthorizedDebt(inventory: InventoryEntry[]): string[] {
     out.push(entryLine(entry));
   }
   return out;
+}
+
+/**
+ * One line per pool, unindented, in the record's own order — the arithmetic a
+ * reader needs to see why a gate failed, or to confirm on a verbose pass that
+ * their pool is well kept. It sits directly under the disposition summary
+ * because it belongs with the tally, not with the blocks below it.
+ */
+function renderPoolCounts(pools: PoolCount[]): string[] {
+  if (pools.length === 0) return [];
+  return ["", ...pools.map(poolCountLine)];
 }
 
 function renderCleanup(cleanup: EvaluationSummary["cleanup"]): string[] {

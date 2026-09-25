@@ -19,6 +19,7 @@ function repo(): FixtureRepo {
 }
 
 const disabled = "// eslint-disable-next-line no-console\n";
+const nextLineNoDebugger = "// eslint-disable-next-line no-debugger\n";
 
 function baseRecord(overrides: Partial<Parameters<typeof exceptionYaml>[0]> = {}) {
   return exceptionYaml({
@@ -30,6 +31,19 @@ function baseRecord(overrides: Partial<Parameters<typeof exceptionYaml>[0]> = {}
     expires: "2099-01-01",
     ...overrides,
   });
+}
+
+/**
+ * A file carrying N identical `no-console` directives: N same-file twins, which
+ * identity cannot tell apart, so they share one fingerprint and form one pool.
+ */
+function twinFile(n: number): string {
+  return Array.from({ length: n }, (_, i) => `${disabled}console.log(${i});\n`).join("");
+}
+
+/** N records for one twin pool, as the one-record-per-suppression shape requires. */
+function twinRecords(n: number): string {
+  return Array.from({ length: n }, () => baseRecord()).join("");
 }
 
 describe("the exception registry, resolved against the baseline", () => {
@@ -335,5 +349,99 @@ describe("the exception registry, resolved against the baseline", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
     assert.equal(res.record?.summary.newDebt.authorized, 1);
+  });
+});
+
+/**
+ * A pool of same-file twins through the gate. The twins are indistinguishable
+ * to identity, so one record cannot cover two of them: the count line and
+ * `summary.cleanup.poolCounts` are what make the bookkeeping legible.
+ */
+describe("one record authorizes one twin", () => {
+  it("leaves the twin no record covers unauthorized, and states the arithmetic", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", baseRecord());
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `export const a = 1;\n${twinFile(2)}`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.authorized, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+    const newDebt = res.record?.inventory.filter((e) => e.disposition === "new") ?? [];
+    assert.equal(newDebt.length, 2);
+    assert.equal(newDebt.filter((e) => e.exception !== null).length, 1);
+    // The count line is on a fail and without --verbose, so the registry's side of
+    // the story is where the reader lands. It shows the record fully used; the
+    // shortfall is the twin that balances the pool and still carries no
+    // exception, which the disposition summary right above it accounts for.
+    assert.match(
+      res.stdout,
+      /^For this rule at this file: 1 matching records, 1 used, 0 leftover$/m,
+    );
+    assert.deepEqual(res.record?.summary.cleanup.poolCounts, [
+      { rule: "no-console", file: "app.js", matched: 1, used: 1, leftover: 0 },
+    ]);
+  });
+
+  it("passes a record per twin, and prints the arithmetic only on a verbose pass", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", twinRecords(2));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `export const a = 1;\n${twinFile(2)}`);
+    r.commit("head");
+    const plain = r.runCli(["check", "--base", "base"]);
+    assert.equal(plain.status, 0);
+    assert.equal(plain.record?.summary.newDebt.authorized, 2);
+    assert.equal(plain.record?.summary.cleanup.danglingExceptions, 0);
+    // A well-kept pool balances, so a quiet pass says nothing about it: the
+    // arithmetic is an answer for a gate that failed, not a standing comment.
+    assert.equal(plain.stdout, "pocket-zipper: PASS\n");
+    // The same scenario, asked for the detail.
+    assert.deepEqual(plain.record?.summary.cleanup.poolCounts, [
+      { rule: "no-console", file: "app.js", matched: 2, used: 2, leftover: 0 },
+    ]);
+    const verbose = r.runCli(["check", "--base", "base", "--verbose"]);
+    assert.equal(verbose.status, 0);
+    assert.match(
+      verbose.stdout,
+      /^For this rule at this file: 2 matching records, 2 used, 0 leftover$/m,
+    );
+  });
+
+  it("records one count per (rule, file) pool, ordered by rule then file", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error", "no-debugger": "error" }));
+    r.write(
+      ".pocket-zipper/exceptions.yml",
+      baseRecord({ file: "app.js" }) +
+        baseRecord({ file: "tools.js" }) +
+        baseRecord({ rule: "no-debugger", fingerprint: NEXT_LINE_NO_DEBUGGER_FP, file: "old.js" }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.write("tools.js", "export const b = 1;\n");
+    r.write("old.js", "export const c = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    r.write("tools.js", `export const b = 1;\n${disabled}console.log(2);\n`);
+    r.write("old.js", `export const c = 1;\n${nextLineNoDebugger}debugger;\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(res.record?.summary.newDebt.authorized, 3);
+    // Three pools, ordered by rule then file. Sorting by file first would read
+    // app.js, old.js, tools.js, so the order is the assertion, not decoration.
+    assert.deepEqual(res.record?.summary.cleanup.poolCounts, [
+      { rule: "no-console", file: "app.js", matched: 1, used: 1, leftover: 0 },
+      { rule: "no-console", file: "tools.js", matched: 1, used: 1, leftover: 0 },
+      { rule: "no-debugger", file: "old.js", matched: 1, used: 1, leftover: 0 },
+    ]);
   });
 });

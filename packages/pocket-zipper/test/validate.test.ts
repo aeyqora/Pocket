@@ -675,18 +675,22 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
         ...(line === undefined ? {} : { line }),
       });
     // One live suppression, two records naming it: allocation is a consuming
-    // count, so exactly one record is in use and its sibling is dangling.
+    // count, so exactly one record is in use and its sibling is surplus — which
+    // is dangling, plus the pool's arithmetic naming the same entry as the one
+    // to delete. The count line is the "why"; the status is the detail.
     const one = repo();
     one.write(REGISTRY, record() + record());
     const first = validate(one);
     assert.equal(first.status, 0);
-    assert.equal(first.lines[0], "pocket-zipper: OK (0 defects, 1 hygiene finding)");
+    assert.equal(first.lines[0], "pocket-zipper: OK (0 defects, 2 hygiene findings)");
     assert.deepEqual(first.lines.slice(2), [
+      `${REGISTRY}:9:3  POOL_COUNTS  entry 2  For this rule at this file: 2 matching records, 1 used, 1 leftover`,
       `${REGISTRY}:9:3  DANGLING_EXCEPTION  entry 2  no suppression matches this record in app.js`,
     ]);
 
     // Two identical directives, two records: both authorizations are real, and
-    // each record's stale note names the line it actually landed on.
+    // each record's stale note names the line it actually landed on. The pool
+    // balances, so it has nothing to report and the registry stays clean.
     const two = repo();
     two.write(
       "app.js",
@@ -694,6 +698,93 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
     );
     two.write(REGISTRY, record(1) + record(3));
     assert.deepEqual(validate(two), {
+      status: 0,
+      lines: ["pocket-zipper: OK (0 defects, 0 hygiene findings)"],
+    });
+  });
+
+  it("accuses a leftover record of a renewal only when its date disagrees", () => {
+    const record = (expires: string) =>
+      exceptionYaml({
+        rule: "no-console",
+        suppressionType: "next-line",
+        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+        file: "app.js",
+        expires,
+      });
+
+    // Two records, one live suppression, the same date on both: a twin pool
+    // mid-landing, and nothing but a surplus record. A renewal accusation here
+    // would be wrong — nobody renewed anything, and the hygiene count says so.
+    const agreeing = repo();
+    agreeing.write(REGISTRY, record(IN_WINDOW) + record(IN_WINDOW));
+    const same = validate(agreeing);
+    assert.equal(same.status, 0);
+    assert.equal(same.lines[0], "pocket-zipper: OK (0 defects, 2 hygiene findings)");
+    assert.deepEqual(same.lines.filter((line) => line.includes("RENEWAL_BY_APPEND")), []);
+
+    // The same pool with the second record's date moved on: that is the shape a
+    // renewal-by-append takes, and it is the surplus record the finding names.
+    const disagreeing = repo();
+    disagreeing.write(REGISTRY, record(IN_WINDOW) + record(addDuration(TODAY, "31d")));
+    const different = validate(disagreeing);
+    assert.equal(different.status, 0);
+    assert.equal(different.lines[0], "pocket-zipper: OK (0 defects, 3 hygiene findings)");
+    const renewal = different.lines.filter((line) => line.includes("RENEWAL_BY_APPEND"));
+    assert.equal(renewal.length, 1);
+    assert.match(renewal[0]!, / {2}RENEWAL_BY_APPEND {2}entry 2 {2}/);
+    assert.match(renewal[0]!, /renewal is an edit of the existing record, not an append/);
+  });
+
+  it("never accuses a twin pool of a renewal, even with two different dates", () => {
+    const record = (expires: string) =>
+      exceptionYaml({
+        rule: "no-console",
+        suppressionType: "next-line",
+        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+        file: "app.js",
+        expires,
+      });
+    const r = repo();
+    r.write(
+      "app.js",
+      '// eslint-disable-next-line no-console\nconsole.log("a");\n// eslint-disable-next-line no-console\nconsole.log("b");\n',
+    );
+    // Two records for two live suppressions, each with its own horizon: the
+    // shape a twin pool is *supposed* to have. Every record is used, so there
+    // is no leftover to accuse, and two suppressions with two dates is not a
+    // renewal — it is two suppressions.
+    r.write(REGISTRY, record(IN_WINDOW) + record(addDuration(TODAY, "31d")));
+    assert.deepEqual(validate(r), {
+      status: 0,
+      lines: ["pocket-zipper: OK (0 defects, 0 hygiene findings)"],
+    });
+  });
+
+  it("keeps a well-kept registry at zero hygiene findings, pools and all", () => {
+    const r = repo();
+    r.write("tools.js", '// eslint-disable-next-line no-debugger\ndebugger;\n');
+    r.write(
+      REGISTRY,
+      exceptionYaml({
+        rule: "no-console",
+        suppressionType: "next-line",
+        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+        file: "app.js",
+        expires: IN_WINDOW,
+      }) +
+        exceptionYaml({
+          rule: "no-debugger",
+          suppressionType: "next-line",
+          fingerprint: NEXT_LINE_NO_DEBUGGER_FP,
+          file: "tools.js",
+          expires: IN_WINDOW,
+        }),
+    );
+    // Both pools are real and both balance. A registry kept this way stays at
+    // zero hygiene findings: the count line has nothing to say, and a well-kept
+    // registry must not accumulate findings nobody can act on.
+    assert.deepEqual(validate(r), {
       status: 0,
       lines: ["pocket-zipper: OK (0 defects, 0 hygiene findings)"],
     });
@@ -717,6 +808,27 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
       status: 0,
       lines: ["pocket-zipper: OK (0 defects, 0 hygiene findings)"],
     });
+  });
+
+  it("still reports a record expired when the tree could not read its file", () => {
+    const r = repo();
+    r.write(
+      REGISTRY,
+      exceptionYaml({
+        rule: "no-console",
+        suppressionType: "next-line",
+        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+        file: "not-here.js",
+        expires: LONG_PAST,
+      }),
+    );
+    // Expiry needs no tree: the date is on the record, so an absent file cannot
+    // hide it. Excluding the record from allocation is what keeps an unreadable
+    // file from reading as dangling; it must not also cost the expiry finding.
+    const { status, lines } = validate(r);
+    assert.equal(status, 0);
+    assert.equal(lines[0], "pocket-zipper: OK (0 defects, 1 hygiene finding)");
+    assert.match(lines[2]!, new RegExp(`EXPIRED_EXCEPTION  entry 1  expired ${LONG_PAST}`));
   });
 
   it("judges nothing, and does not crash, when the tree has no usable ESLint", () => {

@@ -3,6 +3,7 @@ import type { Pair } from "yaml";
 import { PocketZipperError } from "./errors.js";
 import { matchKey } from "./identity.js";
 import { expiryHorizon } from "./policy.js";
+import { countKey, poolCountLine, type UnclaimedRecord } from "./registry.js";
 import type {
   DurationLiteral,
   ExceptionRecord,
@@ -102,16 +103,13 @@ export type FindingCode =
   | "OWNERS_FILE_READINESS";
 
 /*
- * These codes are named here before anything emits them, so the vocabulary is
- * settled in one place rather than growing a second list at each producer:
+ * `SPENT_EXCEPTION` is still named here before anything emits it: it needs the
+ * allocation-aware judgement of an evaluation, and a working-tree lint cannot
+ * tell pre-existing debt from debt this change introduced — it has no baseline
+ * (ticket 10's per-record findings).
  *
- * - `SPENT_EXCEPTION` needs the allocation-aware judgement (ticket 04's
- *   statuses and ticket 10's per-record findings); a working-tree lint cannot
- *   tell pre-existing debt from debt this change introduced.
- * - `POOL_COUNTS` and `RENEWAL_BY_APPEND` read the one-record-per-suppression
- *   shape, which ticket 08 lands.
- * - `HOST_MISMATCH` and `OWNERS_FILE_READINESS` are the combined-landing
- *   corroborations, which need the host surface in ticket 07.
+ * `HOST_MISMATCH` and `OWNERS_FILE_READINESS` are the combined-landing
+ * corroborations, which need the host surface in ticket 07.
  */
 
 /**
@@ -910,6 +908,57 @@ function staleNote(record: ExceptionRecord, ctx: HygieneContext): string {
   const live = ctx.liveLines.get(record);
   if (live === undefined || record.line === undefined || record.line === live) return "";
   return ` (record says ${record.line}, currently at ${live})`;
+}
+
+/**
+ * Hygiene a pool's *arithmetic* carries, over the records allocation left over.
+ * Two findings, both read off one list, both anchored at a record rather than at
+ * the pool so the author lands on the line to edit or delete:
+ *
+ * - `POOL_COUNTS` — the surplus story, once per `(rule, file)` pool with
+ *   something left over, anchored at the first leftover record. The message is
+ *   the whole finding: there is nothing expected or actual about arithmetic.
+ *   A pool that balances says nothing, so a well-kept registry accumulates no
+ *   findings nobody can act on.
+ * - `RENEWAL_BY_APPEND` — a leftover record whose `expires` disagrees with the
+ *   record that reserved the pool's first slot, which is the shape renewing by
+ *   appending takes. A twin pool is *required* to hold different horizons (they
+ *   authorize different suppressions), so nothing is accused unless a record no
+ *   suppression needed moved its own date.
+ *
+ * Neither changes an exit code: a surplus record and a misdated one are both
+ * questions worth asking, never failures.
+ */
+export function poolHygiene(
+  entries: readonly RegistryEntry[],
+  unclaimed: readonly UnclaimedRecord[],
+): Finding[] {
+  const byRecord = new Map<ExceptionRecord, RegistryEntry>();
+  for (const entry of entries) byRecord.set(entry.record, entry);
+  const findings: Finding[] = [];
+  const at = (record: ExceptionRecord, init: Omit<FindingInit, "path" | "entry" | "position">): void => {
+    const entry = byRecord.get(record);
+    if (entry === undefined) return;
+    findings.push(of({ ...init, path: PROTECTED_REGISTRY, entry: entry.index, position: entry.position }));
+  };
+
+  const counted = new Set<string>();
+  for (const { record, pool } of unclaimed) {
+    if (pool.leftover === 0 || counted.has(countKey(pool.rule, pool.file))) continue;
+    counted.add(countKey(pool.rule, pool.file));
+    at(record, { code: "POOL_COUNTS", message: poolCountLine(pool) });
+  }
+  for (const { record, reserved } of unclaimed) {
+    // A pool exists only to hold a slot, and its first non-expired record takes
+    // it, so `reserved` cannot be null here — nothing to compare, nothing to say.
+    if (reserved === null || record.expires === reserved.expires) continue;
+    at(record, {
+      code: "RENEWAL_BY_APPEND",
+      message:
+        "'expires' differs from the record that reserved this pool — a renewal is an edit of the existing record, not an append",
+    });
+  }
+  return findings;
 }
 
 // --- finding construction -------------------------------------------------
