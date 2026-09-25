@@ -69,6 +69,11 @@ exception a review rather than a self-serve edit.
   `.github/CODEOWNERS` and replace the example owners. The example pipeline file above
   also opens with both required settings.
 
+On GitHub, a repo may also opt into **combined landing** (one PR carries an additive
+exception and the suppression it authorizes) — an explicit `allowSameChangeExceptions`
+config plus the per-path protection above. What that guarantees, and which failure modes
+it inherits, is in [Landing an exception](../landing-an-exception.md).
+
 ## Deep reference
 
 This page is the copy-paste path. For the trigger/checkout/base-ref semantics, fork-PR

@@ -13,6 +13,8 @@ A failing run looks like this (colors only on a terminal):
 pocket-zipper: FAIL
   existing: 3  moved-existing: 0  removed: 0  new: 1  materially-changed: 0
 
+For this rule at this file: 2 matching records, 1 used, 1 leftover
+
 New suppression debt requiring an exception:
   src/api.ts:42  no-console  (next-line, directive, new)
     remediate with:
@@ -22,9 +24,9 @@ New suppression debt requiring an exception:
       file: src/api.ts
       type: temporary
       reason: <why this suppression is necessary>
-      owner: <owning team>
       reference: <issue or PR link>
-      expires: <YYYY-MM-DD>
+      expires: <YYYY-MM-DD>     # suggested concrete date, per your policy
+      line: 42
 ```
 
 - **`existing` / `moved-existing`** — the suppression was already in the baseline.
@@ -36,6 +38,13 @@ New suppression debt requiring an exception:
 - **`materially-changed`** — the tomb shape: the directive text is identical to a
   baseline suppression's, but the baseline twin is dead and this one is genuinely new.
   Counted as new debt. Blocked unless excepted.
+- **The per-rule count line** — `N matching records, K used, L leftover`: the pool
+  bookkeeping for this rule at this file, one record per logical suppression. A leftover
+  of `0` with unexcepted debt is a genuine shortfall, not a matching problem.
+- **The cleanup section** — when the change removes suppressions, the records they cleared
+  are annotated `cleared by this change — record now unused; remove it in a protected PR`,
+  and unused records are printed `entry N of M · .pocket-zipper/exceptions.yml:lines` with
+  their full text — see [Cleaning up unused exceptions](cleaning-up-unused-exceptions.md).
 
 If the failure is instead an operational error (exit 2), no suppression is being flagged;
 go to [Troubleshooting](troubleshooting.md).
@@ -52,7 +61,10 @@ debt.
 
 An **exception** is a committed record that authorizes exactly one logical suppression.
 The report prints a ready-to-fill template for each offending suppression; fill in the
-human fields and add it to `.pocket-zipper/exceptions.yml`.
+human fields (the machine-readable ones are prefilled). The easiest path is the
+[wizard](exceptions.md#the-wizard-pocket-zipper-exception-add) — `pocket-zipper exception
+add` — which is the ride-along after this very failure. Filling the record by hand works
+too:
 
 ### Exception record fields
 
@@ -63,9 +75,9 @@ human fields and add it to `.pocket-zipper/exceptions.yml`.
   file: src/api.ts                # the record's file scope
   type: temporary                 # temporary | permanent
   reason: Console output is the intended UX for this CLI command.
-  owner: "@platform-team"
   reference: "https://example.com/issues/123"
   expires: 2026-10-31             # required iff type: temporary (UTC, end of day)
+  # line: 42                      # optional; the wizard prefills it, drift is fine
 ```
 
 - Matching is by **`fingerprint` + `suppression_type` + `rule` + `file`** — never by
@@ -73,34 +85,48 @@ human fields and add it to `.pocket-zipper/exceptions.yml`.
 - `file` is the record's scope. A matching suppression in some *other* file is not
   covered: it reads as unauthorized new debt, and the record as dangling cleanup.
   Copy the value from the report rather than guessing.
-- `reason`, `owner`, and `reference` are required. `expires` is required for `temporary`
-  and forbidden for `permanent`.
+- **`reason` is required; `reference` is optional** (an issue / PR / ticket link).
+  `expires` is required for `temporary` and forbidden for `permanent`.
+- **There is no `owner` field** — the record's author is attributed by git history, and
+  cleanup accountability sits with the registry maintainer. A stale `owner:` line is a
+  defect; delete it.
+- `line` is optional reference data (the directive's line when the record was written).
+  It drifts with the code and is never a match input — `validate` reports the drift
+  (`record says 12, currently at 141`) as informational only.
 - The `fingerprint` is `v1:` plus a hash of the directive's form and its normalized rule
   set. It is deliberately blind to justification, path, line, and the guarded code, so
   editing any of those doesn't invalidate the exception.
+- The expiry in the template is a suggested concrete date (per your policy's
+  `defaultExpiry`/`maxExpiry`); a newly written expiry beyond the `maxExpiry` is refused
+  (`EXPIRY_POLICY`, exit 1). See the [config reference](config-reference.md) for the
+  policy's expiry keys.
 
-### Land the exception first (two-step landing)
+### Land the exception
 
-Exceptions are read from the **baseline** registry. An exception committed in the same
-change as the suppression it authorizes authorizes nothing for that change. Land it in
-two steps:
-
-1. A protected policy PR adding the record to `.pocket-zipper/exceptions.yml`.
-2. A later ordinary PR that introduces the suppression.
-
-This is why the exception registry sits behind the same review path as the policy: human
-approval is where the authorization is actually counted. Which people count as authorized
-approvers on your host is the `.pocket-zipper/**` protection prerequisite — see
-[CI wiring principles §5](../ci/principles.md#5-the-pocket-zipper-protection-prerequisite).
+Exceptions are read from the **baseline** registry — a record in the same change as the
+suppression it authorizes authorizes nothing for that change (one-merge lag). How the
+record lands depends on your repo's posture — two-step or combined — and on what your git
+host can guarantee. That decision is the whole subject of
+**[Landing an exception](landing-an-exception.md)**; in one line: *two-step* means the
+record lands in a protected policy PR before the suppression PR, and *combined* is an
+opt-in for GitHub / GitLab-Premium repos where the record may ride the same PR as the
+suppression, additive-only and baseline-gated. Whichever posture, the registry sits behind
+the same review path as the policy: human approval is where the authorization is actually
+counted.
 
 ### Temporary and permanent
 
 - **Temporary** — has an `expires` date and is valid through the end of that UTC date.
   After that it authorizes nothing and the suppression reads as unexcepted new debt.
-- **Permanent** — no `expires`; intended to remain indefinitely.
+- **Permanent** — no `expires`; intended to remain indefinitely. Permanents are
+  orthogonal to `maxExpiry`.
+- **Overlong** — a temporary whose `expires` exceeds the policy's `maxExpiry`. Reported
+  as hygiene and still authorizes until its date; a change that *newly writes* such a date
+  fails (`EXPIRY_POLICY`).
 
-To renew a temporary exception, change its `expires` date. Renewal is a policy change and
-needs fresh authorization through the protected workflow.
+To renew a temporary exception, change its `expires` date (an in-place edit, never an
+append). Renewal is a policy change and needs fresh authorization through the protected
+workflow.
 
 ### Config-level suppressions are not exceptable
 
@@ -117,24 +143,18 @@ The full set of shapes the gate counts — directives and config-offs — is in
 
 ## Cleanup: unused exceptions
 
-An exception record that authorizes nothing is **unused**. Two shapes:
-
-- **dangling** — its suppression no longer exists: nothing matching its fingerprint,
-  suppression type, and rule remains in the record's file. A lookalike directive in
-  another file doesn't count — the record's `file` field scopes it.
-- **spent** — its suppression has become existing debt in the record's file (it landed
-  in the baseline), so the record is no longer doing work.
-
-A third status is reported alongside them: **expired** — a temporary exception past
-its date. Unlike the other two, an expired record does not authorize, so its
-suppression counts as unexcepted new debt.
-
-Unused exceptions are reported as cleanup debt and **never fail the gate on their own**.
-Delete dangling and spent records when you notice them. Expired records should either be
-renewed or the suppression removed.
+An exception record that authorizes nothing is **unused**. The shapes — dangling, spent,
+expired, overlong — and the exact steps to remove one safely are in
+**[Cleaning up unused exceptions](cleaning-up-unused-exceptions.md)**. The short version:
+unused records are reported as cleanup debt and **never fail the gate on their own**;
+delete a record once nothing unclaimed matches it (the report's `entry N of M · path:lines`
+pointer makes that copy-paste), in a protected PR — deletion never trips `POLICY_CHANGE`.
 
 ## Next steps
 
+- [Exceptions: the registry format](exceptions.md) — the record schema and finding
+  vocabulary.
+- [Landing an exception](landing-an-exception.md) — two-step vs combined.
 - [Pre-commit hook](pre-commit.md) — catch this locally before pushing.
 - [Troubleshooting](troubleshooting.md) — exit codes and errors.
 - [Onboarding an existing codebase](onboarding-existing-codebase.md) — if you're seeing

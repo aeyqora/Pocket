@@ -113,6 +113,10 @@ users can still merge — enforcement is write/merge restriction plus convention
 gate's build result is the PR's pipeline status; nothing else is reported (the tool never
 calls host APIs).
 
+**No combined landing here:** Bitbucket has no path-scoped approval, so an exception
+record and the suppression it authorizes must land in separate PRs — the two-step posture
+and why are in [Landing an exception](../guides/landing-an-exception.md).
+
 ## Provenance
 
 Every claim above is verified against Atlassian's own documentation and `git merge`

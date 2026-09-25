@@ -8,6 +8,10 @@ optional, and bypassable.
 npx pocket-zipper pre-commit
 ```
 
+For editing the registry itself — not a change under evaluation — use
+[`pocket-zipper validate`](exceptions.md#pocket-zipper-validate) instead: it lints both
+protected files in your working tree and prints every defect and hygiene finding.
+
 ## What it evaluates
 
 - **The staged index only.** Unstaged worktree edits are ignored, so the verdict matches
@@ -72,4 +76,6 @@ the target branch. Treat the hook as a convenience, not a substitute.
 
 - [CI quick-starts](ci/github.md) — put the authoritative check in your pipeline.
 - [Handling a failure](handling-a-failure.md) — what to do when the hook fails.
+- [Exceptions: the registry format](exceptions.md) — `validate` and the wizard, the
+  pre-commit siblings for registry work.
 - [Troubleshooting](troubleshooting.md) — when the hook runs oddly or fails to resolve git state.

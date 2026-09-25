@@ -12,12 +12,20 @@ If you're new here, read them in this order:
    the suppression debt you already have instead of blocking on it.
 3. **[Handling a failure](handling-a-failure.md)** — read the report, then fix the code
    or authorize the suppression with an exception approved by your authorized approvers.
-4. **[Pre-commit hook](pre-commit.md)** — get the verdict locally before you push.
-5. **CI quick-starts** — put the authoritative gate in your pipeline:
+4. **[Exceptions: the registry format](exceptions.md)** — the record schema, when the
+   registry is read and fails closed, `validate`, and the wizard.
+5. **[Landing an exception](landing-an-exception.md)** — strict two-step vs combined
+   landing, and what your git host can guarantee per path.
+6. **[Pre-commit hook](pre-commit.md)** — get the verdict locally before you push.
+7. **CI quick-starts** — put the authoritative gate in your pipeline:
    [GitHub Actions](ci/github.md), [GitLab CI/CD](ci/gitlab.md),
    [Bitbucket Cloud](ci/bitbucket.md).
-6. **[Troubleshooting](troubleshooting.md)** — exit codes, error codes, and the
+8. **[Troubleshooting](troubleshooting.md)** — exit codes, error codes, and the
    problems people actually hit.
+
+The registry-adjacent references: **[Config reference](config-reference.md)** for the
+canonical default and every key, and **[Cleaning up unused exceptions](cleaning-up-unused-exceptions.md)**
+for keeping the registry honest.
 
 ## The mental model
 

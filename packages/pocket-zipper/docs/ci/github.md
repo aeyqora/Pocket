@@ -83,6 +83,10 @@ Picking approvers: for team ownership (`@org/team`), the team's members are the
 approvers — change membership in the org, not this file. A bare `@username` works too,
 but that person needs write access to the repository.
 
+**Combined landing** (one PR carries an additive exception record and the suppression it
+authorizes) is a documented opt-in on GitHub — what to configure, and the fail-open modes
+that remain — in [Landing an exception](../guides/landing-an-exception.md).
+
 ## Provenance
 
 Every env-var and merge-commit claim above is verified against GitHub's own docs and the

@@ -52,6 +52,12 @@ change; with it, only your named Code Owners decide.
   `.gitlab/CODEOWNERS` and replace the example owners. Only direct
   members of the eligible groups can approve, so keep the policy-owning group tight.
 
+Two tier truths to know: **code-owner approval requires a Premium/Ultimate license** (on
+GitLab Free there are no required approvals at all — a registry MR can merge with zero),
+and a repo on Premium/Ultimate may opt into **combined landing** (one MR carries an
+additive exception and the suppression it authorizes). The per-tier breakdown and
+failure modes are in [Landing an exception](../landing-an-exception.md).
+
 ## Deep reference
 
 This page is the copy-paste path. For detached vs merged-results pipelines, the MR-only

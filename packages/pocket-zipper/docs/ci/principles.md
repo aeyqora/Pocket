@@ -104,9 +104,13 @@ The concrete per-host settings live in each host page's "Trust" section, and eve
 [example pipeline](examples/) opens with them. Each host also ships a ready-made file
 naming the authorized approvers: `examples/github-CODEOWNERS`,
 `examples/gitlab-CODEOWNERS`, and `examples/bitbucket-CODEOWNERS` with
-`examples/bitbucket-teams.yaml`. On GitHub and GitLab, code-owner approval actually
-enforces. On Bitbucket the code-owners file only *assigns* reviewers, so the example
-pairs it with enforced UI settings — branch restrictions plus a merge check.
+`examples/bitbucket-teams.yaml`. On GitHub and GitLab Premium/Ultimate, code-owner
+approval actually enforces. On GitLab Free there are **no required approvals at all**;
+on Bitbucket the code-owners file only *assigns* reviewers (and merge-check enforcement
+needs the Premium plan), so the example pairs it with enforced UI settings — branch
+restrictions plus a merge check. The honest three-layer breakdown of what each host can
+guarantee — core gate vs two-step vs combined landing — with setup checklists and
+fail-open modes, lives in [Landing an exception](../guides/landing-an-exception.md).
 
 Without this protection the exception registry is toothless: an author could weaken the
 gate and approve their own debt in one change.

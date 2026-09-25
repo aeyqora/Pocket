@@ -13,24 +13,30 @@ a net-zero trade never clears new debt. That's the point: the count can only rat
 The gate is strict, but it does not pretend a codebase will never need a new suppression.
 Sometimes one genuinely does — a vendored file, a deliberate `no-console` in a CLI, a
 rule the team is not ready for this quarter. When that happens, the failure report prints
-a ready-to-fill exception record, and landing that record in
-`.pocket-zipper/exceptions.yml` authorizes the suppression. Each record covers exactly one
-suppression and requires a reason, an owner, and a reference. Temporary records expire on
-a date; permanent ones are an explicit decision with the same review.
+a ready-to-fill exception record (or offers the wizard, `pocket-zipper exception add`),
+and landing that record in `.pocket-zipper/exceptions.yml` authorizes the suppression.
+Each record covers exactly one suppression and requires a written reason; a reference and
+an expiry are optional-but-usual, and by default records expire on a date (per your
+policy's `defaultExpiry`/`maxExpiry`). The machine-readable fields are never hand-copied;
+there is no `owner` field — git history is the audit trail.
 
 The registry is not a back door, because it sits behind the same protected review path as
 the policy. `.pocket-zipper/**` changes pass path-gated review by the authorized
 approvers you name for your host, so an author cannot approve their own debt in the same
-change that creates it. Every exception match is also recorded in the evaluation
-artifact, so the decisions stay auditable after the merge, not just at review time.
+change that creates it. Landing is two-step by default (a protected policy PR, then the
+suppression PR); repos on GitHub or GitLab Premium may opt into
+[combined landing](docs/guides/landing-an-exception.md) — one PR, additive-only,
+baseline-gated. Every exception match is also recorded in the evaluation artifact, so the
+decisions stay auditable after the merge, not just at review time.
 
 That keeps Pocket Zipper a reasonable addition to any codebase or organization. You never
 have to promise a world with zero exceptions, only one where exceptions happen through a
 controlled, approved, expiring process instead of by convention. The count can still only
 ratchet down; new debt always gets paid for in review.
 
-See [Handling a failure](docs/guides/handling-a-failure.md) for the record fields and the
-two-step landing.
+See [Handling a failure](docs/guides/handling-a-failure.md) for the record fields, and
+the [registry format](docs/guides/exceptions.md) for the full schema and finding
+vocabulary.
 
 ## Install
 
@@ -46,7 +52,7 @@ recomputed from git on every run.
 ## Quick start
 
 ```sh
-# 1. Add a policy file
+# 1. Add a policy file — see the canonical default in the config reference
 mkdir -p .pocket-zipper
 printf 'enabled: true\n' > .pocket-zipper/config.yml
 
@@ -56,7 +62,8 @@ npx pocket-zipper check --base main
 
 - `PASS` (exit 0) — no unauthorized new debt.
 - `FAIL` (exit 1) — new or materially-changed debt; the report prints a copy-paste
-  exception record for each suppression.
+  exception record for each suppression. Also `POLICY_CHANGE` (self-authorization) and
+  `EXPIRY_POLICY` (an out-of-policy expiry).
 - **Exit 2** — an operational error (`GIT_ERROR`, `ESLINT_ERROR`, `CONFIG_ERROR`,
   `INTERNAL_ERROR`).
 
@@ -69,6 +76,8 @@ debt grandfathers in instead of blocking you.
 ```sh
 pocket-zipper check --base <ref> [--json <path>] [--verbose]   # authoritative CI gate
 pocket-zipper pre-commit [--json <path>] [--verbose]           # staged index, local feedback
+pocket-zipper validate                                         # lint config.yml + exceptions.yml
+pocket-zipper exception add [--from <file:line> --reason <text> --reference <link>]  # authoring wizard
 ```
 
 `--json <path>` writes the versioned evaluation record; stdout stays for the human report.
@@ -84,6 +93,10 @@ vocabulary the fail report uses, so you never have to parse the JSON to see the 
   [quick start](docs/guides/quick-start.md),
   [onboarding an existing codebase](docs/guides/onboarding-existing-codebase.md),
   [handling a failure](docs/guides/handling-a-failure.md),
+  [exceptions: the registry format](docs/guides/exceptions.md),
+  [landing an exception](docs/guides/landing-an-exception.md),
+  [cleaning up unused exceptions](docs/guides/cleaning-up-unused-exceptions.md),
+  [config reference](docs/guides/config-reference.md),
   [pre-commit hook](docs/guides/pre-commit.md),
   [troubleshooting](docs/guides/troubleshooting.md).
 - **CI quick-starts** — copy-paste setup that links to the deep reference:

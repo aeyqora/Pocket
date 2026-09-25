@@ -25,7 +25,20 @@ npm install --save-dev pocket-zipper eslint
 
 ## 2. Add a config file
 
-Create `.pocket-zipper/config.yml`. The smallest useful config is:
+Create `.pocket-zipper/config.yml`. The canonical default — what the install docs ship, to
+be landed by your repo's authorizers through a protected policy PR — spells every fallback
+explicitly:
+
+```yaml
+enabled: true
+# governedRules:              # optional; absent = every applicable rule is governed
+exceptions:
+  defaultExpiry: 30d          # duration literal (Nd / Nmo); fallback 30d
+  maxExpiry: 3mo              # duration literal (Nd / Nmo); fallback 3mo
+allowSameChangeExceptions: false   # fallback; host required iff this is true
+```
+
+The smallest useful config — enough to run a check — is:
 
 ```yaml
 enabled: true
@@ -49,7 +62,9 @@ matched. Naming a rule ESLint doesn't recognize at all fails closed (`CONFIG_ERR
 exit 2); naming a real rule that doesn't currently apply anywhere is a forward
 declaration, not an error.
 
-An absent config file means the same as `enabled: true` with no allowlist.
+An absent config file means the same as `enabled: true` with no allowlist. Every key is
+documented in the [config reference](config-reference.md), which also carries the migration
+note for upgrading to unknown-key rejection.
 
 ## 3. Run your first check
 
@@ -75,7 +90,8 @@ npx pocket-zipper check --base main --json pocket-zipper.json
   each offending suppression; landing one means getting it reviewed by your authorized
   approvers. See [Handling a failure](handling-a-failure.md).
 - **Exit 2** — an operational failure (`GIT_ERROR`, `ESLINT_ERROR`, `CONFIG_ERROR`,
-  `INTERNAL_ERROR`). Nothing was approved. See [Troubleshooting](troubleshooting.md).
+  `INTERNAL_ERROR`; or registry/config defects from `validate`). Nothing was approved. See
+  [Troubleshooting](troubleshooting.md).
 
 A failing `check` prints only what you need: the verdict, per-disposition counts, and the
 offending suppressions. A passing one prints just the verdict. Colors appear only when
@@ -86,11 +102,19 @@ stdout is a terminal.
 ```sh
 pocket-zipper check --base <ref> [--json <path>] [--verbose]
 pocket-zipper pre-commit [--json <path>] [--verbose]
+pocket-zipper validate
+pocket-zipper exception add [--from <file:line> --reason <text> --reference <link>]
 ```
 
 - `check` is the authoritative gate; run it in CI against the target branch.
 - `pre-commit` evaluates the staged index for local early feedback. See
   [Pre-commit hook](pre-commit.md).
+- `validate` lints both protected files (`config.yml` and `exceptions.yml`) in your working
+  tree — run it when you're writing or editing the registry. Defects exit 2; hygiene alone
+  exits 0. See [the registry format](exceptions.md#pocket-zipper-validate).
+- `exception add` is the wizard for authoring an exception (new debt or renewal), with
+  non-interactive flags for scripted/agented use. See
+  [the wizard](exceptions.md#the-wizard-pocket-zipper-exception-add).
 - `--json <path>` writes the evaluation record and leaves stdout for the human report.
 - `--verbose` reports even on pass: the disposition summary, new debt authorized by an
   exception, and unused-exception cleanup (dangling, spent, expired) — in both modes.
@@ -99,6 +123,9 @@ pocket-zipper pre-commit [--json <path>] [--verbose]
 
 - [Onboarding an existing codebase](onboarding-existing-codebase.md)
 - [Handling a failure](handling-a-failure.md)
+- [Exceptions: the registry format](exceptions.md)
+- [Landing an exception](landing-an-exception.md)
 - [CI quick-starts](ci/github.md)
+- [Config reference](config-reference.md)
 - [Troubleshooting](troubleshooting.md)
 - Deep reference: [CI wiring principles](../ci/principles.md)

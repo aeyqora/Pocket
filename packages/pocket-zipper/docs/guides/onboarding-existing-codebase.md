@@ -12,10 +12,18 @@ takes effect from the next evaluation, and the flip itself is judged under the o
 
 ## Step 1 — land the policy disabled
 
-Add `.pocket-zipper/config.yml` with the gate off:
+Add `.pocket-zipper/config.yml` with the gate off. The canonical default from the
+[config reference](config-reference.md) is the copy-paste source — land it with
+`enabled: false` on the first pass (the only deliberate deviation; the canonical form
+ships `enabled: true`, and step 3 restores it):
 
 ```yaml
-enabled: false
+enabled: false                      # the canonical default ships enabled: true; this first landing disables the gate
+# governedRules:                    # optional; absent = every applicable rule is governed
+exceptions:
+  defaultExpiry: 30d                # duration literal (Nd / Nmo); fallback 30d
+  maxExpiry: 3mo                    # duration literal (Nd / Nmo); fallback 3mo
+allowSameChangeExceptions: false    # fallback; host required iff this is true
 ```
 
 Land this through your **protected policy PR** — the same review path that will later
@@ -23,7 +31,9 @@ guard exceptions. See [Protecting the policy](#protecting-the-policy) below and
 [CI wiring principles §5](../ci/principles.md#5-the-pocket-zipper-protection-prerequisite).
 
 While `enabled: false`, Pocket Zipper evaluates nothing, exits 0, and skips policy
-validation entirely.
+validation entirely (structural config checks still run — a typo'd key during onboarding
+fails fast instead of lying dormant until flip-on, per the config reference's validation
+rules).
 
 ## Step 2 — mass-suppress in ordinary PRs
 
@@ -103,5 +113,7 @@ cover the wiring.
 ## Next steps
 
 - [Handling a failure](handling-a-failure.md) — what to do when a later change trips the gate.
+- [Exceptions: the registry format](exceptions.md) — the exception flow once you're live.
+- [Config reference](config-reference.md) — the canonical default and every config key.
 - [CI quick-starts](ci/github.md) — put the authoritative check in your pipeline.
 - [Quick start](quick-start.md) — the command surface if you skipped it.

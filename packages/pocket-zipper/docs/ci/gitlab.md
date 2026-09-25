@@ -116,6 +116,11 @@ Code Owner approval plus a protected branch
 Only direct members of the eligible groups can approve, so keep the policy-owning group
 tight.
 
+Two tier truths: **Code Owner approval requires a Premium/Ultimate license** — on GitLab
+Free there are no required approvals at all (a registry MR can merge with zero). Combined
+landing is therefore available only on Premium/Ultimate; the per-host head-to-head and
+setup are in [Landing an exception](../guides/landing-an-exception.md).
+
 ## Provenance
 
 Every env-var, merge-commit, and shallow-fetch claim above is verified against GitLab's
