@@ -20,8 +20,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * The registry's known field set, in canonical field order. A record carrying
- * anything else is a defect, so the v2 format is unambiguous and a future field
- * has to register here (or be deliberately removed and named in `REMOVED_FIELDS`).
+ * anything else is a defect, so the format is unambiguous: a field joins here
+ * to be accepted and leaves here (with its advice in `REMOVED_FIELDS`) to be
+ * rejected. The order is the record's field order, shared with the remediation
+ * template in `remediationFields`.
  */
 const KNOWN_FIELDS = [
   "rule",
@@ -38,9 +40,11 @@ const KNOWN_FIELDS = [
 const KNOWN_FIELD_SET = new Set<string>(KNOWN_FIELDS);
 
 /**
- * Fields removed from the registry format, each with the advice that replaces
- * its diagnostic. `owner` was dropped in v2: attribution is git history, never
- * re-derived in-tool, so a stale line is a defect naming the field to delete.
+ * Fields the registry format no longer carries, each with the advice that
+ * replaces its diagnostic. `owner` is the one so far: attribution is git
+ * history, never re-derived in-tool, so a stale line is a defect naming the
+ * field and the fix. Registering a removal here is what keeps an unregistered
+ * field from degrading into a bare "unknown field" with no advice.
  */
 const REMOVED_FIELDS = new Map<string, string>([
   ["owner", "removed from the registry format; delete this line"],
@@ -108,7 +112,7 @@ function validateRecord(entry: unknown, index: number): ExceptionRecord {
     throw configError(`${where}: permanent records must not carry 'expires'`);
   }
 
-  const line = optionalLine(obj, where);
+  const line = optionalLine(obj, "line", where);
 
   return {
     rule,
@@ -135,6 +139,12 @@ function requireString(
   return value;
 }
 
+/**
+ * An optional field reads an explicitly empty YAML value (`reference:`) as
+ * absent rather than as a defect — for an optional field the two say the same
+ * thing, and a wizard that writes a skipped prompt as a bare key shouldn't
+ * produce a record the loader rejects.
+ */
 function optionalString(
   obj: Record<string, unknown>,
   field: string,
@@ -148,12 +158,20 @@ function optionalString(
   return value;
 }
 
-/** `line` is capture-time reference data: a 1-based integer, never a match input. */
-function optionalLine(obj: Record<string, unknown>, where: string): number | undefined {
-  const value = obj["line"];
+/**
+ * `line` is capture-time reference data, never a match input: a 1-based integer
+ * when present, and read leniently (an explicitly empty value is absent) since
+ * a value read here can never widen an authorization.
+ */
+function optionalLine(
+  obj: Record<string, unknown>,
+  field: string,
+  where: string,
+): number | undefined {
+  const value = obj[field];
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
-    throw configError(`${where}: 'line' must be an integer of at least 1`);
+    throw configError(`${where}: '${field}' must be an integer of at least 1`);
   }
   return value;
 }
@@ -170,14 +188,18 @@ export function isExpired(expires: string | undefined, now: Date): boolean {
 
 /**
  * The ordered fields of the exception record that would remediate a flagged
- * suppression, with defaults for the human-authored ones. The single source of
- * the record's field list for the human report.
+ * suppression, with placeholders for the human-authored ones and the
+ * evaluation's suggested expiry. The one place the record's field *order* is
+ * spelled for a human; `KNOWN_FIELDS` is the same order, and a test pins the
+ * two together. A record's own optional fields stay optional here: the `line`
+ * row appears only when the inventory knows the directive's line, so the
+ * template never prints a value the loader would reject.
  */
 export function remediationFields(
   entry: InventoryEntry,
   suggestedExpiry?: string,
 ): Array<[string, string]> {
-  return [
+  const fields: Array<[string, string]> = [
     ["rule", entry.rule],
     ["suppression_type", entry.suppressionType],
     ["fingerprint", entry.fingerprint],
@@ -186,8 +208,9 @@ export function remediationFields(
     ["reason", "<why this suppression is necessary>"],
     ["reference", "<issue or PR link>"],
     ["expires", suggestedExpiry ?? "<YYYY-MM-DD>"],
-    ["line", String(entry.lines.head ?? "?")],
   ];
+  if (entry.lines.head !== null) fields.push(["line", String(entry.lines.head)]);
+  return fields;
 }
 
 /** The record's match key, hiding the registry's snake_case field spelling. */

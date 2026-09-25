@@ -25,7 +25,7 @@ New suppression debt requiring an exception:
       type: temporary
       reason: <why this suppression is necessary>
       reference: <issue or PR link>
-      expires: <YYYY-MM-DD>     # suggested concrete date, per your policy
+      expires: 2026-10-31       # the concrete date your policy's defaultExpiry resolves to
       line: 42
 ```
 

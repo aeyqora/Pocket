@@ -6,7 +6,7 @@ import type { ExceptionRecord, ReconciledSuppression } from "../src/types.js";
 const NOW = new Date("2026-09-14T12:00:00Z");
 const FP_NC = "v1:fp:no-console";
 
-/** A temporary v2 record with every optional field absent. */
+/** A temporary record with every optional field absent. */
 const MINIMAL_TEMPORARY = [
   "- rule: no-console",
   "  suppression_type: next-line",
@@ -18,12 +18,24 @@ const MINIMAL_TEMPORARY = [
   "",
 ].join("\n");
 
-/** `parseRegistry`'s diagnostic for the named field, or the thrown shape. */
+/** The same record as a permanent one: no `expires`, no `line`. */
+const MINIMAL_PERMANENT = MINIMAL_TEMPORARY.replace(
+  "  type: temporary\n  reason: needed\n  expires: 2099-01-01\n",
+  "  type: permanent\n  reason: needed\n",
+);
+
+/**
+ * The registry's own diagnostic for a defective document, asserted the way
+ * `assertConfigError` asserts the policy's: `CONFIG_ERROR` first, then the
+ * message.
+ */
 function defectMessage(raw: string): string {
   try {
     parseRegistry(raw);
   } catch (err) {
-    return (err as Error).message;
+    const e = err as { code?: string; message?: string };
+    assert.equal(e.code, "CONFIG_ERROR");
+    return e.message ?? "";
   }
   return assert.fail(`expected ${raw} to be a defect`);
 }
@@ -64,23 +76,16 @@ function record(overrides: Partial<ExceptionRecord> = {}): ExceptionRecord {
 
 describe("registry: v2 record shape", () => {
   it("reads a permanent record carrying no owner", () => {
-    const [r] = parseRegistry(
-      [
-        "- rule: no-console",
-        "  suppression_type: next-line",
-        `  fingerprint: ${FP_NC}`,
-        "  file: app.js",
-        "  type: permanent",
-        "  reason: needed",
-        "  reference: '#1'",
-        "",
-      ].join("\n"),
-    );
-    assert.ok(r);
-    assert.equal(r.type, "permanent");
-    assert.equal(r.reason, "needed");
-    assert.equal(r.reference, "#1");
-    assert.equal(r.expires, undefined);
+    const [r] = parseRegistry(MINIMAL_PERMANENT + "  reference: '#1'\n");
+    assert.deepEqual(r, {
+      rule: "no-console",
+      suppression_type: "next-line",
+      fingerprint: FP_NC,
+      file: "app.js",
+      type: "permanent",
+      reason: "needed",
+      reference: "#1",
+    });
   });
 
   it("fails closed on a stale owner, naming the removed field and the fix", () => {
@@ -107,8 +112,8 @@ describe("registry: v2 record shape", () => {
 
   it("rejects a line that is not an integer of at least 1", () => {
     for (const value of ["0", "-3", "2.5", "abc"]) {
-      assert.throws(
-        () => parseRegistry(MINIMAL_TEMPORARY + `  line: ${value}\n`),
+      assert.match(
+        defectMessage(MINIMAL_TEMPORARY + `  line: ${value}\n`),
         /'line'/,
         `line: ${value}`,
       );
@@ -121,27 +126,29 @@ describe("registry: v2 record shape", () => {
     assert.match(message, /known fields are rule, suppression_type, fingerprint/);
   });
 
-  it("serializes a record without an owner key", () => {
-    const [r] = parseRegistry(MINIMAL_TEMPORARY);
-    assert.ok(r && !("owner" in r));
-  });
-
   it("requires expires on a temporary and forbids it on a permanent", () => {
-    const permanent = [
-      "- rule: no-console",
-      "  suppression_type: next-line",
-      `  fingerprint: ${FP_NC}`,
-      "  file: app.js",
-      "  type: permanent",
-      "  reason: needed",
-      "",
-    ].join("\n");
-    assert.equal(parseRegistry(permanent)[0]?.type, "permanent");
+    assert.equal(parseRegistry(MINIMAL_PERMANENT)[0]?.type, "permanent");
     assert.match(
       defectMessage(MINIMAL_TEMPORARY.replace("  expires: 2099-01-01\n", "")),
       /'expires'/,
     );
-    assert.match(defectMessage(permanent + "  expires: 2099-01-01\n"), /'expires'/);
+    assert.match(defectMessage(MINIMAL_PERMANENT + "  expires: 2099-01-01\n"), /'expires'/);
+  });
+
+  it("hands on exactly the known field set, in the canonical order", () => {
+    assert.deepEqual(
+      Object.keys(parseRegistry(MINIMAL_TEMPORARY + "  line: 7\n")[0]!),
+      [
+        "rule",
+        "suppression_type",
+        "fingerprint",
+        "file",
+        "type",
+        "reason",
+        "expires",
+        "line",
+      ],
+    );
   });
 });
 

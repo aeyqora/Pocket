@@ -116,6 +116,25 @@ describe("the fail report's remediation block", () => {
   it("suggests the concrete expiry the policy resolved", () => {
     assert.match(block({ suggestedExpiry: "2026-10-14" }), /^ {6}expires: 2026-10-14$/m);
   });
+
+  it("prints the record's fields in the registry's canonical order", () => {
+    // `remediationFields` and the loader's known-field list are two spellings of
+    // the record's field order; this keeps them from drifting apart.
+    const out = block({ suggestedExpiry: "2026-10-14" });
+    // The first field carries the YAML list marker, the rest are indented under it.
+    const printed = [...out.matchAll(/^ {4}- (\w+):|^ {6}(\w+):/gm)].map((m) => m[1] ?? m[2]!);
+    assert.deepEqual(printed, [
+      "rule",
+      "suppression_type",
+      "fingerprint",
+      "file",
+      "type",
+      "reason",
+      "reference",
+      "expires",
+      "line",
+    ]);
+  });
 });
 
 describe("pass report detail (--verbose)", () => {

@@ -51,7 +51,8 @@ export interface EvaluateResult {
   /**
    * The concrete `expires` a remediation block should suggest: this
    * evaluation's date plus the baseline policy's `defaultExpiry`. Undefined
-   * when no policy was read (an operational error, where nothing is flagged).
+   * when no remediation block can be printed — nothing was flagged, or the
+   * gate is disabled, or the run failed before a policy was read.
    */
   suggestedExpiry: string | undefined;
 }
@@ -81,7 +82,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         }),
         exitCode: 0,
         report: "",
-        suggestedExpiry: suggestedExpiry(now, initialPolicy.exceptions.defaultExpiry),
+        suggestedExpiry: undefined,
       };
     }
 
