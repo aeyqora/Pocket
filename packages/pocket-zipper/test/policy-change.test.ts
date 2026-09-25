@@ -20,11 +20,15 @@ const enabled = (value: boolean) => `enabled: ${value}\n`;
 const allowlist = (...rules: string[]) =>
   `governedRules:\n${rules.map((r) => `  - ${r}`).join("\n")}\n`;
 
+/** Two well-formed fingerprints: broadening compares match keys, not validity. */
+const FP_A = `v1:sha256:${"a".repeat(64)}`;
+const FP_B = `v1:sha256:${"b".repeat(64)}`;
+
 function record(overrides: Record<string, string> = {}): string {
   const fields: Record<string, string> = {
     rule: "no-console",
     suppression_type: "next-line",
-    fingerprint: "v1:fp",
+    fingerprint: FP_A,
     file: "app.js",
     type: "permanent",
     reason: "r",
@@ -114,7 +118,7 @@ describe("policy-change: registry broadening", () => {
   it("flags a change to an identity-critical field", () => {
     assert.equal(
       detect({
-        baselineRegistry: record({ rule: "no-debugger", fingerprint: "v1:fp2" }),
+        baselineRegistry: record({ rule: "no-debugger", fingerprint: FP_B }),
         headRegistry: record(),
       }).weakening,
       true,
@@ -133,22 +137,34 @@ describe("policy-change: registry broadening", () => {
 
   it("ignores record order and formatting", () => {
     const a = record();
-    const b = record({ rule: "no-debugger", fingerprint: "v1:fp2" });
+    const b = record({ rule: "no-debugger", fingerprint: FP_B });
     assert.equal(detect({ baselineRegistry: a + b, headRegistry: b + a }).weakening, false);
   });
 
-  it("treats a malformed head registry as broadened", () => {
-    assert.equal(detect({ headRegistry: "- rule: no-console\n" }).weakening, true);
+  it("does not read a defective head registry as broadening", () => {
+    // A registry this tool cannot read is a defect for the loader to report, not
+    // a policy edit: a head that only tightened its fingerprints has widened
+    // nothing.
+    assert.equal(detect({ headRegistry: "- rule: no-console\n" }).weakening, false);
+    assert.equal(detect({ baselineRegistry: record(), headRegistry: record() + "- rule: no-console\n" })
+      .weakening, false);
+    assert.equal(
+      detect({ baselineRegistry: record(), headRegistry: record({ fingerprint: "v1:fp:no-console" }) })
+        .weakening,
+      false,
+    );
   });
 
-  it("treats a malformed baseline against a valid head as broadened", () => {
+  it("reads a defective baseline as authorizing nothing", () => {
+    // The mirror image, and the fail-closed one: whatever the head authorizes, the
+    // baseline authorized none of it. The loader reports the defect first.
     assert.equal(
       detect({ baselineRegistry: "- rule: no-console\n", headRegistry: record() }).weakening,
       true,
     );
   });
 
-  it("treats identical malformed registries as unchanged", () => {
+  it("treats identical defective registries as unchanged", () => {
     assert.equal(
       detect({ baselineRegistry: "- rule: no-console\n", headRegistry: "- rule: no-console\n" })
         .weakening,

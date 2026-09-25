@@ -1,10 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { coverExceptions, parseRegistry, recordMatchKey } from "../src/registry.js";
+import { coverExceptions, recordMatchKey } from "../src/registry.js";
+import { loadRegistry } from "../src/validate.js";
 import type { ExceptionRecord, ReconciledSuppression } from "../src/types.js";
 
 const NOW = new Date("2026-09-14T12:00:00Z");
-const FP_NC = "v1:fp:no-console";
+/** A well-formed fingerprint: the format check is a separate concern from matching. */
+const FP_NC = `v1:sha256:${"a".repeat(64)}`;
 
 /** A temporary record with every optional field absent. */
 const MINIMAL_TEMPORARY = [
@@ -27,11 +29,11 @@ const MINIMAL_PERMANENT = MINIMAL_TEMPORARY.replace(
 /**
  * The registry's own diagnostic for a defective document, asserted the way
  * `assertConfigError` asserts the policy's: `CONFIG_ERROR` first, then the
- * message.
+ * message — which is every defect's diagnostic line, joined.
  */
 function defectMessage(raw: string): string {
   try {
-    parseRegistry(raw);
+    loadRegistry(raw);
   } catch (err) {
     const e = err as { code?: string; message?: string };
     assert.equal(e.code, "CONFIG_ERROR");
@@ -76,7 +78,7 @@ function record(overrides: Partial<ExceptionRecord> = {}): ExceptionRecord {
 
 describe("registry: record shape", () => {
   it("reads a permanent record carrying no owner", () => {
-    const [r] = parseRegistry(MINIMAL_PERMANENT + "  reference: '#1'\n");
+    const [r] = loadRegistry(MINIMAL_PERMANENT + "  reference: '#1'\n");
     assert.deepEqual(r, {
       rule: "no-console",
       suppression_type: "next-line",
@@ -100,13 +102,13 @@ describe("registry: record shape", () => {
   });
 
   it("reads an optional integer line and keeps it out of the match key", () => {
-    const [r] = parseRegistry(MINIMAL_TEMPORARY + "  line: 7\n");
+    const [r] = loadRegistry(MINIMAL_TEMPORARY + "  line: 7\n");
     assert.equal(r?.line, 7);
-    assert.equal(recordMatchKey(r!), recordMatchKey(parseRegistry(MINIMAL_TEMPORARY)[0]!));
+    assert.equal(recordMatchKey(r!), recordMatchKey(loadRegistry(MINIMAL_TEMPORARY)[0]!));
   });
 
   it("omits line entirely when undeclared", () => {
-    const [r] = parseRegistry(MINIMAL_TEMPORARY);
+    const [r] = loadRegistry(MINIMAL_TEMPORARY);
     assert.equal(r?.line, undefined);
   });
 
@@ -127,7 +129,7 @@ describe("registry: record shape", () => {
   });
 
   it("requires expires on a temporary and forbids it on a permanent", () => {
-    assert.equal(parseRegistry(MINIMAL_PERMANENT)[0]?.type, "permanent");
+    assert.equal(loadRegistry(MINIMAL_PERMANENT)[0]?.type, "permanent");
     assert.match(
       defectMessage(MINIMAL_TEMPORARY.replace("  expires: 2099-01-01\n", "")),
       /'expires'/,
@@ -137,7 +139,7 @@ describe("registry: record shape", () => {
 
   it("hands on exactly the known field set, in the canonical order", () => {
     assert.deepEqual(
-      Object.keys(parseRegistry(MINIMAL_TEMPORARY + "  line: 7\n")[0]!),
+      Object.keys(loadRegistry(MINIMAL_TEMPORARY + "  line: 7\n")[0]!),
       [
         "rule",
         "suppression_type",

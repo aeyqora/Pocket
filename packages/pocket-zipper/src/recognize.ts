@@ -13,6 +13,7 @@ import {
   scopeKeyOf,
 } from "./identity.js";
 import { severityOf, type EslintComment, type EslintSession } from "./eslint.js";
+import { eslintError } from "./errors.js";
 import type { LogicalSuppression, SuppressionType } from "./types.js";
 
 type DirectiveForm = Exclude<SuppressionType, "config-off">;
@@ -225,6 +226,62 @@ export function recognizeDirectives(input: RecognizeDirectivesInput): LogicalSup
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Per-file recognition
+// ---------------------------------------------------------------------------
+
+export interface RecognizeFileInput {
+  session: EslintSession;
+  /** The tree the file lives in, root the paths ESLint sees resolve against. */
+  treeDir: string;
+  relFile: string;
+  content: string;
+}
+
+export interface RecognizeFileResult {
+  /** The logical suppressions the file declares, one per guarded rule. */
+  suppressions: LogicalSuppression[];
+  /** Rules ESLint's effective configuration applies to this file. */
+  applicable: string[];
+}
+
+/**
+ * The one recognition pass over one file: ESLint for what is applicable and
+ * what a directive silences, the linter for the comments, then the directive
+ * grammar. Shared by every surface that inventories a tree, so no two can
+ * disagree about what a file contains — and it fails closed when ESLint
+ * acknowledged a suppression the inventory does not carry: a "pass" must never
+ * mean "we didn't look".
+ */
+export async function recognizeFile(input: RecognizeFileInput): Promise<RecognizeFileResult> {
+  const { session, treeDir, relFile, content } = input;
+  const filePath = join(treeDir, relFile);
+  const { used, unused } = await session.lint(content, filePath);
+  const cfg = await session.effectiveConfig(filePath);
+  const applicable = new Set(applicableRules(cfg));
+  const comments = session.comments(content, filePath, cfg.languageOptions);
+  const found = recognizeDirectives({ file: relFile, code: content, cfg, comments });
+  const inventoried = new Set(found.map((s) => s.rule));
+  const assertInventoried = (rule: string, shape: string): void => {
+    if (applicable.has(rule) && !inventoried.has(rule)) {
+      throw eslintError(
+        `recognition missed a ${shape} logical suppression for rule '${rule}' in ${relFile}`,
+      );
+    }
+  };
+  for (const message of used) {
+    const rule = message.ruleId;
+    if (!rule) continue;
+    const viaDirective = (message.suppressions ?? []).some((s) => s.kind === "directive");
+    if (viaDirective) assertInventoried(rule, "used");
+  }
+  for (const directive of unused) {
+    if (directive.isEnable) continue;
+    for (const rule of directive.ruleNames) assertInventoried(rule, "unused");
+  }
+  return { suppressions: found, applicable: [...applicable] };
 }
 
 // ---------------------------------------------------------------------------

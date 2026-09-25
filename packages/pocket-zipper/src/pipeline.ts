@@ -6,12 +6,17 @@ import {
   configPluginRuleNames,
   configSeverityLevels,
   recognizeConfigOffs,
-  recognizeDirectives,
-  applicableRules,
+  recognizeFile,
   type ConfigSeverityLevel,
 } from "./recognize.js";
 import { computeGovernedSet, parsePolicy, suggestedExpiry } from "./policy.js";
-import { coverExceptions, parseRegistry } from "./registry.js";
+import { coverExceptions } from "./registry.js";
+import {
+  PROTECTED_CONFIG,
+  PROTECTED_REGISTRY,
+  errorRecords,
+  loadRegistry,
+} from "./validate.js";
 import { detectPolicyChange } from "./policy-change.js";
 import { buildRecord, excludedRecord, failureRecord, summarize } from "./record.js";
 import {
@@ -21,7 +26,7 @@ import {
   type LineDiff,
 } from "./identity.js";
 import { reconcile } from "./reconcile.js";
-import { PocketZipperError, eslintError, gitError } from "./errors.js";
+import { PocketZipperError, gitError } from "./errors.js";
 import type {
   ErrorCode,
   EvaluationRecord,
@@ -33,8 +38,6 @@ import type {
 
 export { TOOL_NAME, TOOL_VERSION, SCHEMA_VERSION } from "./record.js";
 
-const PROTECTED_CONFIG = ".pocket-zipper/config.yml";
-const PROTECTED_REGISTRY = ".pocket-zipper/exceptions.yml";
 const SKIP_PREFIXES = [".git/", "node_modules/", ".pocket-zipper/"];
 
 export interface EvaluateOptions {
@@ -100,7 +103,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
 
       const baselineRegistryRaw = git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY);
       const policy = parsePolicy(baselinePolicyRaw, knownRules);
-      const registry = parseRegistry(baselineRegistryRaw);
+      const registry = loadRegistry(baselineRegistryRaw);
 
       const changeMap =
         options.mode === "pre-commit"
@@ -201,7 +204,9 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
     }
   } catch (err) {
     if (err instanceof PocketZipperError) {
-      errors.push({ code: err.code, message: err.message, detail: err.detail });
+      // A defective registry read reports one error per defect, so the record
+      // names every thing wrong with the file rather than only the first.
+      errors.push(...errorRecords(err));
       return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined };
     }
     errors.push({
@@ -418,33 +423,13 @@ interface RecognizeSideInput {
 
 async function recognizeSide(input: RecognizeSideInput): Promise<void> {
   const { session, treeDir, relFile, content, suppressions, applicable } = input;
-  const filePath = join(treeDir, relFile);
-  const { used, unused } = await session.lint(content, filePath);
-  const cfg = await session.effectiveConfig(filePath);
-  const fileApplicable = new Set(applicableRules(cfg));
+  const { suppressions: found, applicable: fileApplicable } = await recognizeFile({
+    session,
+    treeDir,
+    relFile,
+    content,
+  });
   for (const rule of fileApplicable) applicable.add(rule);
-  const comments = session.comments(content, filePath, cfg.languageOptions);
-  const found = recognizeDirectives({ file: relFile, code: content, cfg, comments });
-  // Fail closed if ESLint acknowledged a suppression we did not inventory as a
-  // logical suppression: a "pass" must never mean "we didn't look".
-  const inventoriedRules = new Set(found.map((s) => s.rule));
-  const assertInventoried = (rule: string, shape: string): void => {
-    if (fileApplicable.has(rule) && !inventoriedRules.has(rule)) {
-      throw eslintError(
-        `recognition missed a ${shape} logical suppression for rule '${rule}' in ${relFile}`,
-      );
-    }
-  };
-  for (const message of used) {
-    const rule = message.ruleId;
-    if (!rule) continue;
-    const viaDirective = (message.suppressions ?? []).some((s) => s.kind === "directive");
-    if (viaDirective) assertInventoried(rule, "used");
-  }
-  for (const directive of unused) {
-    if (directive.isEnable) continue;
-    for (const rule of directive.ruleNames) assertInventoried(rule, "unused");
-  }
   suppressions.push(...found);
 }
 

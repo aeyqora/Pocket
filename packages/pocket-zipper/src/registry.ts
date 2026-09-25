@@ -1,181 +1,17 @@
-import { parse as parseYaml } from "yaml";
-import { configError } from "./errors.js";
 import { matchKey } from "./identity.js";
 import type {
   ExceptionRecord,
   ExceptionStatus,
   InventoryEntry,
   ReconciledSuppression,
-  SuppressionType,
 } from "./types.js";
 
-const DIRECTIVE_TYPES: SuppressionType[] = [
-  "next-line",
-  "line",
-  "block",
-  "file-level directive",
-];
-
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
 /**
- * The registry's known field set, in canonical field order. A record carrying
- * anything else is a defect, so the format is unambiguous: a field joins here
- * to be accepted and leaves here (with its advice in `REMOVED_FIELDS`) to be
- * rejected. The order is the record's field order, shared with the remediation
- * template in `remediationFields`.
+ * The registry's semantics: what a record means once it is a valid instance of
+ * the format. The format itself — the field grammar, the enum and date rules,
+ * and the diagnostics — belongs to the shared validator, which every read of
+ * these files goes through.
  */
-const KNOWN_FIELDS = [
-  "rule",
-  "suppression_type",
-  "fingerprint",
-  "file",
-  "type",
-  "reason",
-  "reference",
-  "expires",
-  "line",
-] as const;
-
-const KNOWN_FIELD_SET = new Set<string>(KNOWN_FIELDS);
-
-/**
- * Fields the registry format no longer carries, each with the advice that
- * replaces its diagnostic. `owner` is the one so far: attribution is git
- * history, never re-derived in-tool, so a stale line is a defect naming the
- * field and the fix. Registering a removal here is what keeps an unregistered
- * field from degrading into a bare "unknown field" with no advice.
- */
-const REMOVED_FIELDS = new Map<string, string>([
-  ["owner", "removed from the registry format; delete this line"],
-]);
-
-function rejectUnknownFields(obj: Record<string, unknown>, where: string): void {
-  for (const key of Object.keys(obj)) {
-    if (KNOWN_FIELD_SET.has(key)) continue;
-    const removed = REMOVED_FIELDS.get(key);
-    throw configError(
-      `${where}: unknown field '${key}' — ${
-        removed ?? `known fields are ${KNOWN_FIELDS.join(", ")}`
-      }`,
-    );
-  }
-}
-
-export function parseRegistry(raw: string | null): ExceptionRecord[] {
-  if (raw === null || raw.trim().length === 0) return [];
-  let doc: unknown;
-  try {
-    doc = parseYaml(raw);
-  } catch (err) {
-    throw configError("malformed .pocket-zipper/exceptions.yml", String(err));
-  }
-  if (doc === null || doc === undefined) return [];
-  if (!Array.isArray(doc)) {
-    throw configError(".pocket-zipper/exceptions.yml must be a list of records");
-  }
-  return doc.map((entry, index) => validateRecord(entry, index));
-}
-
-function validateRecord(entry: unknown, index: number): ExceptionRecord {
-  const where = `.pocket-zipper/exceptions.yml[${index}]`;
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-    throw configError(`${where} must be a mapping`);
-  }
-  const obj = entry as Record<string, unknown>;
-  rejectUnknownFields(obj, where);
-  const rule = requireString(obj, "rule", where);
-  const suppressionType = requireString(obj, "suppression_type", where) as SuppressionType;
-  if (!DIRECTIVE_TYPES.includes(suppressionType)) {
-    throw configError(
-      `${where}: 'suppression_type' must be one of ${DIRECTIVE_TYPES.join(", ")}`,
-    );
-  }
-  const fingerprint = requireString(obj, "fingerprint", where);
-  const file = requireString(obj, "file", where);
-  const type = requireString(obj, "type", where);
-  if (type !== "temporary" && type !== "permanent") {
-    throw configError(`${where}: 'type' must be 'temporary' or 'permanent'`);
-  }
-  const reason = requireString(obj, "reason", where);
-  const reference = optionalString(obj, "reference", where);
-
-  const expiresRaw = obj["expires"];
-  let expires: string | undefined;
-  if (type === "temporary") {
-    const value = requireString(obj, "expires", where);
-    if (!DATE_RE.test(value)) {
-      throw configError(`${where}: 'expires' must be YYYY-MM-DD`);
-    }
-    expires = value;
-  } else if (expiresRaw !== undefined && expiresRaw !== null) {
-    throw configError(`${where}: permanent records must not carry 'expires'`);
-  }
-
-  const line = optionalLine(obj, "line", where);
-
-  return {
-    rule,
-    suppression_type: suppressionType,
-    fingerprint,
-    file,
-    type,
-    reason,
-    ...(reference ? { reference } : {}),
-    ...(expires ? { expires } : {}),
-    ...(line === undefined ? {} : { line }),
-  };
-}
-
-function requireString(
-  obj: Record<string, unknown>,
-  field: string,
-  where: string,
-): string {
-  const value = obj[field];
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw configError(`${where}: '${field}' is required and must be a string`);
-  }
-  return value;
-}
-
-/**
- * An optional field reads an explicitly empty YAML value (`reference:`) as
- * absent rather than as a defect — for an optional field the two say the same
- * thing, and a wizard that writes a skipped prompt as a bare key shouldn't
- * produce a record the loader rejects.
- */
-function optionalString(
-  obj: Record<string, unknown>,
-  field: string,
-  where: string,
-): string | undefined {
-  const value = obj[field];
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw configError(`${where}: '${field}' must be a non-empty string when present`);
-  }
-  return value;
-}
-
-/**
- * `line` is capture-time reference data, never a match input: a 1-based integer
- * when present, and read leniently (an explicitly empty value is absent) since
- * a value read here can never widen an authorization.
- */
-function optionalLine(
-  obj: Record<string, unknown>,
-  field: string,
-  where: string,
-): number | undefined {
-  const value = obj[field];
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
-    throw configError(`${where}: '${field}' must be an integer of at least 1`);
-  }
-  return value;
-}
-
 export function isValidThrough(expires: string, now: Date): boolean {
   const endOfDay = new Date(`${expires}T23:59:59.999Z`);
   return now.getTime() <= endOfDay.getTime();
@@ -213,7 +49,11 @@ export function remediationFields(
   return fields;
 }
 
-/** The record's match key, hiding the registry's snake_case field spelling. */
+/**
+ * The record's match key, hiding the registry's snake_case field spelling. It is
+ * record *semantics* — what a record is matched on — not part of the format
+ * grammar, so it lives here beside the reader that uses it.
+ */
 export function recordMatchKey(record: ExceptionRecord): string {
   return matchKey({
     fingerprint: record.fingerprint,

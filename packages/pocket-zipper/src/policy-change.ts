@@ -1,5 +1,6 @@
 import { viewPolicy } from "./policy.js";
-import { parseRegistry, recordMatchKey } from "./registry.js";
+import { recordMatchKey } from "./registry.js";
+import { defectsOf, validateRegistry } from "./validate.js";
 import type { ConfigSeverityLevel } from "./recognize.js";
 
 export interface PolicyChangeInput {
@@ -24,12 +25,6 @@ export interface PolicyChangeResult {
   /** Which surface weakened, for a truthful error message. */
   source: PolicyChangeSource;
 }
-
-/**
- * A malformed registry reads as broadened, so a broken head registry cannot
- * silently weaken enforcement (fail closed rather than fail open).
- */
-const MALFORMED_REGISTRY = "<malformed>";
 
 /**
  * The self-authorization rule: a weakening delta (to the protected
@@ -91,14 +86,18 @@ function configWeakened(
 }
 
 function registryBroadened(baselineRaw: string | null, headRaw: string | null): boolean {
+  // Only well-formed registries are compared: broadening answers "did the
+  // authorized set grow?", which a registry this tool cannot read has no answer
+  // to. A defective registry is a defect in its own right (exit 2, the
+  // validator's own diagnostics) and ticket 06 owns the head-side read that
+  // reports it; reading one as broadening reports a broken file as a policy
+  // edit, and calls a head that merely tightened its fingerprints a weakening.
+  // It never failed the gate on its own — a weakening with no debt consumed
+  // beside it is a pass — so this changes the reported error, not the verdict.
   const keys = (raw: string | null): Set<string> => {
-    if (raw === null || raw.trim() === "") return new Set();
-    try {
-      const records = parseRegistry(raw);
-      return new Set(records.map((r) => recordMatchKey(r)));
-    } catch {
-      return new Set([MALFORMED_REGISTRY]);
-    }
+    const { entries, findings } = validateRegistry(raw);
+    if (defectsOf(findings).length > 0) return new Set();
+    return new Set(entries.map((entry) => recordMatchKey(entry.record)));
   };
   const base = keys(baselineRaw);
   const head = keys(headRaw);

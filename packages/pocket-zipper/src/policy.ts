@@ -324,13 +324,22 @@ function formatIso(dt: Date): string {
 }
 
 /**
+ * The date a duration literal lands on from `now`'s UTC date — the one spelling
+ * of the "today plus a literal" arithmetic, so the authoring surface's prefill
+ * and the expiry-horizon check can never disagree about a date.
+ */
+export function expiryHorizon(now: Date, literal: DurationLiteral): string {
+  return addDuration(formatIso(now), literal);
+}
+
+/**
  * The concrete `expires` date an authoring surface prefills: the evaluation's
  * UTC date plus the policy's `defaultExpiry`. It is a suggestion, never a
  * constraint — the author may pick another date, and the ceiling that actually
  * binds is `maxExpiry` (ticket 05).
  */
 export function suggestedExpiry(now: Date, defaultExpiry: DurationLiteral): string {
-  return addDuration(formatIso(now), defaultExpiry);
+  return expiryHorizon(now, defaultExpiry);
 }
 
 export function computeGovernedSet(
