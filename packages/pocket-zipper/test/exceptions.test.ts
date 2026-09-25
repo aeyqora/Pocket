@@ -323,7 +323,7 @@ describe("the exception registry, resolved against the baseline", () => {
     );
   });
 
-  it("authorizes a v2 record carrying a line", () => {
+  it("authorizes a record carrying a line", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write(".pocket-zipper/exceptions.yml", baseRecord({ line: 2 }));

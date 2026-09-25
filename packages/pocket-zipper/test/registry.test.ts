@@ -74,7 +74,7 @@ function record(overrides: Partial<ExceptionRecord> = {}): ExceptionRecord {
   };
 }
 
-describe("registry: v2 record shape", () => {
+describe("registry: record shape", () => {
   it("reads a permanent record carrying no owner", () => {
     const [r] = parseRegistry(MINIMAL_PERMANENT + "  reference: '#1'\n");
     assert.deepEqual(r, {

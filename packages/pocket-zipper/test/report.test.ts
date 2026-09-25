@@ -97,7 +97,7 @@ describe("the fail report's remediation block", () => {
     );
   }
 
-  it("prints the v2 field set with a machine-prefilled line", () => {
+  it("prints the record's field set with a machine-prefilled line", () => {
     const out = block();
     assert.match(out, /remediate with:/);
     assert.match(out, /- rule: no-console/);
