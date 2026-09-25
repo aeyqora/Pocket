@@ -147,13 +147,29 @@ export function eslintConfig(rules: Record<string, string>): string {
   return `export default [\n  {\n    rules: {\n${body}\n    },\n  },\n];\n`;
 }
 
-export function configYaml(opts: { enabled?: boolean; governedRules?: string[] }): string {
+export function configYaml(opts: {
+  enabled?: boolean;
+  governedRules?: string[];
+  defaultExpiry?: string;
+  maxExpiry?: string;
+  allowSameChangeExceptions?: boolean;
+  host?: string;
+}): string {
   const lines: string[] = [];
   if (opts.enabled !== undefined) lines.push(`enabled: ${opts.enabled}`);
   if (opts.governedRules !== undefined) {
     lines.push("governedRules:");
     for (const r of opts.governedRules) lines.push(`  - ${r}`);
   }
+  if (opts.defaultExpiry !== undefined || opts.maxExpiry !== undefined) {
+    lines.push("exceptions:");
+    if (opts.defaultExpiry !== undefined) lines.push(`  defaultExpiry: ${opts.defaultExpiry}`);
+    if (opts.maxExpiry !== undefined) lines.push(`  maxExpiry: ${opts.maxExpiry}`);
+  }
+  if (opts.allowSameChangeExceptions !== undefined) {
+    lines.push(`allowSameChangeExceptions: ${opts.allowSameChangeExceptions}`);
+  }
+  if (opts.host !== undefined) lines.push(`host: ${opts.host}`);
   return lines.join("\n") + "\n";
 }
 

@@ -13,6 +13,7 @@ import type {
   RecordExceptionEntry,
   Verdict,
 } from "./types.js";
+import { DEFAULT_POLICY } from "./policy.js";
 
 export const TOOL_NAME = "pocket-zipper";
 export const TOOL_VERSION = "0.2.0";
@@ -173,7 +174,7 @@ function recordOf(parts: RecordParts): EvaluationRecord {
   };
 }
 
-function emptySummary(policy: Policy = { enabled: true, governedRules: null }): EvaluationSummary {
+function emptySummary(policy: Policy = DEFAULT_POLICY): EvaluationSummary {
   return {
     policy: { enabled: policy.enabled, allowlist: policy.governedRules },
     governedRules: [],

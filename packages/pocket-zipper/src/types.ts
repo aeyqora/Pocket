@@ -27,6 +27,22 @@ export type Verdict = "pass" | "fail" | "excluded";
 
 export type ExceptionStatus = "used" | "dangling" | "spent" | "expired";
 
+/**
+ * A policy duration literal: a positive integer plus one of two units, strict
+ * lowercase — `d` (exact days) or `mo` (calendar months, clamped to month
+ * end). Constrained at runtime by the `^\d+(d|mo)$` grammar in policy.ts; the
+ * template-literal type is a convenience, not the validator.
+ */
+export type DurationLiteral = `${number}d` | `${number}mo`;
+
+/** The declared host value space. The can-guarantee subset is a ticket-07 concern. */
+export type Host =
+  | "github"
+  | "gitlab-premium"
+  | "gitlab-free"
+  | "bitbucket-cloud"
+  | "bitbucket-server";
+
 /** A directive / config-off expressed as a logical unit before reconciliation. */
 export interface LogicalSuppression {
   fingerprint: string;
@@ -65,6 +81,15 @@ export interface ExceptionRef {
 export interface Policy {
   enabled: boolean;
   governedRules: string[] | null;
+  /** The expiry policy: fallbacks apply when absent (`30d` / `3mo`). */
+  exceptions: {
+    defaultExpiry: DurationLiteral;
+    maxExpiry: DurationLiteral;
+  };
+  /** Combined-landing opt-in; semantics (ticket 07) do not apply in ticket 01. */
+  allowSameChangeExceptions: boolean;
+  /** Declared host; a valid forward declaration with or without the opt-in. */
+  host: Host | null;
 }
 
 export interface ExceptionRecord {
