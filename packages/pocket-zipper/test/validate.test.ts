@@ -897,7 +897,7 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
 
 // --- the combined-landing corroborations ----------------------------------
 
-/** The committed owners file, in the location a GitHub checkout reads it from. */
+/** The owners file, in the location a GitHub checkout reads it from. */
 const OWNERS = ".github/CODEOWNERS";
 
 /** The three remotes a checkout can be classified from, one per known domain. */
@@ -920,10 +920,10 @@ describe("validate: the combined-landing corroborations", () => {
   after(() => repos.forEach((r) => r.cleanup()));
 
   /**
-   * A repo shaped like an attestation: the config declares, the remote observes,
-   * and the owners file is whatever the test says the host would read. Each of
-   * the three is opt-out and no other fact is in play, so the count on the
-   * verdict line is exactly what the two corroborations contributed.
+   * A repo shaped like a declaration under test: the config declares, the remote
+   * observes, and the owners file is whatever the test says the host would read.
+   * Each of the three is opt-out and no other fact is in play, so the count on
+   * the verdict line is exactly what the two corroborations contributed.
    */
   function repo(opts: {
     combined?: boolean;
@@ -1064,7 +1064,7 @@ describe("validate: the combined-landing corroborations", () => {
     ]);
   });
 
-  it("surfaces the policy path when a committed owners file claims everything else", () => {
+  it("surfaces the policy path when the working tree's owners file claims everything else", () => {
     const r = repo({
       combined: true,
       host: "github",

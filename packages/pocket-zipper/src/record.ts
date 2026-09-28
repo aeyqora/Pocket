@@ -27,8 +27,8 @@ export interface Summary {
 
 /**
  * New debt is a property of directives only. A config-off (a rule disabled in
- * the flat config) is a policy change, not debt: it can never be excepted and
- * it never fails the gate on its own.
+ * the flat config) is a policy change, not debt: it can never be a same-change
+ * exception and it never fails the gate on its own.
  */
 function isNewDebt(suppression: ReconciledSuppression): boolean {
   return (

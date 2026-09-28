@@ -117,10 +117,17 @@ gate and approve their own debt in one change.
 
 The policy is **baseline-authoritative**: the evaluation always reads the *baseline's*
 `.pocket-zipper` files, never the head's. A head-side edit to `config.yml` or
-`exceptions.yml` never shapes the current evaluation. It records as a policy-change
-signal and takes effect from the next evaluation (one merge of lag). A policy-weakening
-edit *consumed by new debt in the same change* fails the gate (`POLICY_CHANGE`, exit 1).
-A pure policy edit is recorded but not gate-failed.
+`exceptions.yml` never shapes the current evaluation, with one sanctioned exception:
+when the **baseline** config declares the combined-landing opt-in on a host that can
+guarantee a distinct path-scoped approval for `.pocket-zipper/**` (see
+[Landing an exception](../guides/landing-an-exception.md)), a single **additive**
+record may ride the change it authorizes and joins coverage. Identity-field edits and
+renewals never ride, in either posture. Any other head-side edit records as a
+policy-change signal and takes effect from the next evaluation (one merge of lag); an
+excepted record raises no signal at all, because the host's path-scoped approval is the
+review the signal would ask for. A policy-weakening edit *consumed by new debt in the
+same change* fails the gate (`POLICY_CHANGE`, exit 1). A pure policy edit is recorded
+but not gate-failed.
 
 Turning a governed rule `"off"` in `eslint.config.*` — or lowering its severity to
 `"warn"` — is the same policy-weakening signal, detected even though the config file is

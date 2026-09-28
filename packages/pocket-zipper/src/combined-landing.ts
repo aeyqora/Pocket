@@ -1,27 +1,69 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Host } from "./types.js";
+import { Git } from "./git.js";
+import type { Host, Policy } from "./types.js";
 
 /**
- * The three host families, with both GitLab tiers and both Bitbucket flavors
- * folded together. The tier is forced to fold: a plan is not in a remote URL, so
- * an implementation that compared plans would flag every premium repository on
- * `gitlab.com` as disagreeing with itself, and would flag the free tier as
- * agreeing for the wrong reason.
+ * What a combined-landing repository can be observed to be, gathered from the
+ * working tree. The declared half comes from the policy the caller already
+ * parsed, so this is the observed half plus the two declared values the findings
+ * compare them against.
+ */
+export interface CombinedLandingFacts {
+  /** The working tree's declared `host`; null when the config declares none. */
+  readonly host: Host | null;
+  /** Whether the working tree's policy declares the combined-landing opt-in. */
+  readonly combined: boolean;
+  /** The checkout's remote, classified; null when there is none or it is unknown. */
+  readonly remote: HostFamily | null;
+  /** The owners file and where it was found; null when there is none. */
+  readonly owners: OwnersFile | null;
+}
+
+/**
+ * What the checkout says about itself, gathered best-effort. Every read here is
+ * allowed to come back empty — a directory that is not a repository, a git that
+ * declines, an owners file that is not there — because `validate` is a
+ * working-tree lint that must keep working outside a repository, and a fact it
+ * could not observe is not a defect about a protected file.
+ */
+export async function combinedLandingFacts(
+  cwd: string,
+  policy: Policy,
+): Promise<CombinedLandingFacts> {
+  return {
+    host: policy.host,
+    combined: policy.allowSameChangeExceptions,
+    remote: remoteFamily(await originUrl(cwd)),
+    owners: ownersFileFor(cwd),
+  };
+}
+
+async function originUrl(cwd: string): Promise<string | null> {
+  try {
+    const git = await Git.discover(cwd);
+    return git.remoteUrl();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a checkout can be *observed* to be about the two things a combined-landing
+ * repository's opt-in depends on: whether it is really on the host it declares,
+ * and whether anyone is named to own the protected paths. The families are this
+ * module's reason to exist, and the tier is forced to fold — a plan is not in a
+ * remote URL, so an implementation that compared tiers would flag every premium
+ * repository on `gitlab.com` as disagreeing with itself, and would flag the free
+ * tier as agreeing for the wrong reason.
  *
- * The families are this module's reason to exist. It holds what a tool can
- * observe about whether a repository's declared host really is the host it
- * claims to be, and about whether anyone is named to own the policy path — four
- * read-only facts, no verdict and no failure. The core never reads host
+ * Four read-only facts, no verdict and no failure. The core never reads host
  * *capability* or approval state, because a declared `host` is a string and a
  * remote URL is a string, and neither is a capability. `validate` turns these
  * into findings; nothing else reads them.
  *
- * "Attestation" is the config reference's word for what the repository
- * *declares* about its own host, and this module is not that. It is the
- * observed counterpart: the declared `host` is the claim under test, the
- * remote URL and the owners file are what a checkout can be seen to be, and
- * the two are only ever compared, never merged.
+ * The declared side is a claim under test and the observed side is the evidence,
+ * and the two are only ever compared, never merged.
  */
 export type HostFamily = "github" | "gitlab" | "bitbucket";
 
@@ -72,7 +114,7 @@ function remoteHost(url: string): string {
   return (path === -1 ? rest : rest.slice(0, path)).toLowerCase();
 }
 
-/** A committed owners file, with the path it was found at. */
+/** An owners file, with the path it was found at. */
 export interface OwnersFile {
   readonly path: string;
   readonly text: string;
@@ -93,10 +135,18 @@ const OWNERS_FILE_LOCATIONS: readonly string[] = [
 ];
 
 /**
- * The first owners file in a documented location, read from the working tree,
- * or null when the repository carries none. The working tree rather than the
- * index because the caller is a pre-push lint: a file an author has staged but
- * not yet committed is a file they are about to rely on.
+ * The first owners file in a documented location, read from the working tree, or
+ * null when the repository carries none.
+ *
+ * The working tree rather than the commit, because the caller is a pre-push lint
+ * and the approval being asked about is the one that will exist once the change
+ * lands: an author adding a protected path to an existing owners file in the same
+ * change has made the claim, and the lint is there to notice a gap they left, not
+ * to fail them for closing one in the same breath. The trade is deliberate and
+ * worth stating: a staged-but-uncommitted owners file counts as coverage, so a
+ * repository that never commits it loses the finding it was warned about. That
+ * is a real hole, and it is the price of a lint that reads what is in front of it
+ * rather than what CI would see.
  */
 export function ownersFileFor(cwd: string): OwnersFile | null {
   for (const path of OWNERS_FILE_LOCATIONS) {

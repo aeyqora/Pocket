@@ -128,7 +128,7 @@ function twoStep(opts: { registry?: string; app?: string } = {}): FixtureRepo {
  * The one head-side change the same-change-exception tests share: a record whose
  * match key the baseline registry does not carry, beside the debt it authorizes.
  * Only the baseline posture differs between them, which is the whole point of
- * running the identical diff twice.
+ * running the identical proposed change twice.
  */
 function rideAdditiveRecord(
   r: FixtureRepo,
@@ -195,7 +195,7 @@ describe("combined landing: the additive same-change exception", () => {
     assert.deepEqual(res.record?.summary.newDebt, { authorized: 0, unauthorized: 1 });
   });
 
-  it("refuses the identical diff on a two-step baseline, so the exception stays a posture and not a shape", () => {
+  it("refuses the identical change on a two-step baseline, so a same-change exception stays a posture and not a shape", () => {
     const r = twoStep();
     rideAdditiveRecord(r);
     r.commit("head");
@@ -215,8 +215,8 @@ describe("combined landing: the additive same-change exception", () => {
     const res = check(r);
     // A record riding in a change that consumes nothing is still a record: it
     // is published, it is dangling, and it lands in the cleanup counts. Under
-    // the exception the change itself is the host's protected path, so there
-    // no second-PR signal to raise about it either.
+    // the same-change exception the change itself is the host's protected path,
+    // so there is no second-PR signal to raise about it either.
     assert.equal(res.status, 0);
     assert.deepEqual(res.record?.errors, []);
     assert.deepEqual(res.record?.exceptions.map((e) => e.status), ["dangling"]);
@@ -259,7 +259,7 @@ describe("combined landing: the additive same-change exception", () => {
     assert.deepEqual(res.record?.summary.newDebt, { authorized: 0, unauthorized: 1 });
   });
 
-  it("keeps a renewal off the exception: the baseline's expired record authorizes nothing", () => {
+  it("keeps a renewal off the same-change exception: the baseline's expired record authorizes nothing", () => {
     const r = combinedOnHost({ registry: record({ expires: LONG_PAST }) });
     // A renewal re-points no slot, so the head record is not an addition and
     // never joins the union. What the coverage pass sees is the baseline's own
@@ -337,8 +337,8 @@ describe("combined landing: the additive same-change exception", () => {
       const res = check(r);
       // The record and the debt it covered both go. A removal never broadens
       // what the registry permits and never authorizes anything, so it is legal
-      // in any PR in either posture — the exception never has to be consulted, and
-      // consulting it must not be what makes this pass.
+      // in any PR in either posture — the same-change exception never has to be
+      // consulted, and consulting it must not be what makes this pass.
       assert.equal(res.status, 0, build.name);
       assert.deepEqual(res.record?.errors, [], build.name);
       assert.deepEqual(res.record?.summary.newDebt, { authorized: 0, unauthorized: 0 }, build.name);
@@ -487,8 +487,8 @@ describe("a record re-pointed across files", () => {
   it("reads a re-point across files as an identity edit, on a two-step baseline", () => {
     // `file` is part of the match, so moving a record to a new file is the
     // same debt at a new path — an identity edit, not a fresh grant. Judged on
-    // a two-step baseline, where the exception is not in play at all, so this
-    // pins the delta's shape and nothing else.
+    // a two-step baseline, where the same-change exception is not in play at
+    // all, so this pins the delta's shape and nothing else.
     const r = twoStep({
       app: `export const a = 1;\n${disabled}console.log(1);\n`,
       registry: record({ type: "permanent" }),

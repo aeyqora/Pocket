@@ -17,12 +17,13 @@ export interface PolicyChangeInput {
   /** New or materially-changed governed debt introduced by the same change. */
   consumedDebt: number;
   /**
-   * The **baseline** policy, for the combined-landing opt-in. Read from the
-   * baseline alone, which is what makes the opt-in baseline-gated: a head that
-   * flips it on contributes nothing here, so enabling combined is itself a
-   * protected policy change.
+   * The **baseline** policy's two combined-landing terms: the opt-in and the
+   * declared host. Read from the baseline alone, which is what makes the
+   * opt-in baseline-gated: a head that flips it on contributes nothing here,
+   * so enabling combined is itself a protected policy change. Only the two
+   * fields the rule reads, so the seam states its need and nothing wider.
    */
-  baselinePolicy: Policy;
+  baselinePolicy: Pick<Policy, "allowSameChangeExceptions" | "host">;
   /** Effective severity bands in the flat config, per tree (see `configSeverityLevels`). */
   baselineLevels: ConfigSeverityLevel[];
   headLevels: ConfigSeverityLevel[];
@@ -45,10 +46,23 @@ export interface PolicyChangeResult {
    */
   shape: PolicyChangeShape;
   /**
+   * The head records a new grant brought, in registry order — the additions a
+   * same-change exception lets ride into the evaluation's coverage union. Empty
+   * unless `combined`, and computed in the same pass that produced the verdict,
+   * so the union a caller builds and the verdict it read cannot disagree.
+   */
+  readonly sanctioned: readonly ExceptionRecord[];
+  /**
    * The host's path-scoped approval on `.pocket-zipper/**` stands in for the
    * second PR: the whole delta is a new grant (so there is something to ride
    * along) and the **baseline** policy sanctions it. Read here, next to the
    * shape it qualifies, so "additive and nothing else" is stated once.
+   *
+   * Implies `weakening` — a delta with nothing weakened has nothing to except —
+   * and is the one field that suppresses a consequence of weakening, so a caller
+   * reads it rather than re-deciding the question. `failure` below is derived
+   * from it; the `POLICY_CHANGE` signal the caller raises pairs it with
+   * `weakening`, which `combined` cannot stand in for.
    */
   combined: boolean;
 }
@@ -82,10 +96,11 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
   // here, and comparing it would judge a file outside the change. The ESLint
   // flat config's own severities are the same policy change however the change
   // is spelled, so `configSeverityWeakened` keeps its own structural gate.
-  const registry = protectedTouched ? registryDelta(baselineRegistry, headRegistry) : "none";
+  const registry =
+    protectedTouched ? registryDelta(baselineRegistry, headRegistry) : NO_REGISTRY_CHANGE;
   const configWeakenedHere =
     protectedTouched && configWeakened(baselineConfig, headConfig, baselineGoverned);
-  const protectedWeakened = configWeakenedHere || registry !== "none";
+  const protectedWeakened = configWeakenedHere || registry.shape !== "none";
   const eslintWeakened = configSeverityWeakened(baselineLevels, headLevels, baselineGoverned);
 
   const weakening = protectedWeakened || eslintWeakened;
@@ -94,8 +109,9 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
       weakening: false,
       failure: false,
       source: "none",
-      registry,
+      registry: registry.shape,
       shape: "none",
+      sanctioned: [],
       combined: false,
     };
   }
@@ -111,27 +127,41 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
   // severity weakening is a combined PR, and reads as an `edit` whatever the
   // registry alone would say.
   const shape: PolicyChangeShape =
-    registry === "additive" && !configWeakenedHere && !eslintWeakened ? "additive" : "edit";
-  // The exception is the intersection of the shape and the baseline's own posture,
-  // and the shape carries the whole "and nothing else": an `edit` never rides,
-  // whatever the config says. The host half is `parsePolicy`'s own can-guarantee
-  // rule, read rather than restated — a repo whose config is self-contradicting
-  // never reaches this, because the baseline read throws first.
+    registry.shape === "additive" && !configWeakenedHere && !eslintWeakened
+      ? "additive"
+      : "edit";
+  // A same-change exception is the intersection of the shape and the baseline's
+  // own posture, and the shape carries the whole "and nothing else": an `edit`
+  // never rides, whatever the config says. The host half is `parsePolicy`'s own
+  // can-guarantee rule, read rather than restated — a repo whose config is
+  // self-contradicting never reaches this, because the baseline read throws
+  // first.
   const combined =
     shape === "additive" &&
     baselinePolicy.allowSameChangeExceptions &&
     canGuaranteePathApproval(baselinePolicy.host);
   // The host's path-scoped approval on `.pocket-zipper/**` stands in for the
-  // second PR, so an excepted delta is not a failure and raises no signal: the
-  // change carries its own record, and the approval being asked for is the very
-  // approval covering the policy path. Both terms are answered together, so a
-  // caller cannot read one and not the other.
+  // second PR, so a same-change exception is not a failure and raises no signal:
+  // the change carries its own record, and the approval being asked for is the
+  // very approval covering the policy path. It is the single suppression both
+  // consequences read — `failure` below takes it alone, and the signal the caller
+  // raises pairs it with `weakening`, which this field cannot imply back the
+  // other way round.
+  //
+  // The sanctioned additions are read off the same new-slot set the verdict came
+  // from — head slots the baseline never carried — so the coverage union a
+  // caller builds and the verdict it read are one pass over the two registries,
+  // not two that could drift apart.
+  const sanctioned = combined
+    ? (headRegistry ?? []).filter((record) => registry.newSlots.has(slotKeyOf(record)))
+    : [];
   return {
     weakening: true,
     failure: !combined && consumedDebt > 0,
     source,
-    registry,
+    registry: registry.shape,
     shape,
+    sanctioned,
     combined,
   };
 }
@@ -193,11 +223,16 @@ function configWeakened(
  * Same-file claims are spent first, so every pairing that existed before the
  * second claim source is unchanged by it. `edit` wins over `additive` when a
  * delta carries both.
+ *
+ * Returns the verdict and the new-slot set it was read from, because the
+ * sanctioned additions of a same-change exception are the head records in those
+ * same slots — one pass answers both, so the verdict and the additions a caller
+ * builds a coverage union from cannot disagree.
  */
 function registryDelta(
   baseline: readonly ExceptionRecord[] | null,
   head: readonly ExceptionRecord[] | null,
-): PolicyChangeShape {
+): { shape: PolicyChangeShape; newSlots: ReadonlySet<string> } {
   const baselineSlots = slotCounts(baseline);
   const headSlots = slotCounts(head);
   const newSlots = newSlotsOf(baselineSlots, headSlots);
@@ -225,14 +260,21 @@ function registryDelta(
     edits += matched;
     additives += counted - matched;
   }
-  return edits > 0 ? "edit" : additives > 0 ? "additive" : "none";
+  return { shape: edits > 0 ? "edit" : additives > 0 ? "additive" : "none", newSlots };
 }
+
+/** A registry the change does not touch: no shape, no new slots, no additions. */
+const NO_REGISTRY_CHANGE: { shape: PolicyChangeShape; newSlots: ReadonlySet<string> } = {
+  shape: "none",
+  newSlots: new Set<string>(),
+};
 
 /**
  * The head slots the baseline never carried, as `file` + match key: the
- * definition of a new grant. `registryDelta` reads it off the two slot maps it
- * has already built, and `sanctionedAdditions` off two fresh ones, so the rule
- * itself is stated once and the two cannot drift apart.
+ * definition of a new grant, and the one statement of it. `registryDelta` reads
+ * it off the two slot maps it has already built; the detector filters the head
+ * records through it for the sanctioned additions. Stated once, so the verdict
+ * and the additions cannot drift apart.
  */
 function newSlotsOf(
   baselineSlots: ReadonlyMap<string, number>,
@@ -285,21 +327,6 @@ function claimUnpaired(
     claimed += taken;
   }
   return claimed;
-}
-
-/**
- * The head records a new grant brought, in registry order — the coverage union
- * the same-change exception authorizes debt against. It is the same rule
- * `registryDelta` reads: head slots the baseline never carried. Under the same-change exception
- * there are no edits by construction, so "every record in a new slot" and "every
- * addition" are one set, and no second accounting rule can disagree.
- */
-export function sanctionedAdditions(
-  baseline: readonly ExceptionRecord[] | null,
-  head: readonly ExceptionRecord[] | null,
-): ExceptionRecord[] {
-  const slots = newSlotsOf(slotCounts(baseline), slotCounts(head));
-  return (head ?? []).filter((record) => slots.has(slotKeyOf(record)));
 }
 
 /** The separator a slot key is built on; git paths cannot contain it. */

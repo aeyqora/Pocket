@@ -1,7 +1,7 @@
 import { LineCounter, isMap, isScalar, isSeq, parseDocument } from "yaml";
 import type { Pair } from "yaml";
 import { PocketZipperError } from "./errors.js";
-import { hostFamily, ownersCover, type HostFamily, type OwnersFile } from "./host-attestation.js";
+import { hostFamily, ownersCover, type CombinedLandingFacts } from "./combined-landing.js";
 import { matchKey } from "./identity.js";
 import { expiryHorizon } from "./policy.js";
 import { countKey, isOverlong, poolCountLine, type UnclaimedRecord } from "./registry.js";
@@ -9,7 +9,6 @@ import type {
   DurationLiteral,
   ExceptionRecord,
   ExceptionStatus,
-  Host,
   RecordError,
   SuppressionType,
 } from "./types.js";
@@ -969,7 +968,7 @@ export function poolHygiene(
  *
  * - `HOST_MISMATCH` — the declared `host` against the checkout's own remote, at
  *   family granularity. Ungated: `host` is a valid forward declaration with or
- *   without the opt-in, and a wrong attestation is worth flagging in the posture
+ *   without the opt-in, and a wrong declaration is worth flagging in the posture
  *   every two-step repository runs.
  * - `OWNERS_FILE_READINESS` — a protected path the owners file claims no rule
  *   for, one finding per path, because a finding is about one file: the config
@@ -989,17 +988,6 @@ export function poolHygiene(
  * wolf at a repository doing exactly the right thing is how this finding loses
  * the only value it has.
  */
-export interface CombinedLandingFacts {
-  /** The working tree's declared `host`; null when the config declares none. */
-  readonly host: Host | null;
-  /** Whether the working tree's policy declares the combined-landing opt-in. */
-  readonly combined: boolean;
-  /** The checkout's remote, classified; null when there is none or it is unknown. */
-  readonly remote: HostFamily | null;
-  /** The owners file and where it was found; null when there is none. */
-  readonly owners: OwnersFile | null;
-}
-
 export function combinedLandingHygiene(facts: CombinedLandingFacts): Finding[] {
   const findings: Finding[] = [];
   const declared = hostFamily(facts.host);
@@ -1022,8 +1010,8 @@ export function combinedLandingHygiene(facts: CombinedLandingFacts): Finding[] {
           path,
           message:
             facts.owners === null
-              ? `no committed owners file claims ${path}, so the path is approved by whoever can push to the branch — combined landing substitutes that approval for the second protected PR, and without it there is none`
-              : `the committed owners file (${facts.owners.path}) claims no rule matching ${path} — combined landing substitutes path-scoped ownership for the second protected PR, and an unclaimed path has none`,
+              ? `no owners file in the working tree claims ${path}, so the path is approved by whoever can push to the branch — combined landing substitutes that approval for the second protected PR, and without it there is none`
+              : `the working tree's owners file (${facts.owners.path}) claims no rule matching ${path} — combined landing substitutes path-scoped ownership for the second protected PR, and an unclaimed path has none`,
         }),
       );
     }

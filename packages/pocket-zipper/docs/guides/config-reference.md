@@ -81,7 +81,7 @@ See [Landing an exception](landing-an-exception.md) for the full treatment. Esse
   cross-check (known domains only — `github.com` / `gitlab.com` / `bitbucket.org`; warn-only
   because custom-domain, self-hosted, mirror, and no-remote checkouts aren't classifiable,
   and the GitLab *tier* isn't in the remote) and a registry-path ownership hint against the
-  committed owners file — detect declared-vs-observed *config* mismatches. The core never
+  working tree's owners file — detect declared-vs-observed *config* mismatches. The core never
   reads host or approval state.
 
 ## Migration note — unknown-key rejection (upgrade)

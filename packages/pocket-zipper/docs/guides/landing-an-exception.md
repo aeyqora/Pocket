@@ -61,9 +61,14 @@ posture-free (they never authorize anything).
 a record + suppression legalizes nothing — that change is evaluated under the baseline
 config, which has combined off. Enabling combined is itself a protected policy change,
 landing one merge before the first combined PR. And edits to an existing record's
-identity-critical fields (`rule` / `suppression_type` / `fingerprint` / `file`) or any
-expiry change stay on the protected track in *both* postures — `POLICY_CHANGE` on
-same-change consumption.
+identity-critical fields (`rule` / `suppression_type` / `fingerprint` / `file`) —
+including a re-point to a renamed file, which reads as an identity edit and never as a
+fresh grant — stay on the protected track in *both* postures: the delta reads `edit`,
+so `POLICY_CHANGE` fires on same-change consumption. A plain renewal (an in-place
+expiry edit) is protected by the gate rather than by the signal: it changes the delta
+not at all, no `POLICY_CHANGE` fires, and the baseline's expired record authorizes
+nothing — so the debt the renewal would cover reads as plain unauthorized new debt and
+fails the gate on its own.
 
 ## What each host can actually guarantee
 

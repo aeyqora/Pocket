@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { combinedLandingFacts } from "./combined-landing.js";
 import { EslintSession } from "./eslint.js";
-import { Git } from "./git.js";
-import { ownersFileFor, remoteFamily, type HostFamily } from "./host-attestation.js";
 import { DEFAULT_POLICY, parsePolicy } from "./policy.js";
 import { configPluginRuleNames, recognizeFile, type RecognizeFileResult } from "./recognize.js";
 import { allocateExceptions, isExpired, type UnclaimedRecord } from "./registry.js";
@@ -17,7 +16,6 @@ import {
   renderFinding,
   statusHygiene,
   validateRegistry,
-  type CombinedLandingFacts,
   type Finding,
   type HygieneContext,
   type RegistryEntry,
@@ -87,34 +85,9 @@ export async function runValidate(options: ValidateOptions): Promise<ValidateRes
   findings.push(...statusHygiene(entries, statuses, ctx));
   // Last, because these two are not about a record at all: they corroborate what
   // the checkout says about itself, which no registry reading can speak to.
-  findings.push(...combinedLandingHygiene(await hostAttestation(cwd, policy)));
+  findings.push(...combinedLandingHygiene(await combinedLandingFacts(cwd, policy)));
 
   return { findings, report: renderValidateReport(findings), exitCode: exitCodeOf(findings) };
-}
-
-/**
- * What the checkout says about the host it declared, gathered best-effort. Every
- * read here is allowed to come back empty — a directory that is not a repository,
- * a git that declines, an owners file that is not there — because `validate` is
- * a working-tree lint that must keep working outside a repository, and a fact it
- * could not observe is not a defect about a protected file.
- */
-async function hostAttestation(cwd: string, policy: Policy): Promise<CombinedLandingFacts> {
-  return {
-    host: policy.host,
-    combined: policy.allowSameChangeExceptions,
-    remote: remoteFamily(await originUrl(cwd)),
-    owners: ownersFileFor(cwd),
-  };
-}
-
-async function originUrl(cwd: string): Promise<string | null> {
-  try {
-    const git = await Git.discover(cwd);
-    return git.remoteUrl();
-  } catch {
-    return null;
-  }
 }
 
 /** A defect fails closed; hygiene never fails on its own. */

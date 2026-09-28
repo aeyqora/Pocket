@@ -17,7 +17,7 @@ import {
   errorRecords,
   loadRegistry,
 } from "./validate.js";
-import { detectPolicyChange, sanctionedAdditions, type PolicyChangeResult } from "./policy-change.js";
+import { detectPolicyChange, type PolicyChangeResult } from "./policy-change.js";
 import {
   buildRecord,
   consumedDebtCount,
@@ -198,15 +198,25 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         headLevels: analysis.headLevels,
       });
 
+      // One suppression, read in one place, by both of the terms that depend on
+      // it. When the host's path-scoped approval stands in for the second PR, the
+      // delta is a same-change exception: the sanctioned additions join coverage
+      // below, and neither the gate nor the `POLICY_CHANGE` signal is raised for
+      // it. `combined` is false on a delta that weakened nothing, so the union
+      // above needs no second term, while the signal below does — there is nothing
+      // to signal unless something weakened. `failure` is derived from the same
+      // field in the detector, so no term here can disagree with it.
+      const excepted = policyChange.combined;
+
       // The evaluation's registry: the baseline's, plus the additions the
-      // combined-landing opt-in sanctions. A record rides the one change it
+      // same-change exception sanctions. A record rides the one change it
       // authorizes, so the change's own record is what the change is judged
       // against; the union is also what the record is built from, which is the
       // honest reading of "the evaluation's coverage" — the record this run
-      // publishes names the record this run credited.
-      const records = policyChange.combined
-        ? [...registry, ...sanctionedAdditions(registry, headRegistry)]
-        : registry;
+      // publishes names the record this run credited. The additions come from
+      // the detector with the verdict, off one pass over the two registries,
+      // so the union and the verdict cannot disagree.
+      const records = excepted ? [...registry, ...policyChange.sanctioned] : registry;
       const coverage = coverExceptions({ head, records, now });
       // Overlong is hygiene over the *baseline* registry, like every other
       // cleanup counter: a landed date past the maximum still authorizes and is
@@ -233,7 +243,6 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
 
       const summary = summarize(coverage.head, baseline.length);
 
-
       // The expiry policy: a newly written date past the **baseline** maximum
       // refuses. Its own rule, its own error code, and its own gate term — a
       // registry-only change that legalizes nothing is still a failure, so it
@@ -255,11 +264,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       const gateFailure =
         summary.newDebt.unauthorized > 0 || policyChange.failure || refusals.length > 0;
 
-      // Suppressed outright when the host's path-scoped approval stands in for
-      // the second PR. The detector answers both terms together — an excepted delta
-      // is not a failure and raises no signal — so this is one question, not two
-      // halves of the same question.
-      if (policyChange.weakening && !policyChange.combined) {
+      if (policyChange.weakening && !excepted) {
         errors.push({
           code: "POLICY_CHANGE",
           message: policyChangeMessage(policyChange),
