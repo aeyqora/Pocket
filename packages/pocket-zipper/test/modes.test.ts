@@ -1,7 +1,10 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   createRepo,
+  configYaml,
   eslintConfig,
   exceptionYaml,
   NEXT_LINE_NO_CONSOLE_FP,
@@ -291,6 +294,84 @@ describe("pre-commit mode", () => {
     assert.equal(res.status, 1);
     assert.equal(res.record?.mode, "pre-commit");
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
+    assert.ok(hasExpiryPolicy(res.record));
+  });
+
+  /**
+   * The pre-commit side of the protected-file trigger. `CONTEXT.md` says the
+   * proposed change in this mode is the staged index; the worktree is read only
+   * for what the index does not carry.
+   */
+  it("judges nothing when a registry in the worktree is not staged", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    // Written and never staged, beside an empty staged diff. The proposed
+    // change is the index, and it carries nothing.
+    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    const res = r.runCli(["pre-commit"]);
+    assert.equal(res.status, 0);
+    assert.deepEqual(res.record?.errors, []);
+  });
+
+  it("judges nothing from a worktree registry it could not stage", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    // A locked index is not a thing an author does on purpose; it is what a
+    // hook racing another writer looks like. It is here because it is the one
+    // way the staged index stops being readable, and the fallback then reads
+    // the *worktree* — where a registry the change never staged is sitting. The
+    // change still contains nothing; the file it does not carry must not decide
+    // whether the change passes.
+    writeFileSync(join(r.dir, ".git", "index.lock"), "");
+    const res = r.runCli(["pre-commit"]);
+    assert.equal(res.status, 0);
+    assert.deepEqual(res.record?.errors, []);
+  });
+
+  it("judges nothing from a worktree config it could not stage", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    // The other protected file, on the same locked-index path, and the same
+    // reason the fallback reaches the worktree: `config.yml` is not in the index
+    // at all, so the head read has nothing staged to return and falls through to
+    // the worktree, where `enabled: false` is sitting untracked. Without a
+    // baseline `config.yml` the two documents differ, so an ungated
+    // `configWeakened` reports a weakening for a file the change never carried.
+    // The firing side is already pinned by "fails when a weakening edit is
+    // consumed by new debt in the same change"; what this closes is the gate.
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    writeFileSync(join(r.dir, ".git", "index.lock"), "");
+    const res = r.runCli(["pre-commit"]);
+    assert.equal(res.status, 0);
+    assert.deepEqual(res.record?.errors, []);
+  });
+
+  it("judges the same registry once it is staged", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    // The mirror of the two tests above, and the guard on them: the same
+    // registry, the same date, one `stage()` apart. If the trigger had been
+    // satisfied by switching the check off, this would pass too.
+    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    r.stage();
+    const res = r.runCli(["pre-commit"]);
+    assert.equal(res.status, 1);
     assert.ok(hasExpiryPolicy(res.record));
   });
 });

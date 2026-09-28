@@ -279,10 +279,13 @@ export function validateRegistry(raw: string | null): RegistryValidation {
 }
 
 /**
- * The failing read every evaluation path uses: the shared validation, then
- * fail-closed on any defect. The error carries the findings themselves, so a
- * caller can report one diagnostic per defect; its message is those same lines
- * joined, so a caller that reports the error whole still reads correctly.
+ * The failing read every evaluation path uses, for both trees: the shared
+ * validation, then fail-closed on any defect. The error carries the findings
+ * themselves, so a caller can report one diagnostic per defect; its message is
+ * those same lines joined, so a caller that reports the error whole still reads
+ * correctly. A registry malformed in the head of a change is the same defect as
+ * one malformed at baseline — a file this tool cannot read is a defect, never a
+ * delta to judge.
  */
 export function loadRegistry(raw: string | null): ExceptionRecord[] {
   const { entries, findings } = validateRegistry(raw);
@@ -290,26 +293,6 @@ export function loadRegistry(raw: string | null): ExceptionRecord[] {
   if (defects.length > 0) {
     throw new RegistryDefectError(defects);
   }
-  return entries.map((entry) => entry.record);
-}
-
-/**
- * The head-side read, beside the failing one: the same shared validation, but a
- * registry this tool cannot read yields `null` instead of an exception, because
- * the callers here are *judging* a proposed registry rather than enforcing one
- * and a document they cannot parse has no answer to "which dates did this change
- * newly write".
- *
- * A deliberate fail-open, matching `registryBroadened` (policy-change.ts): a
- * defective head registry is a defect in its own right, reported by
- * `validate` on the working tree and — from ticket 06 — by the head-side read
- * that fails closed. Until then, skipping the judgement here changes what is
- * reported, not whether a well-formed change passes. Do not "fix" this by
- * throwing: that is ticket 06's change, made where the defect is diagnosed.
- */
-export function readHeadRegistry(raw: string | null): ExceptionRecord[] | null {
-  const { entries, findings } = validateRegistry(raw);
-  if (defectsOf(findings).length > 0) return null;
   return entries.map((entry) => entry.record);
 }
 

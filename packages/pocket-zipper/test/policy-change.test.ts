@@ -1,18 +1,36 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { detectPolicyChange, type PolicyChangeInput } from "../src/policy-change.js";
+import { detectPolicyChange } from "../src/policy-change.js";
+import type { PolicyChangeInput, PolicyChangeResult } from "../src/policy-change.js";
+import { loadRegistry } from "../src/validate.js";
 
-function detect(overrides: Partial<PolicyChangeInput> = {}) {
+/**
+ * The detector's contract, with the registries written the way a *fixture*
+ * writes them — as documents — and parsed here by the failing read every
+ * evaluation path uses. The seam under test takes records (D4), so a defective
+ * registry cannot be expressed as a "not broadening" case at all: it throws
+ * before the detector is reached, which is the property the type buys.
+ */
+function detect(
+  overrides: Partial<Omit<PolicyChangeInput, "baselineRegistry" | "headRegistry">> & {
+    baselineRegistry?: string | null;
+    headRegistry?: string | null;
+  } = {},
+): PolicyChangeResult {
+  const { baselineRegistry = null, headRegistry = null, ...rest } = overrides;
   return detectPolicyChange({
     baselineConfig: null,
     headConfig: null,
-    baselineRegistry: null,
-    headRegistry: null,
+    baselineRegistry: baselineRegistry === null ? null : loadRegistry(baselineRegistry),
+    headRegistry: headRegistry === null ? null : loadRegistry(headRegistry),
     baselineGoverned: [],
     consumedDebt: 0,
     baselineLevels: [],
     headLevels: [],
-    ...overrides,
+    // Every case below is a "the protected document changed" case unless it says
+    // otherwise in its name.
+    protectedTouched: true,
+    ...rest,
   });
 }
 
@@ -20,9 +38,10 @@ const enabled = (value: boolean) => `enabled: ${value}\n`;
 const allowlist = (...rules: string[]) =>
   `governedRules:\n${rules.map((r) => `  - ${r}`).join("\n")}\n`;
 
-/** Two well-formed fingerprints: broadening compares match keys, not validity. */
+/** Three well-formed fingerprints: broadening compares match keys, not validity. */
 const FP_A = `v1:sha256:${"a".repeat(64)}`;
 const FP_B = `v1:sha256:${"b".repeat(64)}`;
+const FP_C = `v1:sha256:${"c".repeat(64)}`;
 
 function record(overrides: Record<string, string> = {}): string {
   const fields: Record<string, string> = {
@@ -41,6 +60,13 @@ function record(overrides: Record<string, string> = {}): string {
       .join("\n") + "\n"
   );
 }
+
+const lv = (
+  rule: string,
+  band: number,
+  files: string[] | null = null,
+  ignores: string[] | null = null,
+) => ({ rule, files, ignores, band });
 
 describe("policy-change: config weakening", () => {
   it("flags enabled true -> false", () => {
@@ -138,38 +164,128 @@ describe("policy-change: registry broadening", () => {
   it("ignores record order and formatting", () => {
     const a = record();
     const b = record({ rule: "no-debugger", fingerprint: FP_B });
-    assert.equal(detect({ baselineRegistry: a + b, headRegistry: b + a }).weakening, false);
+    // Reordering is the stronger half of "no delta": the same records, written
+    // in the other order, and the result names no change of either shape.
+    assert.deepEqual(detect({ baselineRegistry: a + b, headRegistry: b + a }), {
+      weakening: false,
+      failure: false,
+      source: "none",
+      registry: "none",
+      shape: "none",
+    });
   });
+});
 
-  it("does not read a defective head registry as broadening", () => {
-    // A registry this tool cannot read is a defect for the loader to report, not
-    // a policy edit: a head that only tightened its fingerprints has widened
-    // nothing.
-    assert.equal(detect({ headRegistry: "- rule: no-console\n" }).weakening, false);
-    assert.equal(detect({ baselineRegistry: record(), headRegistry: record() + "- rule: no-console\n" })
-      .weakening, false);
+/**
+ * The delta's two shapes. `registry` answers "how did the registry itself
+ * change"; `shape` answers "how did the whole delta change", which is the value
+ * ticket 07's combined-mode waiver reads.
+ */
+describe("policy-change: the registry delta's shape", () => {
+  it("reads a new match key as an additive grant", () => {
+    // The new key sits beside a record the head still carries, in the same file:
+    // nothing was re-pointed, so nothing was edited.
+    const kept = record({ rule: "no-debugger", fingerprint: FP_B });
     assert.equal(
-      detect({ baselineRegistry: record(), headRegistry: record({ fingerprint: "v1:fp:no-console" }) })
-        .weakening,
-      false,
+      detect({ baselineRegistry: kept, headRegistry: kept + record() }).registry,
+      "additive",
     );
   });
 
-  it("reads a defective baseline as authorizing nothing", () => {
-    // The mirror image, and the fail-closed one: whatever the head authorizes, the
-    // baseline authorized none of it. The loader reports the defect first.
+  it("reads a same-file repoint as an edit", () => {
+    // One record for another in the same file: the diff cannot tell this from a
+    // removal and an addition, and it must not read as a fresh grant.
     assert.equal(
-      detect({ baselineRegistry: "- rule: no-console\n", headRegistry: record() }).weakening,
-      true,
+      detect({
+        baselineRegistry: record({ rule: "no-debugger", fingerprint: FP_B }),
+        headRegistry: record(),
+      }).registry,
+      "edit",
     );
   });
 
-  it("treats identical defective registries as unchanged", () => {
+  it("reads a twin append as no delta", () => {
+    // The appended record shares the match key and differs only in the line a
+    // reader is helped by. The authorized set of match keys did not grow.
     assert.equal(
-      detect({ baselineRegistry: "- rule: no-console\n", headRegistry: "- rule: no-console\n" })
-        .weakening,
-      false,
+      detect({ baselineRegistry: record(), headRegistry: record() + record({ line: "7" }) })
+        .registry,
+      "none",
     );
+  });
+
+  it("prefers edit over additive when one delta carries both", () => {
+    const base = record() + record({ rule: "no-debugger", fingerprint: FP_B, file: "lib.js" });
+    // app.js gains a key beside its intact record: additive on its own.
+    const additive = record() + record({ suppression_type: "block" });
+    assert.equal(detect({ baselineRegistry: base, headRegistry: additive }).registry, "additive");
+    // The same change, plus lib.js re-pointing its own record. One more file,
+    // and the verdict flips — which is what keeps the waiver downstream from
+    // reading a combined PR as a fresh grant.
+    const both = additive + record({ rule: "no-debugger", fingerprint: FP_C, file: "lib.js" });
+    assert.equal(detect({ baselineRegistry: base, headRegistry: both }).registry, "edit");
+  });
+});
+
+describe("policy-change: shape against the surfaces that contributed", () => {
+  it("calls a sole registry grant additive", () => {
+    const result = detect({ headRegistry: record() });
+    assert.equal(result.registry, "additive");
+    assert.equal(result.shape, "additive");
+    assert.equal(result.source, "protected");
+  });
+
+  it("calls a registry grant beside an enabled flip an edit", () => {
+    const result = detect({
+      headRegistry: record(),
+      baselineConfig: enabled(true),
+      headConfig: enabled(false),
+    });
+    assert.equal(result.registry, "additive");
+    assert.equal(result.shape, "edit");
+    assert.equal(result.source, "protected");
+  });
+
+  it("calls a registry grant beside a severity drop an edit", () => {
+    const result = detect({
+      headRegistry: record(),
+      baselineGoverned: ["no-console"],
+      baselineLevels: [lv("no-console", 2)],
+      headLevels: [lv("no-console", 1)],
+    });
+    assert.equal(result.registry, "additive");
+    assert.equal(result.shape, "edit");
+    assert.equal(result.source, "both");
+  });
+});
+
+describe("policy-change: the protected-file trigger", () => {
+  it("reports nothing when the change touched no protected file", () => {
+    // A re-point that would otherwise read as an edit, judged with the flag off:
+    // a protected file the change does not touch is not part of the change.
+    const result = detect({
+      protectedTouched: false,
+      baselineRegistry: record({ rule: "no-debugger", fingerprint: FP_B }),
+      headRegistry: record(),
+    });
+    assert.equal(result.weakening, false);
+    assert.equal(result.shape, "none");
+    assert.equal(result.source, "none");
+  });
+
+  it("still reports a severity drop when the change touched no protected file", () => {
+    // The flag gates the two `.pocket-zipper` surfaces, not the ESLint flat
+    // config's own severities: a governed rule turned `off` or `warn` is the
+    // same policy change however the change is spelled, and four CLI tests pin
+    // that it fires without `eslint.config.*` being under `.pocket-zipper/**`.
+    const result = detect({
+      protectedTouched: false,
+      baselineGoverned: ["no-console"],
+      baselineLevels: [lv("no-console", 2)],
+      headLevels: [lv("no-console", 1)],
+    });
+    assert.equal(result.weakening, true);
+    assert.equal(result.source, "eslint-config");
   });
 });
 
@@ -179,32 +295,46 @@ describe("policy-change: consumption coupling", () => {
       weakening: false,
       failure: false,
       source: "none",
+      registry: "none",
+      shape: "none",
     });
   });
 
   it("records weakening without consumption as a pure policy edit", () => {
     assert.deepEqual(
       detect({ baselineConfig: enabled(true), headConfig: enabled(false), consumedDebt: 0 }),
-      { weakening: true, failure: false, source: "protected" },
+      { weakening: true, failure: false, source: "protected", registry: "none", shape: "edit" },
     );
   });
 
   it("fails a weakening delta consumed by new debt", () => {
     assert.deepEqual(
       detect({ baselineConfig: enabled(true), headConfig: enabled(false), consumedDebt: 3 }),
-      { weakening: true, failure: true, source: "protected" },
+      { weakening: true, failure: true, source: "protected", registry: "none", shape: "edit" },
     );
+  });
+
+  it("fails a consumed additive grant", () => {
+    // Both shapes gate identically in this ticket: the split changes the
+    // message, never the verdict. The waiver of the additive case is what
+    // ticket 06 defers, and this is the assertion that says so.
+    const result = detect({ headRegistry: record(), consumedDebt: 1 });
+    assert.equal(result.registry, "additive");
+    assert.equal(result.failure, true);
+  });
+
+  it("fails a consumed identity edit", () => {
+    const result = detect({
+      baselineRegistry: record({ rule: "no-debugger", fingerprint: FP_B }),
+      headRegistry: record(),
+      consumedDebt: 1,
+    });
+    assert.equal(result.registry, "edit");
+    assert.equal(result.failure, true);
   });
 });
 
 describe("policy-change: ESLint config severity weakening", () => {
-  const lv = (
-    rule: string,
-    band: number,
-    files: string[] | null = null,
-    ignores: string[] | null = null,
-  ) => ({ rule, files, ignores, band });
-
   it("flags lowering a governed rule from error to warn", () => {
     assert.deepEqual(
       detect({
@@ -212,7 +342,7 @@ describe("policy-change: ESLint config severity weakening", () => {
         baselineLevels: [lv("no-console", 2)],
         headLevels: [lv("no-console", 1)],
       }),
-      { weakening: true, failure: false, source: "eslint-config" },
+      { weakening: true, failure: false, source: "eslint-config", registry: "none", shape: "edit" },
     );
   });
 
@@ -275,7 +405,7 @@ describe("policy-change: ESLint config severity weakening", () => {
     assert.equal(
       detect({
         baselineGoverned: ["no-console"],
-        baselineLevels: [lv("no-console", 2)],
+        baselineLevels: [lv("no-console", 1)],
       }).weakening,
       false,
     );
@@ -333,7 +463,7 @@ describe("policy-change: ESLint config severity weakening", () => {
         headLevels: [lv("no-console", 1)],
         consumedDebt: 2,
       }),
-      { weakening: true, failure: true, source: "eslint-config" },
+      { weakening: true, failure: true, source: "eslint-config", registry: "none", shape: "edit" },
     );
   });
 
@@ -346,7 +476,7 @@ describe("policy-change: ESLint config severity weakening", () => {
         baselineLevels: [lv("no-console", 2)],
         headLevels: [lv("no-console", 1)],
       }),
-      { weakening: true, failure: false, source: "both" },
+      { weakening: true, failure: false, source: "both", registry: "none", shape: "edit" },
     );
   });
 });

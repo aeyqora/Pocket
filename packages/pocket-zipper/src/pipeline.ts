@@ -16,9 +16,8 @@ import {
   PROTECTED_REGISTRY,
   errorRecords,
   loadRegistry,
-  readHeadRegistry,
 } from "./validate.js";
-import { detectPolicyChange } from "./policy-change.js";
+import { detectPolicyChange, type PolicyChangeResult } from "./policy-change.js";
 import { buildRecord, excludedRecord, failureRecord, summarize } from "./record.js";
 import {
   canonicalCodeLine,
@@ -121,6 +120,15 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
           ? git.stagedChangeMap()
           : git.changeMap(trees.baselineCommit, trees.headCommit!);
 
+      // The trigger: the policy-change signal and the expiry refusal fire only
+      // when the change itself touched one of the two `.pocket-zipper` files.
+      // A protected file the change does not carry is not part of the change —
+      // most importantly, the pre-commit staged index is not judged by a
+      // worktree registry the change never staged. The ESLint-severity surface
+      // keeps its own structural gate, so it is not gated here.
+      const protectedTouched =
+        changeMap.files.has(PROTECTED_CONFIG) || changeMap.files.has(PROTECTED_REGISTRY);
+
       const analysis = await analyzeTrees({
         git,
         options,
@@ -181,11 +189,19 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       // nothing when nothing weakened.
       const headConfigRaw = readHeadContent(git, trees, options, headDir, PROTECTED_CONFIG);
       const headRegistryRaw = readHeadContent(git, trees, options, headDir, PROTECTED_REGISTRY);
+      // Hoisted above the detector: the split hands the detector parsed records,
+      // so the head read happens first. The throw lands before the first
+      // `errors.push`, so a malformed head registry can never also be reported
+      // as a policy change. The read is gated by the trigger too — an untracked
+      // worktree registry a pre-commit never staged must not be pulled in and
+      // validated into a false defect.
+      const headRegistry = protectedTouched ? loadRegistry(headRegistryRaw) : null;
       const policyChange = detectPolicyChange({
         baselineConfig: baselinePolicyRaw,
         headConfig: headConfigRaw,
-        baselineRegistry: baselineRegistryRaw,
-        headRegistry: headRegistryRaw,
+        baselineRegistry: registry,
+        headRegistry,
+        protectedTouched,
         baselineGoverned: governedBaseline,
         consumedDebt,
         baselineLevels: analysis.baselineLevels,
@@ -200,7 +216,6 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       // maximum comes from the baseline policy read above, never from the head
       // document sitting next to it: bumping `maxExpiry` in the same change
       // legalizes nothing.
-      const headRegistry = readHeadRegistry(headRegistryRaw);
       const refusals =
         headRegistry === null
           ? []
@@ -217,11 +232,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       if (policyChange.weakening) {
         errors.push({
           code: "POLICY_CHANGE",
-          message: policyChange.failure
-            ? "policy weakening consumed by new suppression debt in the same change"
-            : policyChange.source === "eslint-config"
-              ? "rule weakened in ESLint config: policy change recorded (review the config edit; not exceptable)"
-              : "policy weakening detected (routed through protected-branch review)",
+          message: policyChangeMessage(policyChange),
         });
       }
 
@@ -275,6 +286,32 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
     });
     return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined };
   }
+}
+
+/** The two shape clauses, appended to the routed/consumed sentences only when the registry contributed. */
+const ADDITIVE_CLAUSE =
+  ": a new exception record authorizes debt the baseline registry did not";
+const EDIT_CLAUSE =
+  ": an existing exception record's identity changed, so it now authorizes different debt";
+
+/**
+ * The `POLICY_CHANGE` error line: the shared weakening sentence, plus the
+ * registry's shape when the registry itself contributed. The `eslint-config`
+ * sentence never carries a clause — that surface has no registry shape to name.
+ */
+function policyChangeMessage(policyChange: PolicyChangeResult): string {
+  const sentence = policyChange.failure
+    ? "policy weakening consumed by new suppression debt in the same change"
+    : policyChange.source === "eslint-config"
+      ? "rule weakened in ESLint config: policy change recorded (review the config edit; not exceptable)"
+      : "policy weakening detected (routed through protected-branch review)";
+  const clause =
+    policyChange.registry === "additive"
+      ? ADDITIVE_CLAUSE
+      : policyChange.registry === "edit"
+        ? EDIT_CLAUSE
+        : "";
+  return `${sentence}${clause}`;
 }
 
 /**
