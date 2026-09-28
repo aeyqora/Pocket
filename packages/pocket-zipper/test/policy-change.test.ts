@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { detectPolicyChange } from "../src/policy-change.js";
 import type { PolicyChangeInput, PolicyChangeResult } from "../src/policy-change.js";
+import { DEFAULT_POLICY } from "../src/policy.js";
 import { loadRegistry } from "../src/validate.js";
 
 /**
@@ -25,6 +26,10 @@ function detect(
     headRegistry: headRegistry === null ? null : loadRegistry(headRegistry),
     baselineGoverned: [],
     consumedDebt: 0,
+    // No opt-in unless a case declares one: the exception is the only thing these
+    // literals' new `combined` field can turn on, and a default that opted in
+    // would make it a test of the default rather than of the shape.
+    baselinePolicy: { ...DEFAULT_POLICY },
     baselineLevels: [],
     headLevels: [],
     // Every case below is a "the protected document changed" case unless it says
@@ -172,6 +177,7 @@ describe("policy-change: registry broadening", () => {
       source: "none",
       registry: "none",
       shape: "none",
+      combined: false,
     });
   });
 });
@@ -297,20 +303,21 @@ describe("policy-change: consumption coupling", () => {
       source: "none",
       registry: "none",
       shape: "none",
+      combined: false,
     });
   });
 
   it("records weakening without consumption as a pure policy edit", () => {
     assert.deepEqual(
       detect({ baselineConfig: enabled(true), headConfig: enabled(false), consumedDebt: 0 }),
-      { weakening: true, failure: false, source: "protected", registry: "none", shape: "edit" },
+      { weakening: true, failure: false, source: "protected", registry: "none", shape: "edit", combined: false },
     );
   });
 
   it("fails a weakening delta consumed by new debt", () => {
     assert.deepEqual(
       detect({ baselineConfig: enabled(true), headConfig: enabled(false), consumedDebt: 3 }),
-      { weakening: true, failure: true, source: "protected", registry: "none", shape: "edit" },
+      { weakening: true, failure: true, source: "protected", registry: "none", shape: "edit", combined: false },
     );
   });
 
@@ -342,7 +349,7 @@ describe("policy-change: ESLint config severity weakening", () => {
         baselineLevels: [lv("no-console", 2)],
         headLevels: [lv("no-console", 1)],
       }),
-      { weakening: true, failure: false, source: "eslint-config", registry: "none", shape: "edit" },
+      { weakening: true, failure: false, source: "eslint-config", registry: "none", shape: "edit", combined: false },
     );
   });
 
@@ -463,7 +470,7 @@ describe("policy-change: ESLint config severity weakening", () => {
         headLevels: [lv("no-console", 1)],
         consumedDebt: 2,
       }),
-      { weakening: true, failure: true, source: "eslint-config", registry: "none", shape: "edit" },
+      { weakening: true, failure: true, source: "eslint-config", registry: "none", shape: "edit", combined: false },
     );
   });
 
@@ -476,7 +483,7 @@ describe("policy-change: ESLint config severity weakening", () => {
         baselineLevels: [lv("no-console", 2)],
         headLevels: [lv("no-console", 1)],
       }),
-      { weakening: true, failure: false, source: "both", registry: "none", shape: "edit" },
+      { weakening: true, failure: false, source: "both", registry: "none", shape: "edit", combined: false },
     );
   });
 });

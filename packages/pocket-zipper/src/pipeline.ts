@@ -17,8 +17,14 @@ import {
   errorRecords,
   loadRegistry,
 } from "./validate.js";
-import { detectPolicyChange, type PolicyChangeResult } from "./policy-change.js";
-import { buildRecord, excludedRecord, failureRecord, summarize } from "./record.js";
+import { detectPolicyChange, sanctionedAdditions, type PolicyChangeResult } from "./policy-change.js";
+import {
+  buildRecord,
+  consumedDebtCount,
+  excludedRecord,
+  failureRecord,
+  summarize,
+} from "./record.js";
 import {
   canonicalCodeLine,
   canonicalMovementLine,
@@ -158,29 +164,12 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         headIndex: analysis.headIndex,
       });
 
-      const coverage = coverExceptions({ head, records: registry, now });
-      // Overlong is hygiene over the *baseline* registry, like every other
-      // cleanup counter: a landed date past the maximum still authorizes and is
-      // counted, and a change that newly writes one is refused below. Derived
-      // here, not in `validate`, so the report reads the evaluation's own
-      // statuses (expired wins) — while `pocket-zipper validate` lints the
-      // working tree and so reads the *head* policy's maximum. That divergence
-      // is correct: the two commands answer different questions.
-      const overlong = overlongRecords({
-        records: registry,
-        statuses: coverage.statuses,
-        now,
-        maxExpiry: policy.exceptions.maxExpiry,
-      });
-      const cleanup = {
-        expired: coverage.counts.expired,
-        dangling: coverage.counts.dangling,
-        spent: coverage.counts.spent,
-        overlong: overlong.length,
-      };
-
-      const summary = summarize(coverage.head, baseline.length);
-      const consumedDebt = summary.newDebt.authorized + summary.newDebt.unauthorized;
+      // The gate's failure term, before anything is authorized. Coverage cannot
+      // move it, and that is what lets the order below run shape → opt-in →
+      // coverage: the verdict decides which records may join coverage, so a
+      // verdict derived from coverage would be waiting for an answer it is
+      // supposed to give.
+      const consumedDebt = consumedDebtCount(head);
 
       // Weakening is judged against both protected surfaces: the
       // `.pocket-zipper` policy documents and the ESLint flat config's own rule
@@ -204,9 +193,46 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         protectedTouched,
         baselineGoverned: governedBaseline,
         consumedDebt,
+        baselinePolicy: policy,
         baselineLevels: analysis.baselineLevels,
         headLevels: analysis.headLevels,
       });
+
+      // The evaluation's registry: the baseline's, plus the additions the
+      // combined-landing opt-in sanctions. A record rides the one change it
+      // authorizes, so the change's own record is what the change is judged
+      // against; the union is also what the record is built from, which is the
+      // honest reading of "the evaluation's coverage" — the record this run
+      // publishes names the record this run credited.
+      const records = policyChange.combined
+        ? [...registry, ...sanctionedAdditions(registry, headRegistry)]
+        : registry;
+      const coverage = coverExceptions({ head, records, now });
+      // Overlong is hygiene over the *baseline* registry, like every other
+      // cleanup counter: a landed date past the maximum still authorizes and is
+      // counted, and a change that newly writes one is refused below. It stays
+      // baseline-only even when a record rides, because a newly written
+      // far-future date is already a refusal and counting it as hygiene too is
+      // the same failure reported twice. Derived here, not in `validate`, so the
+      // report reads the evaluation's own statuses (expired wins) — while
+      // `pocket-zipper validate` lints the working tree and so reads the *head*
+      // policy's maximum. That divergence is correct: the two commands answer
+      // different questions.
+      const overlong = overlongRecords({
+        records: registry,
+        statuses: coverage.statuses,
+        now,
+        maxExpiry: policy.exceptions.maxExpiry,
+      });
+      const cleanup = {
+        expired: coverage.counts.expired,
+        dangling: coverage.counts.dangling,
+        spent: coverage.counts.spent,
+        overlong: overlong.length,
+      };
+
+      const summary = summarize(coverage.head, baseline.length);
+
 
       // The expiry policy: a newly written date past the **baseline** maximum
       // refuses. Its own rule, its own error code, and its own gate term — a
@@ -229,7 +255,11 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       const gateFailure =
         summary.newDebt.unauthorized > 0 || policyChange.failure || refusals.length > 0;
 
-      if (policyChange.weakening) {
+      // Suppressed outright when the host's path-scoped approval stands in for
+      // the second PR. The detector answers both terms together — an excepted delta
+      // is not a failure and raises no signal — so this is one question, not two
+      // halves of the same question.
+      if (policyChange.weakening && !policyChange.combined) {
         errors.push({
           code: "POLICY_CHANGE",
           message: policyChangeMessage(policyChange),
@@ -256,7 +286,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         governedRules: governedHead,
         head: coverage.head,
         removed: baseline,
-        registry,
+        registry: records,
         cleanup,
         poolCounts: coverage.pools,
         exceptionStatuses: coverage.statuses,

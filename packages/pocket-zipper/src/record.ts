@@ -61,6 +61,22 @@ export function summarize(
   };
 }
 
+/**
+ * New debt this change brought, as a count — the gate's failure term, derived
+ * before anything is authorized. Coverage cannot move it: a suppression's
+ * disposition is a property of the directives, and `summarize` partitions on
+ * that before it splits authorized from unauthorized, so the same predicate
+ * answers "how much debt" and "how much of it is unauthorized".
+ *
+ * Hoisting the count here rather than reading it off `summarize`'s result is
+ * what lets the policy-change verdict be reached before the coverage pass: the
+ * verdict decides whether a record may join coverage, so a verdict that waited
+ * for coverage would wait for an answer it is supposed to give.
+ */
+export function consumedDebtCount(head: readonly ReconciledSuppression[]): number {
+  return head.filter(isNewDebt).length;
+}
+
 export interface BuildRecordInput {
   mode: Mode;
   verdict: Verdict;

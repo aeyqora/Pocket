@@ -81,6 +81,19 @@ export class Git {
     return res.status === 0;
   }
 
+  /**
+   * The `origin` remote's URL, or null when the repository has no `origin` or
+   * git declines to name one. Never throws, because its only caller is
+   * `validate` — a working-tree lint that must keep working outside a
+   * repository, where a read that failed would be a defect about a file nobody
+   * has asked about.
+   */
+  remoteUrl(): string | null {
+    const res = this.run(["remote", "get-url", "origin"], { allowFail: true });
+    const url = res.stdout.trim();
+    return res.status === 0 && url.length > 0 ? url : null;
+  }
+
   revParse(ref: string, opts: { verify?: boolean } = {}): string {
     const args = ["rev-parse"];
     if (opts.verify) args.push("--verify", "--quiet");

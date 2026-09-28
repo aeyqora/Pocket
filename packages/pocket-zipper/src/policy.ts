@@ -24,6 +24,22 @@ export const HOSTS: readonly Host[] = [
   "bitbucket-server",
 ];
 
+/**
+ * The hosts that can guarantee a **distinct, path-scoped approval** for
+ * `.pocket-zipper/**` — the layer combined landing substitutes for the second
+ * protected PR. GitHub's rulesets and required-CODEOWNERS reviews, and GitLab
+ * Premium's enforced approval rules, are the two that can make "a different
+ * human approved this path" a fact the host will not let a PR skip. Everything
+ * else in the value space either has no such layer or has one that only warns,
+ * which is precisely the fail-open the opt-in refuses to buy.
+ */
+export const CAN_GUARANTEE_HOSTS: readonly Host[] = ["github", "gitlab-premium"];
+
+/** Whether a declared host can guarantee the distinct path approval the opt-in relies on. */
+export function canGuaranteePathApproval(host: Host | null): boolean {
+  return host !== null && CAN_GUARANTEE_HOSTS.includes(host);
+}
+
 /** Top-level keys the policy document may carry; anything else is rejected. */
 const KNOWN_KEYS = new Set([
   "enabled",
@@ -249,6 +265,17 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
   }
   if (!view.hostValid) {
     throw configError(`.pocket-zipper/config.yml: 'host' must be one of: ${HOSTS.join(", ")}`);
+  }
+  // The pair is one setting, not two. Combined landing trades the second
+  // protected PR for the host's own path-scoped approval on `.pocket-zipper/**`,
+  // so a host that cannot guarantee one makes the trade a silent fail-open — the
+  // path would get no distinct approval and nothing in the tool would say so.
+  // A self-contradicting config cannot opt in: the repository stays two-step.
+  if (view.allowSameChangeExceptions && !canGuaranteePathApproval(view.host)) {
+    const values = CAN_GUARANTEE_HOSTS.map((h) => `'${h}'`).join(" or ");
+    throw configError(
+      `.pocket-zipper/config.yml: 'allowSameChangeExceptions' requires a 'host' that can guarantee a distinct, path-scoped approval for .pocket-zipper/** (${values}) — the opt-in substitutes that approval for the second protected PR, and a host that cannot guarantee it would leave the policy path unowned by anyone in particular; this config is self-contradicting, so the repository stays on the two-step landing`,
+    );
   }
 
   const exceptions: Policy["exceptions"] = {

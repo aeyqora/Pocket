@@ -1,6 +1,6 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRepo, eslintConfig, exceptionYaml, NEXT_LINE_NO_CONSOLE_FP, NEXT_LINE_NO_DEBUGGER_FP, type FixtureRepo } from "./harness.js";
+import { configYaml, createRepo, eslintConfig, exceptionYaml, NEXT_LINE_NO_CONSOLE_FP, NEXT_LINE_NO_DEBUGGER_FP, type FixtureRepo } from "./harness.js";
 import { addDuration } from "../src/policy.js";
 import {
   defectsOf,
@@ -892,5 +892,243 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
       assert.match(res.stderr, /unknown argument/, args.join(" "));
     }
     assert.deepEqual(validate(r).status, 0);
+  });
+});
+
+// --- the combined-landing corroborations ----------------------------------
+
+/** The committed owners file, in the location a GitHub checkout reads it from. */
+const OWNERS = ".github/CODEOWNERS";
+
+/** The three remotes a checkout can be classified from, one per known domain. */
+const GITHUB_REMOTE = "git@github.com:team/repo.git";
+const BITBUCKET_REMOTE = "git@bitbucket.org:team/repo.git";
+const GITLAB_REMOTE = "https://gitlab.com/team/repo.git";
+
+/** An owners file that already claims the policy path, so only the host arm can speak. */
+const COVERS_POLICY_PATH = ".pocket-zipper/** @repo-owner\n";
+
+/**
+ * The two corroborations read *config* for a mismatch: what the config declares
+ * against what the checkout actually is. The core never reads approval state, so
+ * these are the only in-tool signals a combined repo gets before its distinct
+ * path-scoped approval quietly stops existing — and both are hygiene, so neither
+ * can fail a run. That last part is asserted in every test here.
+ */
+describe("validate: the combined-landing corroborations", () => {
+  const repos: FixtureRepo[] = [];
+  after(() => repos.forEach((r) => r.cleanup()));
+
+  /**
+   * A repo shaped like an attestation: the config declares, the remote observes,
+   * and the owners file is whatever the test says the host would read. Each of
+   * the three is opt-out and no other fact is in play, so the count on the
+   * verdict line is exactly what the two corroborations contributed.
+   */
+  function repo(opts: {
+    combined?: boolean;
+    host?: string;
+    remote?: string;
+    owners?: string | null;
+  } = {}): FixtureRepo {
+    const r = createRepo();
+    repos.push(r);
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.write(
+      CONFIG,
+      configYaml({
+        enabled: true,
+        ...(opts.combined === undefined ? {} : { allowSameChangeExceptions: opts.combined }),
+        ...(opts.host === undefined ? {} : { host: opts.host }),
+      }),
+    );
+    // A registry with no records is still a protected file present, which is the
+    // precondition both corroborations read — and contributes no finding of its
+    // own, so the two arms are the only thing the count can be talking about.
+    r.write(REGISTRY, "# nothing yet\n");
+    if (opts.owners) r.write(OWNERS, opts.owners);
+    if (opts.remote) r.git(["remote", "add", "origin", opts.remote]);
+    return r;
+  }
+
+  /** `validate`'s own exit code and diagnostic lines, as the block above reads them. */
+  function validate(r: FixtureRepo): { status: number; lines: string[] } {
+    const res = r.runCli(["validate"], { json: false });
+    return { status: res.status, lines: res.stdout.trimEnd().split("\n") };
+  }
+
+  /**
+   * The diagnostic lines carrying one code. Matching on the code's own greppable
+   * token keeps a `path:line:col` prefix and any scope segment free to vary; only
+   * the code is the contract.
+   */
+  function findingsFor(lines: string[], code: string): string[] {
+    return lines.filter((line) => line.includes(`  ${code}  `));
+  }
+
+  /** The protected file a diagnostic line is about: its first greppable field. */
+  function pathOf(line: string): string {
+    return line.split("  ")[0]!;
+  }
+
+  it("flags a github declaration against a Bitbucket remote, and still exits 0", () => {
+    const r = repo({ combined: true, host: "github", remote: BITBUCKET_REMOTE, owners: COVERS_POLICY_PATH });
+    const { status, lines } = validate(r);
+    // The config check and this corroboration are separate answers: combined on
+    // `github` is a *legal* config, and the remote is what says the repo is not
+    // on GitHub. Both are true at once, and only the finding says so.
+    assert.equal(status, 0);
+    assert.equal(lines[0], "pocket-zipper: OK (0 defects, 1 hygiene finding)");
+    const [finding] = findingsFor(lines, "HOST_MISMATCH");
+    assert.ok(finding, `expected a HOST_MISMATCH line, got ${JSON.stringify(lines)}`);
+    assert.ok(finding.startsWith(CONFIG), finding);
+    // The line names both sides of the disagreement: a declaration without the
+    // thing it disagrees with is not actionable, and one with only the observed
+    // host is not greppable by a declared `host: github`.
+    assert.match(finding, /github/, finding);
+    assert.match(finding, /bitbucket/, finding);
+  });
+
+  it("flags a bitbucket declaration against a GitHub remote, so the cross-check is not one-way", () => {
+    // `bitbucket-cloud` with the opt-in off is a legal config, and the one every
+    // two-step Bitbucket repo runs; a check that only looked for a github
+    // declaration would pass it silently.
+    const r = repo({ host: "bitbucket-cloud", remote: GITHUB_REMOTE, owners: COVERS_POLICY_PATH });
+    const { status, lines } = validate(r);
+    assert.equal(status, 0);
+    assert.equal(lines[0], "pocket-zipper: OK (0 defects, 1 hygiene finding)");
+    const [finding] = findingsFor(lines, "HOST_MISMATCH");
+    assert.ok(finding, `expected a HOST_MISMATCH line, got ${JSON.stringify(lines)}`);
+    assert.match(finding, /bitbucket/, finding);
+    assert.match(finding, /github/, finding);
+  });
+
+  it("says nothing when the checkout has no remote to compare against", () => {
+    // A `git clone` always has one; a tarball, a vendored dependency, and CI's
+    // `actions/checkout` without a `fetch-depth` remote may not. Absent is not
+    // disagreeing, and a finding here would train authors to ignore the finding.
+    const r = repo({ combined: true, host: "github", owners: COVERS_POLICY_PATH });
+    assert.deepEqual(validate(r), {
+      status: 0,
+      lines: ["pocket-zipper: OK (0 defects, 0 hygiene findings)"],
+    });
+  });
+
+  it("says nothing on a remote it cannot classify, on a custom domain or a self-hosted GitLab", () => {
+    for (const remote of [
+      "https://git.example.com/team/repo.git",
+      "https://gitlab.example.com/team/repo.git",
+      "git@mirror.internal:repos/team/repo.git",
+    ]) {
+      const r = repo({ combined: true, host: "github", remote, owners: COVERS_POLICY_PATH });
+      // The docs say warn-only, and say why: custom-domain, self-hosted, mirror
+      // and no-remote checkouts are not classifiable from a remote URL. Calling
+      // `gitlab.example.com` a mismatch would cry wolf at a repo doing exactly
+      // the right thing, which is the one way this finding loses its value.
+      assert.deepEqual(validate(r), {
+        status: 0,
+        lines: ["pocket-zipper: OK (0 defects, 0 hygiene findings)"],
+      }, remote);
+    }
+  });
+
+  it("reads a GitLab plan as invisible in the remote, on either plan", () => {
+    // The tier is not in a remote URL, so folding it away is forced: an
+    // implementation that compared plans would flag every premium repo on
+    // `gitlab.com` as a mismatch against itself, and would flag the free tier
+    // as agreeing for the wrong reason.
+    for (const posture of [
+      { host: "gitlab-premium", combined: true },
+      { host: "gitlab-free", combined: false },
+    ]) {
+      const r = repo({ ...posture, remote: GITLAB_REMOTE, owners: COVERS_POLICY_PATH });
+      assert.deepEqual(validate(r), {
+        status: 0,
+        lines: ["pocket-zipper: OK (0 defects, 0 hygiene findings)"],
+      }, posture.host);
+    }
+  });
+
+  it("surfaces each protected path that no owners file claims at all", () => {
+    const r = repo({ combined: true, host: "github", remote: GITHUB_REMOTE });
+    const { status, lines } = validate(r);
+    // Two paths, two findings, because a finding is about one file: the config
+    // and the registry are approved separately, and a repo owning one of them
+    // has exactly the one-gap fail-open this is meant to surface.
+    assert.equal(status, 0);
+    assert.equal(lines[0], "pocket-zipper: OK (0 defects, 2 hygiene findings)");
+    assert.deepEqual(findingsFor(lines, "OWNERS_FILE_READINESS").map(pathOf).sort(), [
+      CONFIG,
+      REGISTRY,
+    ]);
+  });
+
+  it("surfaces the policy path when a committed owners file claims everything else", () => {
+    const r = repo({
+      combined: true,
+      host: "github",
+      remote: GITHUB_REMOTE,
+      owners: "# owners\napp.js @repo-owner\n",
+    });
+    const { status, lines } = validate(r);
+    // The ordinary silent fail-open: a repo with real owners, where the policy
+    // path was simply never added to them. The owners file being present is
+    // therefore not evidence that the path is owned, and the two cases are
+    // deliberately not collapsed into one.
+    assert.equal(status, 0);
+    assert.equal(lines[0], "pocket-zipper: OK (0 defects, 2 hygiene findings)");
+    assert.deepEqual(findingsFor(lines, "OWNERS_FILE_READINESS").map(pathOf).sort(), [
+      CONFIG,
+      REGISTRY,
+    ]);
+  });
+
+  it("accepts any of the spellings an owners file uses to claim the policy path", () => {
+    for (const rule of [
+      ".pocket-zipper/** @repo-owner",
+      "/.pocket-zipper/** @repo-owner",
+      "/.pocket-zipper/ @repo-owner",
+      "[Registry]\n.pocket-zipper/ @repo-owner",
+    ]) {
+      const r = repo({ combined: true, host: "github", remote: GITHUB_REMOTE, owners: `${rule}\n` });
+      // CODEOWNERS has four ways to say this, and the example files in
+      // `docs/ci/examples/` use all of them. Refusing the ones that plainly do
+      // claim the path would push authors to a gitignore engine this tool has
+      // no business implementing.
+      assert.deepEqual(validate(r), {
+        status: 0,
+        lines: ["pocket-zipper: OK (0 defects, 0 hygiene findings)"],
+      }, JSON.stringify(rule));
+    }
+  });
+
+  it("reports both corroborations in one run, and still exits 0", () => {
+    const r = repo({ combined: true, host: "github", remote: BITBUCKET_REMOTE });
+    // The whole point of hygiene: a repo that is failing both ways is told so,
+    // and the run still passes. Only the host's own branch protection can turn
+    // these into a gate, which is exactly why the tool must not exit non-zero.
+    const { status, lines } = validate(r);
+    assert.equal(status, 0);
+    assert.equal(lines[0], "pocket-zipper: OK (0 defects, 3 hygiene findings)");
+    assert.equal(findingsFor(lines, "HOST_MISMATCH").length, 1);
+    assert.equal(findingsFor(lines, "OWNERS_FILE_READINESS").length, 2);
+  });
+
+  it("stays silent on a repository that governs nothing", () => {
+    const r = createRepo();
+    repos.push(r);
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.write(OWNERS, `${COVERS_POLICY_PATH}app.js @repo-owner\n`);
+    r.git(["remote", "add", "origin", GITHUB_REMOTE]);
+    // Both protected files absent is the short-circuit `runValidate` already
+    // takes, and it has to keep taking it: with no config there is no declared
+    // host to disagree with anything, and a tool that reported on a repository
+    // that governs nothing has nothing to report.
+    assert.deepEqual(validate(r), {
+      status: 0,
+      lines: ["pocket-zipper: OK (0 defects, 0 hygiene findings)"],
+    });
   });
 });

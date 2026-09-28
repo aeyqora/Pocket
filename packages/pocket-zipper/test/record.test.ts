@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildRecord,
+  consumedDebtCount,
   excludedRecord,
   failureRecord,
   summarize,
@@ -93,7 +94,46 @@ describe("record: summarize", () => {
     const summary = summarize([head({ disposition: "moved-existing" })], 4);
     assert.deepEqual(summary.newDebt, { authorized: 0, unauthorized: 0 });
   });
+
+  it("derives the same new-debt count before coverage as after it", () => {
+    // The invariant the gate's reordering rests on: the failure term is derived
+    // from the reconciled head *before* any record is authorized, because the
+    // verdict decides which records may authorize. `summarize` splits the same
+    // debt into authorized and unauthorized, and the two together must always be
+    // this count — an `exception` appears on both sides of that sum with
+    // opposite signs, so coverage cannot move it. If this ever fails, the
+    // same-change exception is unreachable rather than merely wrong.
+    const debt = [
+      head({ disposition: "new", exception: ref }),
+      head({ disposition: "new", exception: null }),
+      head({ disposition: "materially-changed", exception: ref }),
+      head({ disposition: "existing", exception: null }),
+      head({ disposition: "moved-existing", exception: ref }),
+    ];
+    // Every authorization state, not just the mixed one: the sum has to hold
+    // when nothing is authorized, when everything is, and in between.
+    for (const authorized of [true, false]) {
+      const covered = debt.map((h) =>
+        h.disposition === "existing" || h.disposition === "moved-existing" || !authorized
+          ? h
+          : { ...h, exception: ref },
+      );
+      const { newDebt } = summarize(covered, 0);
+      assert.equal(consumedDebtCount(downgraded(debt, authorized)), newDebt.authorized + newDebt.unauthorized);
+    }
+  });
 });
+
+/** The same debt with the pre-coverage shape: no suppression carries a reference. */
+function downgraded(head: readonly ReconciledSuppression[], authorized: boolean): ReconciledSuppression[] {
+  return head.map((h) => ({
+    ...h,
+    exception:
+      authorized && (h.disposition === "new" || h.disposition === "materially-changed")
+        ? ref
+        : null,
+  }));
+}
 
 describe("record: buildRecord", () => {
   const record: ExceptionRecord = {

@@ -178,7 +178,14 @@ describe("policy: exceptions stanza parsing", () => {
   });
 
   it("parses allowSameChangeExceptions as a typed boolean", () => {
-    assert.equal(parsePolicy("allowSameChangeExceptions: true\n", KNOWN).allowSameChangeExceptions, true);
+    // The opt-in is paired with a can-guarantee host in the accepting cases,
+    // because the pair is what the key means: `true` on its own is now a
+    // self-contradicting config, and the type check is judged before that one.
+    assert.equal(
+      parsePolicy("allowSameChangeExceptions: true\nhost: github\n", KNOWN)
+        .allowSameChangeExceptions,
+      true,
+    );
     assert.equal(parsePolicy("allowSameChangeExceptions: false\n", KNOWN).allowSameChangeExceptions, false);
     assertConfigError(
       () => parsePolicy("allowSameChangeExceptions: \"true\"\n", KNOWN),
@@ -190,7 +197,7 @@ describe("policy: exceptions stanza parsing", () => {
     );
   });
 
-  it("parses host as a typed enum (semantics deferred to ticket 07)", () => {
+  it("parses host as a typed enum", () => {
     assert.equal(parsePolicy("host: github\n", KNOWN).host, "github");
     assert.equal(parsePolicy("host: gitlab-premium\n", KNOWN).host, "gitlab-premium");
     assert.equal(parsePolicy("host: bitbucket-server\n", KNOWN).host, "bitbucket-server");
