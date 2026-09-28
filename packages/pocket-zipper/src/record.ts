@@ -71,7 +71,13 @@ export interface BuildRecordInput {
   head: ReconciledSuppression[];
   removed: LogicalSuppression[];
   registry: ExceptionRecord[];
-  cleanup: { expired: number; dangling: number; spent: number };
+  cleanup: {
+    expired: number;
+    dangling: number;
+    spent: number;
+    /** Baseline records past the policy's maximum: hygiene, never a gate failure. */
+    overlong: number;
+  };
   /** The `(rule, file)` pools holding debt to allocate, ordered by rule then file. */
   poolCounts: PoolCount[];
   exceptionStatuses: Map<ExceptionRecord, ExceptionStatus>;
@@ -111,6 +117,7 @@ export function buildRecord(input: BuildRecordInput): EvaluationRecord {
       danglingExceptions: input.cleanup.dangling,
       spentExceptions: input.cleanup.spent,
       expiredExceptions: input.cleanup.expired,
+      overlongExceptions: input.cleanup.overlong,
       poolCounts: input.poolCounts,
     },
   };
@@ -188,6 +195,7 @@ function emptySummary(policy: Policy = DEFAULT_POLICY): EvaluationSummary {
       danglingExceptions: 0,
       spentExceptions: 0,
       expiredExceptions: 0,
+      overlongExceptions: 0,
       poolCounts: [],
     },
   };

@@ -19,6 +19,7 @@ export type ErrorCode =
   | "ESLINT_ERROR"
   | "CONFIG_ERROR"
   | "POLICY_CHANGE"
+  | "EXPIRY_POLICY"
   | "INTERNAL_ERROR";
 
 export type Mode = "check" | "pre-commit";
@@ -149,6 +150,12 @@ export interface EvaluationSummary {
     danglingExceptions: number;
     spentExceptions: number;
     expiredExceptions: number;
+    /**
+     * Baseline records whose `expires` runs past the policy's maximum: hygiene
+     * that still authorizes, counted here and refused only when a change newly
+     * writes one (see `expiryPolicyRefusals`). Never a gate failure on its own.
+     */
+    overlongExceptions: number;
     poolCounts: PoolCount[];
   };
 }

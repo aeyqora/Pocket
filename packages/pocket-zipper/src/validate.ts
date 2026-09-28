@@ -3,7 +3,7 @@ import type { Pair } from "yaml";
 import { PocketZipperError } from "./errors.js";
 import { matchKey } from "./identity.js";
 import { expiryHorizon } from "./policy.js";
-import { countKey, poolCountLine, type UnclaimedRecord } from "./registry.js";
+import { countKey, isOverlong, poolCountLine, type UnclaimedRecord } from "./registry.js";
 import type {
   DurationLiteral,
   ExceptionRecord,
@@ -290,6 +290,26 @@ export function loadRegistry(raw: string | null): ExceptionRecord[] {
   if (defects.length > 0) {
     throw new RegistryDefectError(defects);
   }
+  return entries.map((entry) => entry.record);
+}
+
+/**
+ * The head-side read, beside the failing one: the same shared validation, but a
+ * registry this tool cannot read yields `null` instead of an exception, because
+ * the callers here are *judging* a proposed registry rather than enforcing one
+ * and a document they cannot parse has no answer to "which dates did this change
+ * newly write".
+ *
+ * A deliberate fail-open, matching `registryBroadened` (policy-change.ts): a
+ * defective head registry is a defect in its own right, reported by
+ * `validate` on the working tree and — from ticket 06 — by the head-side read
+ * that fails closed. Until then, skipping the judgement here changes what is
+ * reported, not whether a well-formed change passes. Do not "fix" this by
+ * throwing: that is ticket 06's change, made where the defect is diagnosed.
+ */
+export function readHeadRegistry(raw: string | null): ExceptionRecord[] | null {
+  const { entries, findings } = validateRegistry(raw);
+  if (defectsOf(findings).length > 0) return null;
   return entries.map((entry) => entry.record);
 }
 
@@ -845,7 +865,7 @@ export function recordHygiene(
         actual: record.rule,
       });
     }
-    if (record.expires !== undefined && record.expires > horizon) {
+    if (isOverlong(record, horizon)) {
       const stale = staleNote(record, ctx);
       emit("expires", {
         code: "OVERLONG_EXCEPTION",

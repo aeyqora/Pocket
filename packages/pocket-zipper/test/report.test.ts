@@ -41,6 +41,7 @@ function record(overrides: RecordOverrides = {}): EvaluationRecord {
         danglingExceptions: 0,
         spentExceptions: 0,
         expiredExceptions: 0,
+        overlongExceptions: 0,
         poolCounts: [],
         ...overrides.cleanup,
       },
@@ -268,5 +269,48 @@ describe("the per-pool count line", () => {
       { verbose: false, tty: false },
     );
     assert.doesNotMatch(out, /For this rule at this file/);
+  });
+});
+
+/**
+ * The overlong-exceptions line: the count of baseline records whose expiry is
+ * past the resolved maximum, printed beside the unused-exceptions block. The
+ * maximum travels through `ReportOptions` the way `suggestedExpiry` does —
+ * the pipeline resolves policy, the renderer prints.
+ */
+describe("the overlong-exceptions line", () => {
+  it("prints on a fail, naming the maximum", () => {
+    const out = renderReport(
+      record({ verdict: "fail", newDebt: { unauthorized: 1 }, cleanup: { overlongExceptions: 1 } }),
+      { verbose: false, tty: false, maxExpiry: "3mo" },
+    );
+    assert.match(out, /^  Overlong exceptions: 1 \(expires past the 3mo maximum\)$/m);
+  });
+
+  it("prints on a verbose pass", () => {
+    const out = renderReport(
+      record({ cleanup: { overlongExceptions: 1 } }),
+      { verbose: true, tty: false, maxExpiry: "3mo" },
+    );
+    assert.match(out, /^  Overlong exceptions: 1 \(expires past the 3mo maximum\)$/m);
+  });
+
+  it("stays off a quiet pass, and off a record with none overlong", () => {
+    assert.equal(
+      renderReport(record({ cleanup: { overlongExceptions: 1 } }), {
+        verbose: false,
+        tty: false,
+        maxExpiry: "3mo",
+      }),
+      "pocket-zipper: PASS\n",
+    );
+    // A nonzero unused-exceptions tally does not drag the overlong line along:
+    // the overlong count is its own sentence, present only when it is nonzero.
+    const otherCleanup = renderReport(
+      record({ cleanup: { danglingExceptions: 1 } }),
+      { verbose: true, tty: false, maxExpiry: "3mo" },
+    );
+    assert.match(otherCleanup, /Unused exceptions: dangling 1, spent 0, expired 0/);
+    assert.doesNotMatch(otherCleanup, /Overlong exceptions/);
   });
 });

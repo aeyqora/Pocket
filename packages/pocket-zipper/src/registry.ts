@@ -1,5 +1,7 @@
 import { matchKey } from "./identity.js";
+import { expiryHorizon } from "./policy.js";
 import type {
+  DurationLiteral,
   ExceptionRecord,
   ExceptionStatus,
   InventoryEntry,
@@ -22,6 +24,18 @@ export function isValidThrough(expires: string, now: Date): boolean {
 export function isExpired(expires: string | undefined, now: Date): boolean {
   if (!expires) return false;
   return !isValidThrough(expires, now);
+}
+
+/**
+ * The one statement of "this record's date runs past the ceiling": a defined
+ * `expires` strictly after the horizon the policy allows. Stated here, beside
+ * `isExpired`, because three surfaces answer the same question about the same
+ * records and must not drift — `validate`'s `OVERLONG_EXCEPTION` finding, the
+ * report's overlong count, and the head-side refusal below. The horizon itself
+ * is `expiryHorizon(now, maxExpiry)`, so no caller re-derives the arithmetic.
+ */
+export function isOverlong(record: ExceptionRecord, horizon: string): boolean {
+  return record.expires !== undefined && record.expires > horizon;
 }
 
 /**
@@ -331,4 +345,90 @@ export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage 
   const counts = { used: 0, expired: 0, dangling: 0, spent: 0 };
   for (const status of statuses.values()) counts[status]++;
   return { head: covered, statuses, counts, pools };
+}
+
+export interface ExpiryPolicyInput {
+  /** The baseline registry, as committed: what this change inherited. */
+  baseline: readonly ExceptionRecord[];
+  /** The registry the change proposes, in registry order. */
+  head: readonly ExceptionRecord[];
+  now: Date;
+  /** The **baseline** policy's maximum. A head-side bump never widens it. */
+  maxExpiry: DurationLiteral;
+}
+
+/**
+ * The refusal half of the expiry policy: the head records that newly write a
+ * date past the maximum, and so fail the change writing them. Same predicate as
+ * the overlong count below, different tree, different consequence — a far-future
+ * date in the baseline is hygiene, the same date newly written is a refusal.
+ *
+ * "Newly written" is a **multiset** question, not a membership one. Each head
+ * record past the horizon consumes one baseline record with the same match key
+ * and the same `expires`; one that finds none is a refusal. A set test would
+ * read the second of two identical records as already-known and admit "add N
+ * more far-future records" forever, which is the dodge this rule exists to stop.
+ * The `file` scope is deliberately not part of the identity, so a record that
+ * moved to follow a renamed file is the same record, date and all.
+ *
+ * Permanents are orthogonal: they carry no date to judge, so a temporary
+ * converted to a permanent in the same change writes no new expiry.
+ */
+export function expiryPolicyRefusals(input: ExpiryPolicyInput): ExceptionRecord[] {
+  const { baseline, head, now, maxExpiry } = input;
+  const horizon = expiryHorizon(now, maxExpiry);
+
+  // What the baseline can still absorb, as a count per (identity, date).
+  const available = new Map<string, number>();
+  for (const record of baseline) {
+    if (record.expires === undefined) continue;
+    const key = datedKey(record);
+    available.set(key, (available.get(key) ?? 0) + 1);
+  }
+
+  const refusals: ExceptionRecord[] = [];
+  for (const record of head) {
+    if (record.type !== "temporary" || !isOverlong(record, horizon)) continue;
+    const key = datedKey(record);
+    const left = available.get(key) ?? 0;
+    if (left > 0) {
+      available.set(key, left - 1);
+      continue;
+    }
+    refusals.push(record);
+  }
+  return refusals;
+}
+
+export interface OverlongRecordsInput {
+  records: readonly ExceptionRecord[];
+  /** The statuses the evaluation derived for those same records, by identity. */
+  statuses: ReadonlyMap<ExceptionRecord, ExceptionStatus>;
+  now: Date;
+  /** The **baseline** policy's maximum. */
+  maxExpiry: DurationLiteral;
+}
+
+/**
+ * The hygiene half: the baseline records running past the maximum, which still
+ * authorize and are counted, never refused — a policy tightening never
+ * retroactively fails what has already landed.
+ *
+ * Expiry keeps precedence here, exactly as it does in allocation: a record the
+ * status map calls expired is reported as expired, never also as overlong. The
+ * two predicates cannot both hold (an expired date is before today, an overlong
+ * one after `today + max`), so this says so structurally instead of leaving it
+ * to arithmetic.
+ */
+export function overlongRecords(input: OverlongRecordsInput): ExceptionRecord[] {
+  const { records, statuses, now, maxExpiry } = input;
+  const horizon = expiryHorizon(now, maxExpiry);
+  return records.filter(
+    (record) => statuses.get(record) !== "expired" && isOverlong(record, horizon),
+  );
+}
+
+/** A record's identity together with the date it carries, the refusal multiset's unit. */
+function datedKey(record: ExceptionRecord): string {
+  return `${recordMatchKey(record)}\u0000${record.expires ?? ""}`;
 }

@@ -9,13 +9,14 @@ import {
   recognizeFile,
   type ConfigSeverityLevel,
 } from "./recognize.js";
-import { computeGovernedSet, parsePolicy, suggestedExpiry } from "./policy.js";
-import { coverExceptions } from "./registry.js";
+import { computeGovernedSet, expiryHorizon, parsePolicy, suggestedExpiry } from "./policy.js";
+import { coverExceptions, expiryPolicyRefusals, overlongRecords } from "./registry.js";
 import {
   PROTECTED_CONFIG,
   PROTECTED_REGISTRY,
   errorRecords,
   loadRegistry,
+  readHeadRegistry,
 } from "./validate.js";
 import { detectPolicyChange } from "./policy-change.js";
 import { buildRecord, excludedRecord, failureRecord, summarize } from "./record.js";
@@ -28,8 +29,10 @@ import {
 import { reconcile } from "./reconcile.js";
 import { PocketZipperError, gitError } from "./errors.js";
 import type {
+  DurationLiteral,
   ErrorCode,
   EvaluationRecord,
+  ExceptionRecord,
   LogicalSuppression,
   Mode,
   RecordError,
@@ -58,6 +61,13 @@ export interface EvaluateResult {
    * gate is disabled, or the run failed before a policy was read.
    */
   suggestedExpiry: string | undefined;
+  /**
+   * The baseline policy's `maxExpiry`, the ceiling the overlong count and every
+   * expiry refusal were judged against. The renderer names it; it never
+   * resolves one. Undefined only when the run failed before a policy was read,
+   * where nothing is overlong to name.
+   */
+  maxExpiry: DurationLiteral | undefined;
 }
 
 export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult> {
@@ -86,6 +96,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         exitCode: 0,
         report: "",
         suggestedExpiry: undefined,
+        maxExpiry: initialPolicy.exceptions.maxExpiry,
       };
     }
 
@@ -140,10 +151,24 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       });
 
       const coverage = coverExceptions({ head, records: registry, now });
+      // Overlong is hygiene over the *baseline* registry, like every other
+      // cleanup counter: a landed date past the maximum still authorizes and is
+      // counted, and a change that newly writes one is refused below. Derived
+      // here, not in `validate`, so the report reads the evaluation's own
+      // statuses (expired wins) — while `pocket-zipper validate` lints the
+      // working tree and so reads the *head* policy's maximum. That divergence
+      // is correct: the two commands answer different questions.
+      const overlong = overlongRecords({
+        records: registry,
+        statuses: coverage.statuses,
+        now,
+        maxExpiry: policy.exceptions.maxExpiry,
+      });
       const cleanup = {
         expired: coverage.counts.expired,
         dangling: coverage.counts.dangling,
         spent: coverage.counts.spent,
+        overlong: overlong.length,
       };
 
       const summary = summarize(coverage.head, baseline.length);
@@ -154,18 +179,40 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       // severities (lowering a governed rule to `"warn"` or `"off"` is a policy
       // change, not debt). The detection runs on every evaluation; it reports
       // nothing when nothing weakened.
+      const headConfigRaw = readHeadContent(git, trees, options, headDir, PROTECTED_CONFIG);
+      const headRegistryRaw = readHeadContent(git, trees, options, headDir, PROTECTED_REGISTRY);
       const policyChange = detectPolicyChange({
         baselineConfig: baselinePolicyRaw,
-        headConfig: readHeadContent(git, trees, options, headDir, PROTECTED_CONFIG),
-        baselineRegistry: git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY),
-        headRegistry: readHeadContent(git, trees, options, headDir, PROTECTED_REGISTRY),
+        headConfig: headConfigRaw,
+        baselineRegistry: baselineRegistryRaw,
+        headRegistry: headRegistryRaw,
         baselineGoverned: governedBaseline,
         consumedDebt,
         baselineLevels: analysis.baselineLevels,
         headLevels: analysis.headLevels,
       });
 
-      const gateFailure = summary.newDebt.unauthorized > 0 || policyChange.failure;
+      // The expiry policy: a newly written date past the **baseline** maximum
+      // refuses. Its own rule, its own error code, and its own gate term — a
+      // registry-only change that legalizes nothing is still a failure, so it
+      // cannot be a term inside `detectPolicyChange` (which answers whether a
+      // *weakening* was consumed by new debt) nor a `POLICY_CHANGE` variant. The
+      // maximum comes from the baseline policy read above, never from the head
+      // document sitting next to it: bumping `maxExpiry` in the same change
+      // legalizes nothing.
+      const headRegistry = readHeadRegistry(headRegistryRaw);
+      const refusals =
+        headRegistry === null
+          ? []
+          : expiryPolicyRefusals({
+              baseline: registry,
+              head: headRegistry,
+              now,
+              maxExpiry: policy.exceptions.maxExpiry,
+            });
+
+      const gateFailure =
+        summary.newDebt.unauthorized > 0 || policyChange.failure || refusals.length > 0;
 
       if (policyChange.weakening) {
         errors.push({
@@ -175,6 +222,17 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
             : policyChange.source === "eslint-config"
               ? "rule weakened in ESLint config: policy change recorded (review the config edit; not exceptable)"
               : "policy weakening detected (routed through protected-branch review)",
+        });
+      }
+
+      // One error per refusing record, so CI can point at the offending entry
+      // rather than at the file as a whole. The message carries the same four
+      // facts `validate`'s `OVERLONG_EXCEPTION` diagnostic does — the date, the
+      // record, the limit, and the ceiling — so the two surfaces read alike.
+      for (const record of refusals) {
+        errors.push({
+          code: "EXPIRY_POLICY",
+          message: expiryPolicyMessage(record, policy.exceptions.maxExpiry, now),
         });
       }
 
@@ -199,6 +257,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         exitCode: gateFailure ? 1 : 0,
         report: "",
         suggestedExpiry: suggestedExpiry(now, policy.exceptions.defaultExpiry),
+        maxExpiry: policy.exceptions.maxExpiry,
       };
     } finally {
       for (const dir of tmpDirs) git.cleanup(dir);
@@ -208,14 +267,29 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       // A defective registry read reports one error per defect, so the record
       // names every thing wrong with the file rather than only the first.
       errors.push(...errorRecords(err));
-      return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined };
+      return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined };
     }
     errors.push({
       code: "INTERNAL_ERROR",
       message: err instanceof Error ? err.message : String(err),
     });
-    return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined };
+    return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined };
   }
+}
+
+/**
+ * One refusing record's error line. The facts are `validate`'s, deliberately:
+ * the date that was written, which record wrote it, the maximum it runs past,
+ * and the last date that maximum allows. It does not tell the reader to bump
+ * `maxExpiry` — the two-step is a workflow the guides own, not a sentence to
+ * repeat on every CI line.
+ */
+function expiryPolicyMessage(
+  record: ExceptionRecord,
+  maxExpiry: DurationLiteral,
+  now: Date,
+): string {
+  return `newly written expires ${record.expires} for ${record.rule} in ${record.file} runs past the baseline ${maxExpiry} maximum (on or before ${expiryHorizon(now, maxExpiry)})`;
 }
 
 interface ResolvedTrees {

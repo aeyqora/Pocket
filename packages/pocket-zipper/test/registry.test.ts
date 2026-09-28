@@ -2,9 +2,20 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { coverExceptions, recordMatchKey } from "../src/registry.js";
 import { loadRegistry } from "../src/validate.js";
+import { addDuration } from "../src/policy.js";
 import type { ExceptionRecord, ReconciledSuppression } from "../src/types.js";
 
 const NOW = new Date("2026-09-14T12:00:00Z");
+const TODAY_UTC = NOW.toISOString().slice(0, 10);
+
+/**
+ * Session 3's surface, loaded dynamically: a missing named export would make a
+ * static import error the whole module and take every existing test down with
+ * it, while `await import` resolves to a namespace that simply lacks the name.
+ * A not-yet-implemented `expiryPolicyRefusals` then fails only the tests that
+ * call it — the first failing call is the red assertion.
+ */
+const registryApi = await import("../src/registry.js");
 /** A well-formed fingerprint: the format check is a separate concern from matching. */
 const FP_NC = `v1:sha256:${"a".repeat(64)}`;
 
@@ -563,5 +574,72 @@ describe("registry: allocation as a consuming count", () => {
     assert.deepEqual(out.pools, [
       { rule: "no-console", file: "app.js", matched: 2, used: 2, leftover: 0 },
     ]);
+  });
+});
+
+/**
+ * The refusal half of the expiry policy, at the seam that owns the record's
+ * semantics. The shape under test is the "newly written" rule applied to a
+ * registry edit: a head record is refused iff it is a temporary past the
+ * baseline horizon and no *unconsumed* baseline record shares its match key
+ * and its `expires`. The consuming is a multiset — each head record takes one
+ * baseline counterpart — which is the whole point: a set of keys would admit
+ * unlimited extra records at a refused date.
+ */
+describe("registry: the expiry-policy refusal", () => {
+  const MAX = "3mo";
+  const BEYOND = "2099-01-01"; // past any horizon derived from NOW
+
+  function refusalsOf(input: {
+    baseline: ExceptionRecord[];
+    head: ExceptionRecord[];
+  }): ExceptionRecord[] {
+    return registryApi.expiryPolicyRefusals({ ...input, now: NOW, maxExpiry: MAX });
+  }
+
+  it("refuses a second head twin a set-based rule would admit", () => {
+    const base = record({ type: "temporary", expires: BEYOND });
+    const [kept, twin] = twinRecords(2, { type: "temporary", expires: BEYOND });
+    // The unchanged twin consumes the baseline counterpart and is not a
+    // refusal; the second twin has no counterpart left. Whichever twin the
+    // document writes second is the one refused — the multiset, not the set,
+    // is what shuts the add-N-more dodge down.
+    assert.deepEqual(refusalsOf({ baseline: [base], head: [kept] }), []);
+    assert.deepEqual(refusalsOf({ baseline: [base], head: [kept, twin] }), [twin]);
+    assert.deepEqual(refusalsOf({ baseline: [base], head: [twin, kept] }), [kept]);
+  });
+
+  it("treats a file-scope repair as the same record, date and all", () => {
+    // `file` is deliberately not part of the match key, so a record that moved
+    // to follow a renamed file writes no new date and is not a refusal.
+    const base = record({ type: "temporary", expires: BEYOND });
+    const moved = record({ type: "temporary", expires: BEYOND, file: "lib/app.js" });
+    assert.deepEqual(refusalsOf({ baseline: [base], head: [moved] }), []);
+  });
+
+  it("keeps a permanent out of the expiry policy entirely", () => {
+    // A permanent cannot legally carry a date, so it has no expiry for the
+    // policy to judge — a temporary converted in the same change included.
+    const permanent = record();
+    assert.deepEqual(refusalsOf({ baseline: [], head: [permanent] }), []);
+    const temporary = record({ type: "temporary", expires: BEYOND });
+    assert.deepEqual(refusalsOf({ baseline: [temporary], head: [permanent] }), []);
+  });
+
+  it("keeps a renewal inside the maximum quiet, and stops one past it", () => {
+    // The ordinary case must stay quiet: any newly written date within the
+    // horizon is fine to write, so an in-maximum renewal passes...
+    const within = record({
+      type: "temporary",
+      expires: addDuration(TODAY_UTC, "30d"),
+    });
+    const renewed = record({
+      type: "temporary",
+      expires: addDuration(TODAY_UTC, "60d"),
+    });
+    assert.deepEqual(refusalsOf({ baseline: [within], head: [renewed] }), []);
+    // ...and the same shape one step past the horizon is the refusal.
+    const far = record({ type: "temporary", expires: BEYOND });
+    assert.deepEqual(refusalsOf({ baseline: [within], head: [far] }), [far]);
   });
 });

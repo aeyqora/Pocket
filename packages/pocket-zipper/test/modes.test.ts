@@ -7,6 +7,7 @@ import {
   NEXT_LINE_NO_CONSOLE_FP,
   type FixtureRepo,
 } from "./harness.js";
+import { addDuration } from "../src/policy.js";
 
 const repos: FixtureRepo[] = [];
 after(() => repos.forEach((r) => r.cleanup()));
@@ -19,6 +20,14 @@ function repo(): FixtureRepo {
 
 const disabled = "// eslint-disable-next-line no-console\n";
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/** Real today and a date past the default 3mo max — the staged-side fixture. */
+const TODAY = new Date().toISOString().slice(0, 10);
+const BEYOND_HORIZON = addDuration(TODAY, "6mo");
+
+function hasExpiryPolicy(record: { errors: Array<{ code: string }> } | null): boolean {
+  return record?.errors.some((e) => e.code === "EXPIRY_POLICY") ?? false;
+}
 
 function noConsoleException(): string {
   return exceptionYaml({
@@ -258,5 +267,30 @@ describe("pre-commit mode", () => {
     assert.equal(res.status, 1);
     assert.equal(res.record?.summary.newDebt.authorized, 0);
     assert.equal(res.record?.summary.newDebt.unauthorized, 1);
+  });
+
+  it("refuses a staged record past the committed maximum", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    // The record is staged, nothing else: the refusal is the expiry policy's,
+    // judged against HEAD's maximum, not a debt failure.
+    r.write(
+      ".pocket-zipper/exceptions.yml",
+      exceptionYaml({
+        rule: "no-console",
+        suppressionType: "next-line",
+        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+        file: "app.js",
+        expires: BEYOND_HORIZON,
+      }),
+    );
+    r.stage();
+    const res = r.runCli(["pre-commit"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.mode, "pre-commit");
+    assert.equal(res.record?.summary.newDebt.unauthorized, 0);
+    assert.ok(hasExpiryPolicy(res.record));
   });
 });

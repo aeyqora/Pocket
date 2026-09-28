@@ -2,12 +2,14 @@ import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   createRepo,
+  configYaml,
   eslintConfig,
   exceptionYaml,
   NEXT_LINE_NO_CONSOLE_FP,
   NEXT_LINE_NO_DEBUGGER_FP,
   type FixtureRepo,
 } from "./harness.js";
+import { addDuration } from "../src/policy.js";
 
 const repos: FixtureRepo[] = [];
 after(() => repos.forEach((r) => r.cleanup()));
@@ -20,6 +22,21 @@ function repo(): FixtureRepo {
 
 const disabled = "// eslint-disable-next-line no-console\n";
 const nextLineNoDebugger = "// eslint-disable-next-line no-debugger\n";
+
+/** Real today, and the dates the expiry policy is judged against (default 3mo max). */
+const TODAY = new Date().toISOString().slice(0, 10);
+const IN_WINDOW = addDuration(TODAY, "30d");
+const BEYOND_HORIZON = addDuration(TODAY, "6mo");
+const BEYOND_FAR = addDuration(TODAY, "12mo");
+const LONG_PAST = "2000-01-01";
+
+function hasExpiryPolicy(record: { errors: Array<{ code: string }> } | null): boolean {
+  return record?.errors.some((e) => e.code === "EXPIRY_POLICY") ?? false;
+}
+
+function expiryPolicyCount(record: { errors: Array<{ code: string }> } | null): number {
+  return record?.errors.filter((e) => e.code === "EXPIRY_POLICY").length ?? 0;
+}
 
 function baseRecord(overrides: Partial<Parameters<typeof exceptionYaml>[0]> = {}) {
   return exceptionYaml({
@@ -443,5 +460,176 @@ describe("one record authorizes one twin", () => {
       { rule: "no-console", file: "tools.js", matched: 1, used: 1, leftover: 0 },
       { rule: "no-debugger", file: "old.js", matched: 1, used: 1, leftover: 0 },
     ]);
+  });
+});
+
+/**
+ * The expiry policy, judged against the baseline's maximum. A date past the
+ * max in the baseline is overlong hygiene that still authorizes; the same date
+ * newly written in the head is `EXPIRY_POLICY`, a refusal that fails the
+ * change writing it. Every fixture here keeps the two apart the way the rule
+ * does: whether a record's date was written on the baseline side or the head
+ * side of the diff decides the outcome, nothing else.
+ */
+describe("the expiry policy, judged against the baseline maximum", () => {
+  it("refuses a newly written record past the maximum", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    // The change is the registry alone — no suppression anywhere — so the
+    // exit is the refusal's, and one refusing record is one error (D2).
+    assert.equal(res.record?.summary.newDebt.unauthorized, 0);
+    assert.ok(hasExpiryPolicy(res.record));
+    assert.equal(expiryPolicyCount(res.record), 1);
+  });
+
+  it("refuses a renewal past the maximum", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: IN_WINDOW }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 0);
+    assert.ok(hasExpiryPolicy(res.record));
+    assert.equal(expiryPolicyCount(res.record), 1);
+  });
+
+  it("bumping the maximum in the same change legalizes nothing", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/config.yml", configYaml({ maxExpiry: "3mo" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(".pocket-zipper/config.yml", configYaml({ maxExpiry: "12mo" }));
+    // Six months from today: comfortably inside a 12mo policy, past the
+    // baseline's 3mo. The baseline's maximum is the only one that binds.
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.ok(hasExpiryPolicy(res.record));
+  });
+
+  it("keeps an overlong baseline record authorizing, and reports it", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(res.record?.summary.newDebt.authorized, 1);
+    assert.equal(res.record?.summary.cleanup.overlongExceptions, 1);
+    assert.ok(!hasExpiryPolicy(res.record));
+    // The count reaches the report on a verbose pass and on a FAIL (below).
+    const verbose = r.runCli(["check", "--base", "base", "--verbose"]);
+    assert.equal(verbose.status, 0);
+    assert.match(
+      verbose.stdout,
+      /^  Overlong exceptions: 1 \(expires past the 3mo maximum\)$/m,
+    );
+  });
+
+  it("does not refuse an overlong record the change never writes", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    // The registry is untouched; only a bystander file moves. The same date
+    // that refused in the head-only fixture above stays hygiene here, because
+    // which side of the diff wrote it is the whole question.
+    r.write("other.js", "export const b = 1;\n");
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.ok(!hasExpiryPolicy(res.record));
+    assert.equal(res.record?.summary.cleanup.overlongExceptions, 1);
+  });
+
+  it("lets a non-date edit to an overlong record pass under the tightened maximum", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/config.yml", configYaml({ maxExpiry: "6mo" }));
+    // Landed under a 6mo policy, then the change tightens the maximum to 3mo.
+    // The record runs a year out, so it is past *both* maxima — which is what
+    // keeps the overlong count at 1: the count reads the baseline's maximum, so
+    // a record only stops counting as overlong once the *baseline* catches up,
+    // never when the head tightens. A date merely past the new 3mo would sit
+    // inside the baseline's 6mo and count 0, testing nothing here.
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_FAR }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(".pocket-zipper/config.yml", configYaml({ maxExpiry: "3mo" }));
+    // The only registry edit is a `reason` — no date is written, so there is
+    // nothing for the expiry policy to newly write and refuse.
+    r.write(
+      ".pocket-zipper/exceptions.yml",
+      baseRecord({ expires: BEYOND_FAR }).replace(
+        "  reason: needed",
+        "  reason: clarified in review",
+      ),
+    );
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.ok(!hasExpiryPolicy(res.record));
+    assert.equal(res.record?.summary.cleanup.overlongExceptions, 1);
+  });
+
+  it("refuses a partial-credit renewal that is shorter but still past the maximum", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_FAR }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.summary.newDebt.unauthorized, 0);
+    assert.ok(hasExpiryPolicy(res.record));
+    // The FAIL report carries the baseline record's overlong count and the
+    // refusal its renewal earned.
+    assert.match(
+      res.stdout,
+      /^  Overlong exceptions: 1 \(expires past the 3mo maximum\)$/m,
+    );
+  });
+
+  it("counts a long-expired record as expired, never overlong", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: LONG_PAST }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("other.js", "export const b = 1;\n");
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    // Expired takes precedence over overlong — asserted negatively, because a
+    // record cannot be both (the two predicates contradict).
+    assert.equal(res.record?.summary.cleanup.expiredExceptions, 1);
+    assert.equal(res.record?.summary.cleanup.overlongExceptions, 0);
+    assert.ok(!hasExpiryPolicy(res.record));
   });
 });

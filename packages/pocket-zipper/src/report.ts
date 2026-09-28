@@ -1,5 +1,7 @@
 import { poolCountLine, remediationFields } from "./registry.js";
+import { DEFAULT_MAX_EXPIRY } from "./policy.js";
 import type {
+  DurationLiteral,
   EvaluationRecord,
   EvaluationSummary,
   InventoryEntry,
@@ -16,6 +18,13 @@ export interface ReportOptions {
    * pipeline (the renderer prints, it never computes dates).
    */
   suggestedExpiry?: string;
+  /**
+   * The baseline policy's `maxExpiry`, named by the overlong line for the same
+   * reason. The count and the maximum come from one evaluation, so a report
+   * holding a nonzero overlong count without one was produced against the
+   * default policy.
+   */
+  maxExpiry?: DurationLiteral;
 }
 
 const RED = "\u001b[31m";
@@ -29,7 +38,7 @@ function color(text: string, code: string, tty: boolean): string {
 }
 
 export function renderReport(record: EvaluationRecord, options: ReportOptions): string {
-  const { verbose, tty, suggestedExpiry } = options;
+  const { verbose, tty, suggestedExpiry, maxExpiry } = options;
   const lines: string[] = [];
 
   if (record.verdict === "excluded") {
@@ -51,7 +60,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
       lines.push(renderDispositionSummary(record.summary.dispositions));
       lines.push(...renderPoolCounts(record.summary.cleanup.poolCounts));
       lines.push(...renderAuthorizedDebt(record.inventory));
-      lines.push(...renderCleanup(record.summary.cleanup));
+      lines.push(...renderCleanup(record.summary.cleanup, maxExpiry));
     }
     // A pass can still carry recorded signals, such as a config-off policy
     // change that was routed to review. Buried in the JSON record it would be
@@ -86,7 +95,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
   }
 
   lines.push(...renderAuthorizedDebt(record.inventory));
-  lines.push(...renderCleanup(record.summary.cleanup));
+  lines.push(...renderCleanup(record.summary.cleanup, maxExpiry));
   lines.push(...renderErrors(record.errors));
 
   return joinLines(lines);
@@ -132,18 +141,34 @@ function renderPoolCounts(pools: PoolCount[]): string[] {
   return ["", ...pools.map(poolCountLine)];
 }
 
-function renderCleanup(cleanup: EvaluationSummary["cleanup"]): string[] {
+/**
+ * The cleanup block, in two sentences. An overlong record is not an *unused*
+ * one — it authorizes right up to its date — so it gets its own line beside the
+ * unused tally rather than a place inside it, and it prints only when the count
+ * is nonzero: a well-kept registry with one far-future record is hygiene to
+ * report, not a standing comment on every run.
+ */
+function renderCleanup(
+  cleanup: EvaluationSummary["cleanup"],
+  maxExpiry: DurationLiteral | undefined,
+): string[] {
+  const lines: string[] = [];
   if (
-    cleanup.danglingExceptions === 0 &&
-    cleanup.spentExceptions === 0 &&
-    cleanup.expiredExceptions === 0
+    cleanup.danglingExceptions > 0 ||
+    cleanup.spentExceptions > 0 ||
+    cleanup.expiredExceptions > 0
   ) {
-    return [];
+    lines.push(
+      `Unused exceptions: dangling ${cleanup.danglingExceptions}, spent ${cleanup.spentExceptions}, expired ${cleanup.expiredExceptions}`,
+    );
   }
-  return [
-    "",
-    `Unused exceptions: dangling ${cleanup.danglingExceptions}, spent ${cleanup.spentExceptions}, expired ${cleanup.expiredExceptions}`,
-  ];
+  if (cleanup.overlongExceptions > 0) {
+    lines.push(
+      `  Overlong exceptions: ${cleanup.overlongExceptions} (expires past the ${maxExpiry ?? DEFAULT_MAX_EXPIRY} maximum)`,
+    );
+  }
+  if (lines.length === 0) return [];
+  return ["", ...lines];
 }
 
 function renderProblem(
