@@ -7,7 +7,7 @@ import { EMPTY_TREE, Git } from "./git.js";
 import { EslintSession } from "./eslint.js";
 import { configPluginRuleNames } from "./recognize.js";
 import { analyzeTrees, reconcileGoverned } from "./pipeline.js";
-import { isNewDebt } from "./exception-match.js";
+import { flaggedDebt, isNewDebt } from "./exception-match.js";
 import {
   daysBetween,
   describeDuration,
@@ -22,13 +22,11 @@ import {
   expiryPolicyRefusals,
 } from "./registry.js";
 import { editFields, type FieldEdit } from "./registry-edit.js";
-import { readIfPresent } from "./validate-command.js";
-import { flaggedDebt } from "./report.js";
+import { readProtectedDocument } from "./protected-document.js";
 import {
   PROTECTED_CONFIG,
   PROTECTED_REGISTRY,
   defectsOf,
-  documentDefect,
   isCalendarDate,
   isIsoDateForm,
   renderFinding,
@@ -371,15 +369,13 @@ interface WorkingRegistry {
  * prints its diagnostics and refuses the session (exit 2); a file that is
  * genuinely not there is an empty registry the write will create.
  */
-function readRegistry(root: string, out: NodeJS.WritableStream): WorkingRegistry | { exitCode: number } {
-  let raw: string | null;
-  try {
-    raw = readIfPresent(root, PROTECTED_REGISTRY);
-  } catch (err) {
-    // A registry this session cannot read is a defect, not an absent one.
-    out.write(
-      `${renderFinding(documentReadDefect(err))}\n`,
-    );
+function readRegistry(
+  root: string,
+  out: NodeJS.WritableStream,
+): WorkingRegistry | { exitCode: number } {
+  const { raw, defect } = readProtectedDocument(root, PROTECTED_REGISTRY);
+  if (defect !== null) {
+    out.write(`${renderFinding(defect)}\n`);
     return { exitCode: 2 };
   }
   const validation = validateRegistry(raw);
@@ -393,12 +389,6 @@ function readRegistry(root: string, out: NodeJS.WritableStream): WorkingRegistry
     entries: validation.entries,
     records: validation.entries.map((entry) => entry.record),
   };
-}
-
-/** A protected document that could not be read, as one defect finding. */
-function documentReadDefect(err: unknown): Finding {
-  const code = (err as { code?: string } | null)?.code ?? "unknown error";
-  return documentDefect(PROTECTED_REGISTRY, `the document could not be read (${code})`);
 }
 
 /**

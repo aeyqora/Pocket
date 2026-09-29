@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { combinedLandingFacts } from "./combined-landing.js";
 import { renderCleanupSection, unusedExceptions, type CleanupCounts } from "./cleanup.js";
 import { EslintSession } from "./eslint.js";
 import { DEFAULT_POLICY, expiryHorizon, parsePolicy } from "./policy.js";
+import { readIfPresent, readProtectedDocument } from "./protected-document.js";
 import { configPluginRuleNames, recognizeFile, type RecognizeFileResult } from "./recognize.js";
 import {
   allocateExceptions,
@@ -215,34 +214,15 @@ function plural(count: number, noun: string): string {
 }
 
 /**
- * A protected file's text, or the reason it cannot be read. Only a file that is
- * genuinely not there is "absent" — a registry this command cannot read (a
- * permissions error, a directory where a file should be) is a defect, not a
- * clean repository, and is reported as one.
+ * A protected file's text, or the reason it cannot be read, collected into this
+ * command's findings rather than acted on: `validate` reports every defect it
+ * finds and exits at the end, so an unreadable document must not cut the sweep
+ * short. See `readProtectedDocument` for the absence/failure judgment itself.
  */
 function readProtected(root: string, path: string, findings: Finding[]): string | null {
-  try {
-    return readIfPresent(root, path);
-  } catch (err) {
-    findings.push(documentDefect(path, readErrorMessage(err)));
-    return null;
-  }
-}
-
-/** A file's text, or null when it is not there at all. Throws on any other failure. */
-export function readIfPresent(root: string, path: string): string | null {
-  try {
-    return readFileSync(join(root, path), "utf8");
-  } catch (err) {
-    const code = (err as { code?: string } | null)?.code;
-    if (code === "ENOENT" || code === "ENOTDIR") return null;
-    throw err;
-  }
-}
-
-function readErrorMessage(err: unknown): string {
-  const code = (err as { code?: string } | null)?.code ?? "unknown error";
-  return `the document could not be read (${code})`;
+  const { raw, defect } = readProtectedDocument(root, path);
+  if (defect !== null) findings.push(defect);
+  return raw;
 }
 
 async function openSession(cwd: string): Promise<EslintSession | null> {

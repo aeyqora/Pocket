@@ -1,5 +1,5 @@
 import { renderCleanupSection, renderOverlongLine } from "./cleanup.js";
-import { isExceptable, isNewDebt } from "./exception-match.js";
+import { flaggedDebt, isExceptable, isNewDebt } from "./exception-match.js";
 import { poolCountLine, remediationFields } from "./registry.js";
 import { isUnpaired } from "./reconcile.js";
 import { DEFAULT_MAX_EXPIRY } from "./policy.js";
@@ -129,16 +129,6 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
   lines.push(...renderErrors(record.errors));
 
   return joinLines(lines);
-}
-
-/**
- * The debt a FAIL report flags: governed, new or materially changed, exceptable,
- * and uncovered by any record. One predicate for the two surfaces that answer the
- * same question — the block the report prints, and the ride-along the report's
- * author is offered (a FAIL with nothing here has nothing to author).
- */
-export function flaggedDebt(record: EvaluationRecord): InventoryEntry[] {
-  return record.inventory.filter((e) => isNewDebt(e) && e.exception === null);
 }
 
 function entryLine(entry: InventoryEntry): string {

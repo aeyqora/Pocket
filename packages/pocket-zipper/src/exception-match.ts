@@ -2,8 +2,10 @@ import { matchKey } from "./identity.js";
 import { isUnpaired } from "./reconcile.js";
 import type {
   Disposition,
+  EvaluationRecord,
   ExceptionRecord,
   GuardKind,
+  InventoryEntry,
   SuppressionType,
 } from "./types.js";
 
@@ -102,6 +104,20 @@ export function isExceptable(suppression: { readonly guardKind: GuardKind }): bo
  */
 export function isNewDebt(suppression: DebtFields): boolean {
   return isUnpaired(suppression) && isExceptable(suppression);
+}
+
+/**
+ * The new debt an evaluation flags: new debt no record covers. One predicate for
+ * the two surfaces that ask the same question — the block a FAIL report prints,
+ * and the authoring session offered as a ride-along, where a FAIL with nothing
+ * here has nothing to author.
+ *
+ * It answers about the record rather than about a bare suppression list because
+ * both callers hold an `EvaluationRecord`; the narrowing is coverage, not a
+ * different kind of debt.
+ */
+export function flaggedDebt(record: EvaluationRecord): InventoryEntry[] {
+  return record.inventory.filter((e) => isNewDebt(e) && e.exception === null);
 }
 
 /** The separator every composite key here is built on; git paths cannot contain it. */
