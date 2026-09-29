@@ -12,7 +12,9 @@ import {
   type UnclaimedRecord,
 } from "./registry.js";
 import { defectsOf, documentDefect, renderFinding, type Finding } from "./finding.js";
-import { PROTECTED_CONFIG, PROTECTED_REGISTRY, combinedLandingHygiene, poolHygiene, recordHygiene, statusHygiene, validateRegistry, type HygieneContext, type RegistryEntry } from "./validate.js";
+import { combinedLandingHygiene, poolHygiene, recordHygiene, statusHygiene, validateRegistry } from "./validate.js";
+import type { HygieneContext, RegistryEntry } from "./validate.js";
+import { PROTECTED_CONFIG, PROTECTED_REGISTRY } from "./protected-paths.js";
 
 import type {
   DurationLiteral,

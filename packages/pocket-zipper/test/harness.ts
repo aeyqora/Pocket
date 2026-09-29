@@ -25,7 +25,7 @@ export const CLI = join(ROOT, "dist", "cli.js");
  * expectation rather than as a silently-changed constant. That is the point of
  * one file spelling them out, and it only works while the rest import.
  */
-export { PROTECTED_CONFIG, PROTECTED_REGISTRY } from "../src/validate.js";
+export { PROTECTED_CONFIG, PROTECTED_REGISTRY } from "../src/protected-paths.js";
 
 export interface RunResult {
   status: number;

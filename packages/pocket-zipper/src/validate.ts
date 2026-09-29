@@ -3,6 +3,7 @@ import type { Pair } from "yaml";
 import { PocketZipperError } from "./errors.js";
 import { hostFamily, ownersCover, type CombinedLandingFacts } from "./combined-landing.js";
 import { STATUS_CODES, defectsOf, finding, renderFinding } from "./finding.js";
+import { PROTECTED_CONFIG, PROTECTED_REGISTRY } from "./protected-paths.js";
 import type { Finding, FindingCode, FindingInit, Position } from "./finding.js";
 import { expiryHorizon } from "./policy.js";
 import { countKey, isOverlong, poolCountLine, type UnclaimedRecord } from "./registry.js";
@@ -14,9 +15,6 @@ import type {
   SuppressionType,
 } from "./types.js";
 
-/** The two protected files: the policy document and the exception registry. */
-export const PROTECTED_CONFIG = ".pocket-zipper/config.yml";
-export const PROTECTED_REGISTRY = ".pocket-zipper/exceptions.yml";
 
 /**
  * The registry's known field set, in canonical field order. A record carrying

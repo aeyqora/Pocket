@@ -1,5 +1,7 @@
 import { coversInScope } from "./exception-match.js";
-import { PROTECTED_REGISTRY, type RegistryEntry } from "./validate.js";
+
+import type { RegistryEntry } from "./validate.js";
+import { PROTECTED_REGISTRY } from "./protected-paths.js";
 
 import type {
   DurationLiteral,
