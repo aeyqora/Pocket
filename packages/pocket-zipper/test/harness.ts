@@ -198,6 +198,19 @@ export function exceptionYaml(record: {
   return lines.join("\n") + "\n";
 }
 
+/**
+ * Whether an evaluation record carries an error with the given code. Typed over
+ * `code: string` rather than `ErrorCode` deliberately: a test that pins a new
+ * code is written before the code is in the union, so a name that does not exist
+ * yet should read as a failing assertion rather than a type error.
+ */
+export function hasErrorCode(
+  record: { errors: Array<{ code: string }> } | null,
+  code: string,
+): boolean {
+  return record?.errors.some((e) => e.code === code) ?? false;
+}
+
 export const NEXT_LINE_NO_CONSOLE_FP =
   "v1:sha256:aa3906bd4b359e41c41625a924d3d3bbe95138e721f89cd87cd38839056a0f3e";
 export const NEXT_LINE_NO_DEBUGGER_FP =

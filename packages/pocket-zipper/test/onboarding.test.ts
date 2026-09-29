@@ -1,6 +1,12 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRepo, configYaml, eslintConfig, type FixtureRepo } from "./harness.js";
+import {
+  createRepo,
+  configYaml,
+  eslintConfig,
+  hasErrorCode,
+  type FixtureRepo,
+} from "./harness.js";
 import { EMPTY_TREE } from "../src/git.js";
 
 const repos: FixtureRepo[] = [];
@@ -58,7 +64,7 @@ describe("documented onboarding path", () => {
     r.commit("narrow allowlist");
     const narrow = r.runCli(["check", "--base", "after"]);
     assert.equal(narrow.status, 0);
-    assert.ok(narrow.record?.errors.some((e) => e.code === "POLICY_CHANGE"));
+    assert.ok(hasErrorCode(narrow.record, "POLICY_CHANGE"));
     r.branch("narrow");
 
     r.write(

@@ -5,6 +5,7 @@ import {
   configYaml,
   eslintConfig,
   exceptionYaml,
+  hasErrorCode,
   NEXT_LINE_NO_CONSOLE_FP,
   NEXT_LINE_NO_DEBUGGER_FP,
   type FixtureRepo,
@@ -29,10 +30,6 @@ const IN_WINDOW = addDuration(TODAY, "30d");
 const BEYOND_HORIZON = addDuration(TODAY, "6mo");
 const BEYOND_FAR = addDuration(TODAY, "12mo");
 const LONG_PAST = "2000-01-01";
-
-function hasExpiryPolicy(record: { errors: Array<{ code: string }> } | null): boolean {
-  return record?.errors.some((e) => e.code === "EXPIRY_POLICY") ?? false;
-}
 
 function expiryPolicyCount(record: { errors: Array<{ code: string }> } | null): number {
   return record?.errors.filter((e) => e.code === "EXPIRY_POLICY").length ?? 0;
@@ -485,7 +482,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
     // The change is the registry alone — no suppression anywhere — so the
     // exit is the refusal's, and one refusing record is one error (D2).
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
-    assert.ok(hasExpiryPolicy(res.record));
+    assert.ok(hasErrorCode(res.record, "EXPIRY_POLICY"));
     assert.equal(expiryPolicyCount(res.record), 1);
   });
 
@@ -501,7 +498,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
-    assert.ok(hasExpiryPolicy(res.record));
+    assert.ok(hasErrorCode(res.record, "EXPIRY_POLICY"));
     assert.equal(expiryPolicyCount(res.record), 1);
   });
 
@@ -519,7 +516,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.ok(hasExpiryPolicy(res.record));
+    assert.ok(hasErrorCode(res.record, "EXPIRY_POLICY"));
   });
 
   it("keeps an overlong baseline record authorizing, and reports it", () => {
@@ -535,7 +532,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
     assert.equal(res.status, 0);
     assert.equal(res.record?.summary.newDebt.authorized, 1);
     assert.equal(res.record?.summary.cleanup.overlongExceptions, 1);
-    assert.ok(!hasExpiryPolicy(res.record));
+    assert.ok(!hasErrorCode(res.record, "EXPIRY_POLICY"));
     // The count reaches the report on a verbose pass and on a FAIL (below).
     const verbose = r.runCli(["check", "--base", "base", "--verbose"]);
     assert.equal(verbose.status, 0);
@@ -559,7 +556,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
-    assert.ok(!hasExpiryPolicy(res.record));
+    assert.ok(!hasErrorCode(res.record, "EXPIRY_POLICY"));
     assert.equal(res.record?.summary.cleanup.overlongExceptions, 1);
   });
 
@@ -590,7 +587,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
-    assert.ok(!hasExpiryPolicy(res.record));
+    assert.ok(!hasErrorCode(res.record, "EXPIRY_POLICY"));
     assert.equal(res.record?.summary.cleanup.overlongExceptions, 1);
   });
 
@@ -606,7 +603,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
-    assert.ok(hasExpiryPolicy(res.record));
+    assert.ok(hasErrorCode(res.record, "EXPIRY_POLICY"));
     // The FAIL report carries the baseline record's overlong count and the
     // refusal its renewal earned.
     assert.match(
@@ -630,6 +627,6 @@ describe("the expiry policy, judged against the baseline maximum", () => {
     // record cannot be both (the two predicates contradict).
     assert.equal(res.record?.summary.cleanup.expiredExceptions, 1);
     assert.equal(res.record?.summary.cleanup.overlongExceptions, 0);
-    assert.ok(!hasExpiryPolicy(res.record));
+    assert.ok(!hasErrorCode(res.record, "EXPIRY_POLICY"));
   });
 });

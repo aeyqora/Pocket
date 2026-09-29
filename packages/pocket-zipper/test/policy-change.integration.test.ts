@@ -5,6 +5,7 @@ import {
   configYaml,
   eslintConfig,
   exceptionYaml,
+  hasErrorCode,
   NEXT_LINE_NO_CONSOLE_FP,
   NEXT_LINE_NO_DEBUGGER_FP,
   type FixtureRepo,
@@ -54,10 +55,6 @@ function policyChangeMessage(
   return entry.message;
 }
 
-function hasPolicyChange(record: { errors: Array<{ code: string }> } | null): boolean {
-  return record?.errors.some((e) => e.code === "POLICY_CHANGE") ?? false;
-}
-
 function codes(record: { errors: Array<{ code: string }> } | null): string[] {
   return record?.errors.map((e) => e.code) ?? [];
 }
@@ -75,7 +72,7 @@ describe("policy-change detection through the pipeline", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
   });
 
   it("fails when removal of an explicitly-true enabled key is consumed", () => {
@@ -90,7 +87,7 @@ describe("policy-change detection through the pipeline", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
   });
 
   it("does not fire when no protected file is touched", () => {
@@ -104,7 +101,7 @@ describe("policy-change detection through the pipeline", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.equal(hasPolicyChange(res.record), false);
+    assert.equal(hasErrorCode(res.record, "POLICY_CHANGE"), false);
   });
 
   it("fires even when the consumed debt is authorized by an exception", () => {
@@ -129,7 +126,7 @@ describe("policy-change detection through the pipeline", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
     assert.equal(res.record?.summary.newDebt.authorized, 1);
   });
 
@@ -162,7 +159,7 @@ describe("policy-change detection through the pipeline", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
     assert.equal(res.record?.summary.newDebt.authorized, 1);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
   });
 
   it("fails an absent-to-narrower allowlist consumed even when the debt is authorized", () => {
@@ -190,7 +187,7 @@ describe("policy-change detection through the pipeline", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
     assert.equal(res.record?.summary.newDebt.authorized, 1);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
   });
 
   it("fires when the exception registry broadens and is consumed", () => {
@@ -214,7 +211,7 @@ describe("policy-change detection through the pipeline", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
   });
 
   it("does not fire when an appended record is a twin of one the registry already has", () => {
@@ -264,7 +261,7 @@ describe("policy-change detection through the pipeline", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
-    assert.equal(hasPolicyChange(res.record), false);
+    assert.equal(hasErrorCode(res.record, "POLICY_CHANGE"), false);
     assert.equal(res.record?.summary.newDebt.authorized, 1);
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
   });
@@ -303,7 +300,7 @@ describe("policy-change detection through the pipeline", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
   });
 });
 
@@ -533,7 +530,7 @@ describe("config-level severity weakenings as policy changes", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
     assert.match(res.stdout, /PASS/);
     assert.match(res.stdout, /POLICY_CHANGE/);
@@ -553,7 +550,7 @@ describe("config-level severity weakenings as policy changes", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
     assert.equal(res.record?.verdict, "fail");
   });
 
@@ -572,7 +569,7 @@ describe("config-level severity weakenings as policy changes", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
-    assert.equal(hasPolicyChange(res.record), false);
+    assert.equal(hasErrorCode(res.record, "POLICY_CHANGE"), false);
   });
 
   it("records an off that hides a same-change directive as a policy change, not debt", () => {
@@ -586,7 +583,7 @@ describe("config-level severity weakenings as policy changes", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
   });
 
@@ -600,7 +597,7 @@ describe("config-level severity weakenings as policy changes", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
     assert.match(res.stdout, /POLICY_CHANGE/);
   });
@@ -615,7 +612,7 @@ describe("config-level severity weakenings as policy changes", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
-    assert.equal(hasPolicyChange(res.record), false);
+    assert.equal(hasErrorCode(res.record, "POLICY_CHANGE"), false);
   });
 
   it("fails when a severity drop is paired with new directive debt for the same rule", () => {
@@ -629,7 +626,7 @@ describe("config-level severity weakenings as policy changes", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
     assert.equal(res.record?.verdict, "fail");
   });
 
@@ -650,7 +647,7 @@ describe("config-level severity weakenings as policy changes", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.ok(hasPolicyChange(res.record));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
     assert.equal(res.record?.verdict, "fail");
   });
 });

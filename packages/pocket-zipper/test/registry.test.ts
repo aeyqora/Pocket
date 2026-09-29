@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { coverExceptions, recordMatchKey } from "../src/registry.js";
+import { coverExceptions, expiryPolicyRefusals, recordMatchKey } from "../src/registry.js";
 import { loadRegistry } from "../src/validate.js";
 import { addDuration } from "../src/policy.js";
 import type { ExceptionRecord, ReconciledSuppression } from "../src/types.js";
@@ -8,14 +8,6 @@ import type { ExceptionRecord, ReconciledSuppression } from "../src/types.js";
 const NOW = new Date("2026-09-14T12:00:00Z");
 const TODAY_UTC = NOW.toISOString().slice(0, 10);
 
-/**
- * Session 3's surface, loaded dynamically: a missing named export would make a
- * static import error the whole module and take every existing test down with
- * it, while `await import` resolves to a namespace that simply lacks the name.
- * A not-yet-implemented `expiryPolicyRefusals` then fails only the tests that
- * call it — the first failing call is the red assertion.
- */
-const registryApi = await import("../src/registry.js");
 /** A well-formed fingerprint: the format check is a separate concern from matching. */
 const FP_NC = `v1:sha256:${"a".repeat(64)}`;
 
@@ -594,7 +586,7 @@ describe("registry: the expiry-policy refusal", () => {
     baseline: ExceptionRecord[];
     head: ExceptionRecord[];
   }): ExceptionRecord[] {
-    return registryApi.expiryPolicyRefusals({ ...input, now: NOW, maxExpiry: MAX });
+    return expiryPolicyRefusals({ ...input, now: NOW, maxExpiry: MAX });
   }
 
   it("refuses a second head twin a set-based rule would admit", () => {

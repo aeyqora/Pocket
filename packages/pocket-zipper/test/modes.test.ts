@@ -7,6 +7,7 @@ import {
   configYaml,
   eslintConfig,
   exceptionYaml,
+  hasErrorCode,
   NEXT_LINE_NO_CONSOLE_FP,
   type FixtureRepo,
 } from "./harness.js";
@@ -27,10 +28,6 @@ const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 /** Real today and a date past the default 3mo max — the staged-side fixture. */
 const TODAY = new Date().toISOString().slice(0, 10);
 const BEYOND_HORIZON = addDuration(TODAY, "6mo");
-
-function hasExpiryPolicy(record: { errors: Array<{ code: string }> } | null): boolean {
-  return record?.errors.some((e) => e.code === "EXPIRY_POLICY") ?? false;
-}
 
 function noConsoleException(): string {
   return exceptionYaml({
@@ -294,7 +291,7 @@ describe("pre-commit mode", () => {
     assert.equal(res.status, 1);
     assert.equal(res.record?.mode, "pre-commit");
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
-    assert.ok(hasExpiryPolicy(res.record));
+    assert.ok(hasErrorCode(res.record, "EXPIRY_POLICY"));
   });
 
   /**
@@ -372,6 +369,6 @@ describe("pre-commit mode", () => {
     r.stage();
     const res = r.runCli(["pre-commit"]);
     assert.equal(res.status, 1);
-    assert.ok(hasExpiryPolicy(res.record));
+    assert.ok(hasErrorCode(res.record, "EXPIRY_POLICY"));
   });
 });

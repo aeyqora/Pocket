@@ -5,6 +5,7 @@ import {
   configYaml,
   eslintConfig,
   exceptionYaml,
+  hasErrorCode,
   NEXT_LINE_NO_CONSOLE_FP,
   NEXT_LINE_NO_DEBUGGER_FP,
   type FixtureRepo,
@@ -151,10 +152,6 @@ function policyChangeMessage(
   return entry.message;
 }
 
-function hasPolicyChange(result: { errors: Array<{ code: string }> } | null): boolean {
-  return result?.errors.some((e) => e.code === "POLICY_CHANGE") ?? false;
-}
-
 function codes(result: { errors: Array<{ code: string }> } | null): string[] {
   return result?.errors.map((e) => e.code) ?? [];
 }
@@ -270,7 +267,7 @@ describe("combined landing: the additive same-change exception", () => {
     r.commit("head");
     const res = check(r);
     assert.equal(res.status, 1);
-    assert.equal(hasPolicyChange(res.record), false);
+    assert.equal(hasErrorCode(res.record, "POLICY_CHANGE"), false);
     assert.deepEqual(res.record?.summary.newDebt, { authorized: 0, unauthorized: 1 });
   });
 
@@ -304,7 +301,7 @@ describe("combined landing: the additive same-change exception", () => {
     // exit is 1 on the unauthorized debt, not on a `POLICY_CHANGE`: the delta
     // names one new grant, and that grant is real.
     assert.equal(res.status, 1);
-    assert.equal(hasPolicyChange(res.record), false);
+    assert.equal(hasErrorCode(res.record, "POLICY_CHANGE"), false);
     assert.deepEqual(res.record?.summary.newDebt, { authorized: 1, unauthorized: 1 });
     // The renewed record keeps the status the allocator gave it and never
     // reaches "used", which is the observable form of "it did not ride".

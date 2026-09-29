@@ -1,6 +1,12 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRepo, configYaml, eslintConfig, type FixtureRepo } from "./harness.js";
+import {
+  createRepo,
+  configYaml,
+  eslintConfig,
+  hasErrorCode,
+  type FixtureRepo,
+} from "./harness.js";
 
 const repos: FixtureRepo[] = [];
 after(() => repos.forEach((r) => r.cleanup()));
@@ -151,7 +157,7 @@ describe("config-level off recognition", () => {
     assert.equal(entry?.guardKind, "config-level");
     assert.equal(entry?.suppressionType, "config-off");
     assert.equal(res.record?.summary.newDebt.unauthorized, 0);
-    assert.ok(res.record?.errors.some((e) => e.code === "POLICY_CHANGE"));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
   });
 
   it("reconciles a pre-existing config-level off as existing debt", () => {
