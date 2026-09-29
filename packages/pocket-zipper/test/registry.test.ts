@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { coverExceptions, expiryPolicyRefusals, recordMatchKey } from "../src/registry.js";
+import { coverExceptions, expiryPolicyRefusals } from "../src/registry.js";
+import { recordMatchKey } from "../src/exception-match.js";
 import { loadRegistry } from "../src/validate.js";
 import { addDuration } from "../src/policy.js";
 import type { ExceptionRecord, ReconciledSuppression } from "../src/types.js";
@@ -228,6 +229,32 @@ describe("registry: coverExceptions matching", () => {
       recordMatchKey(record({ file: "elsewhere.js", reason: "other" })),
     );
     assert.notEqual(recordMatchKey(record()), recordMatchKey(record({ rule: "no-debugger" })));
+  });
+
+  it("builds no pool for a new config-off, which no record could ever cover", () => {
+    // A config-off reconciles to `new` like any unpaired suppression, so the
+    // disposition alone would admit it. It is a policy change, not new debt:
+    // its `suppression_type` is in the match key and no record may name one, so
+    // a pool built from it would report `0, 0, 0` forever — a count line
+    // reading "nothing leftover" about a record that could never have been used.
+    const configOff = suppression({
+      rule: "no-console",
+      suppressionType: "config-off",
+      guardKind: "config-level",
+      file: "eslint.config.mjs",
+    });
+    assert.equal(configOff.disposition, "new");
+
+    const out = coverExceptions({ head: [configOff], records: [record()], now: NOW });
+    assert.deepEqual(out.pools, []);
+    assert.equal(out.head[0]!.exception, null);
+  });
+
+  it("still builds a pool for a new directive, the case the count line is for", () => {
+    const out = coverExceptions({ head: [suppression()], records: [], now: NOW });
+    assert.equal(out.pools.length, 1);
+    assert.equal(out.pools[0]!.matched, 0);
+    assert.equal(out.pools[0]!.used, 0);
   });
 });
 

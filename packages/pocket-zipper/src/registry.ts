@@ -1,3 +1,4 @@
+import { coversInScope, isNewDebt, poolKey, recordMatchKey } from "./exception-match.js";
 import { matchKey } from "./identity.js";
 import { expiryHorizon } from "./policy.js";
 import type {
@@ -66,30 +67,6 @@ export function remediationFields(
 }
 
 /**
- * The record's match key, hiding the registry's snake_case field spelling. It is
- * record *semantics* — what a record is matched on — not part of the format
- * grammar, so it lives here beside the reader that uses it.
- */
-export function recordMatchKey(record: ExceptionRecord): string {
-  return matchKey({
-    fingerprint: record.fingerprint,
-    suppressionType: record.suppression_type,
-    rule: record.rule,
-  });
-}
-
-/**
- * A record covers a head suppression only in its scoped file: canonical
- * identity (fingerprint + suppression type + rule) plus the record's `file`
- * scope. A lookalike suppression in another file finds no record and stays
- * unauthorized debt. This states the same scope rule the allocator states as a
- * pool key, so the two have to move together.
- */
-function coversInScope(record: ExceptionRecord, h: ReconciledSuppression): boolean {
-  return record.file === h.file && recordMatchKey(record) === matchKey(h);
-}
-
-/**
  * The pool's arithmetic as one sentence. Written once, here, because the human
  * report and `validate`'s `POOL_COUNTS` finding are two answers to the same
  * question and a reader who gets different numbers from each is worse off than
@@ -153,11 +130,6 @@ interface Pool {
   used: number;
   /** The first record that reserved a slot — this pool's reference record. */
   reserved: ExceptionRecord | null;
-}
-
-/** The allocation unit: one match key in one file. */
-function poolKey(file: string, key: string): string {
-  return `${file}\u0000${key}`;
 }
 
 /**
@@ -278,18 +250,6 @@ export interface CoverExceptionsInput {
   now: Date;
 }
 
-/** Debt a record can authorize: what this change introduced, not what it inherited. */
-function isClaimable(h: ReconciledSuppression): boolean {
-  return h.disposition === "new" || h.disposition === "materially-changed";
-}
-
-/**
- * Authorize new/materially-changed debt against the registry and classify every
- * record's utilization. Authorization is allocation: a record authorizes one
- * logical suppression in its scoped file, from a consuming count, so same-file
- * twins need a record each and a lookalike elsewhere is unauthorized debt that
- * leaves the record unused.
- */
 /**
  * How many records fell to each utilization status. One tally, so the counts
  * `check` publishes and the counts `validate` prints cannot be two hand-rolled
@@ -309,6 +269,19 @@ export function utilizationCounts(
   return counts;
 }
 
+/**
+ * Authorize new/materially-changed debt against the registry and classify every
+ * record's utilization. Authorization is allocation: a record authorizes one
+ * logical suppression in its scoped file, from a consuming count, so same-file
+ * twins need a record each and a lookalike elsewhere is unauthorized debt that
+ * leaves the record unused.
+ *
+ * A pool exists only where there is new debt to allocate. An unexceptable
+ * suppression — a `config-off` — is not new debt (see `isNewDebt`), and since
+ * no record can name one, a pool built from it would report `0, 0, 0` forever:
+ * a count line reading "nothing leftover" about a record that could never have
+ * been used.
+ */
 export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage {
   const { head, records, now } = input;
   const statuses = new Map<ExceptionRecord, ExceptionStatus>();
@@ -317,7 +290,7 @@ export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage 
     records,
     suppressions: head,
     now,
-    claimable: isClaimable,
+    claimable: isNewDebt,
   });
   const authorized = new Map<LogicalSuppression, ExceptionRecord>();
   for (const { record, suppression } of pairs) {

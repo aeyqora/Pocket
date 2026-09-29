@@ -1,5 +1,7 @@
 import { renderCleanupSection, renderOverlongLine } from "./cleanup.js";
+import { isExceptable, isNewDebt } from "./exception-match.js";
 import { poolCountLine, remediationFields } from "./registry.js";
+import { isUnpaired } from "./reconcile.js";
 import { DEFAULT_MAX_EXPIRY } from "./policy.js";
 import type {
   DurationLiteral,
@@ -105,7 +107,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
 
   const flagged = flaggedDebt(record);
   const flaggedConfig = record.inventory.filter(
-    (e) => isNewOrChanged(e) && e.exception === null && e.guardKind === "config-level",
+    (e) => isUnpaired(e) && e.exception === null && !isExceptable(e),
   );
   if (flagged.length > 0) {
     lines.push("");
@@ -129,20 +131,14 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
   return joinLines(lines);
 }
 
-function isNewOrChanged(entry: InventoryEntry): boolean {
-  return entry.disposition === "new" || entry.disposition === "materially-changed";
-}
-
 /**
- * The debt a FAIL report flags: governed, directive-form, new or materially
- * changed, and uncovered by any record. One predicate for the two surfaces that
- * answer the same question — the block the report prints, and the ride-along the
- * report's author is offered (a FAIL with nothing here has nothing to author).
+ * The debt a FAIL report flags: governed, new or materially changed, exceptable,
+ * and uncovered by any record. One predicate for the two surfaces that answer the
+ * same question — the block the report prints, and the ride-along the report's
+ * author is offered (a FAIL with nothing here has nothing to author).
  */
 export function flaggedDebt(record: EvaluationRecord): InventoryEntry[] {
-  return record.inventory.filter(
-    (e) => isNewOrChanged(e) && e.exception === null && e.guardKind === "directive",
-  );
+  return record.inventory.filter((e) => isNewDebt(e) && e.exception === null);
 }
 
 function entryLine(entry: InventoryEntry): string {
@@ -159,9 +155,7 @@ function renderDispositionSummary(dispositions: EvaluationSummary["dispositions"
 }
 
 function renderAuthorizedDebt(inventory: InventoryEntry[]): string[] {
-  const authorized = inventory.filter(
-    (e) => isNewOrChanged(e) && e.exception !== null,
-  );
+  const authorized = inventory.filter((e) => isNewDebt(e) && e.exception !== null);
   if (authorized.length === 0) return [];
   const out: string[] = ["", "New suppression debt authorized by exception:"];
   for (const entry of authorized) {

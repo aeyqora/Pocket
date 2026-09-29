@@ -7,6 +7,7 @@ import { EMPTY_TREE, Git } from "./git.js";
 import { EslintSession } from "./eslint.js";
 import { configPluginRuleNames } from "./recognize.js";
 import { analyzeTrees, reconcileGoverned } from "./pipeline.js";
+import { isNewDebt } from "./exception-match.js";
 import {
   daysBetween,
   describeDuration,
@@ -426,12 +427,7 @@ async function readDebt(
   });
   const { head } = reconcileGoverned({ policy, analysis });
   const coverage = coverExceptions({ head, records, now });
-  return coverage.head.filter(
-    (h) =>
-      (h.disposition === "new" || h.disposition === "materially-changed") &&
-      h.guardKind === "directive" &&
-      h.exception === null,
-  );
+  return coverage.head.filter((h) => isNewDebt(h) && h.exception === null);
 }
 
 /** A working-tree file's text, or null when it is absent or not text at all. */

@@ -1,5 +1,4 @@
-import { matchKey } from "./identity.js";
-import { recordMatchKey } from "./registry.js";
+import { coversInScope } from "./exception-match.js";
 import { PROTECTED_REGISTRY, type RegistryEntry } from "./validate.js";
 import type {
   DurationLiteral,
@@ -92,32 +91,22 @@ export function unusedExceptions(input: UnusedExceptionsInput): UnusedException[
 }
 
 /**
- * Whether a suppression is the one this record excepts. The same question the
- * allocator asks, asked here about a suppression list that is not being
- * allocated from — a record's own live location, or the suppression a change
- * removed — so one predicate carries it rather than two call sites spelling
- * scope and identity out between them.
- */
-function matches(record: ExceptionRecord, suppression: LogicalSuppression): boolean {
-  return (
-    suppression.file === record.file &&
-    matchKey(suppression) === recordMatchKey(record) &&
-    suppression.guardKind === "directive"
-  );
-}
-
-/**
  * Where a record's suppression is *now*, which is the only location a reader
  * can act on. A dangling record has none — nothing matches it — which is what
  * makes its stored `line` a last-known location rather than a stale one. The
  * first matching suppression in document order stands for the pool, so a twin
  * pool points at the first twin that is still there.
+ *
+ * The match is the allocator's own, so this surface and the allocator cannot
+ * spell scope and identity differently. It needs no exceptability clause: a
+ * record's `suppression_type` participates in the match key and no record may
+ * name a `config-off`, so an unexceptable suppression can never match one.
  */
 function liveLocation(
   record: ExceptionRecord,
   live: readonly LogicalSuppression[],
 ): { file: string; line: number } | null {
-  const found = live.find((s) => matches(record, s));
+  const found = live.find((s) => coversInScope(record, s));
   return found === undefined ? null : { file: found.file, line: found.line };
 }
 
@@ -131,7 +120,7 @@ function clearedBy(
   record: ExceptionRecord,
   removed: readonly LogicalSuppression[],
 ): boolean {
-  return removed.some((s) => matches(record, s));
+  return removed.some((s) => coversInScope(record, s));
 }
 
 /**

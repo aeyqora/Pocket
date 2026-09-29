@@ -1,5 +1,10 @@
 import { canGuaranteePathApproval, viewPolicy } from "./policy.js";
-import { recordMatchKey } from "./registry.js";
+import {
+  poolKey,
+  recordMatchKey,
+  slotFileOf,
+  slotMatchKeyOf,
+} from "./exception-match.js";
 import type { ConfigSeverityLevel } from "./recognize.js";
 import type { ExceptionRecord, Policy } from "./types.js";
 
@@ -153,7 +158,9 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
   // caller builds and the verdict it read are one pass over the two registries,
   // not two that could drift apart.
   const sanctioned = combined
-    ? (headRegistry ?? []).filter((record) => registry.newSlots.has(slotKeyOf(record)))
+    ? (headRegistry ?? []).filter((record) =>
+        registry.newSlots.has(poolKey(record.file, recordMatchKey(record))),
+      )
     : [];
   return {
     weakening: true,
@@ -304,18 +311,18 @@ function claimUnpaired(
   slot: string,
   ceiling: number,
 ): number {
-  const file = slotFile(slot);
-  const key = slotMatchKey(slot);
+  const file = slotFileOf(slot);
+  const key = slotMatchKeyOf(slot);
   // The same-file pairing predates the cross-file claim, so no existing
   // behaviour depends on which pool a re-point was drawn from. A candidate
   // matching both is offered twice, which is what the two passes it replaces
   // did: the second pass revisited whatever the first left standing.
   const order: string[] = [];
   for (const [candidate, count] of unpaired) {
-    if (count > 0 && slotFile(candidate) === file) order.push(candidate);
+    if (count > 0 && slotFileOf(candidate) === file) order.push(candidate);
   }
   for (const [candidate, count] of unpaired) {
-    if (count > 0 && slotMatchKey(candidate) === key) order.push(candidate);
+    if (count > 0 && slotMatchKeyOf(candidate) === key) order.push(candidate);
   }
   let claimed = 0;
   for (const candidate of order) {
@@ -329,31 +336,14 @@ function claimUnpaired(
   return claimed;
 }
 
-/** The separator a slot key is built on; git paths cannot contain it. */
-const SLOT_SEPARATOR = "\u0000";
-
 /** One registry's slots, each counted — `(file, match key)` is the allocation's unit. */
 function slotCounts(records: readonly ExceptionRecord[] | null): Map<string, number> {
   const counts = new Map<string, number>();
   for (const record of records ?? []) {
-    const key = slotKeyOf(record);
+    const key = poolKey(record.file, recordMatchKey(record));
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
-}
-
-function slotKeyOf(record: ExceptionRecord): string {
-  return `${record.file}${SLOT_SEPARATOR}${recordMatchKey(record)}`;
-}
-
-/** The file half of a slot key, recovered by the separator it was built on. */
-function slotFile(slot: string): string {
-  return slot.slice(0, slot.indexOf(SLOT_SEPARATOR));
-}
-
-/** The match-key half of a slot key — the identity a re-point across files keeps. */
-function slotMatchKey(slot: string): string {
-  return slot.slice(slot.indexOf(SLOT_SEPARATOR) + 1);
 }
 
 /**

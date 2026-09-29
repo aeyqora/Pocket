@@ -14,6 +14,7 @@ import type {
   RecordExceptionEntry,
   Verdict,
 } from "./types.js";
+import { isNewDebt } from "./exception-match.js";
 import { DEFAULT_POLICY } from "./policy.js";
 
 export const TOOL_NAME = "pocket-zipper";
@@ -23,18 +24,6 @@ export const SCHEMA_VERSION = 1 as const;
 export interface Summary {
   dispositions: EvaluationSummary["dispositions"];
   newDebt: EvaluationSummary["newDebt"];
-}
-
-/**
- * New debt is a property of directives only. A config-off (a rule disabled in
- * the flat config) is a policy change, not debt: it can never be a same-change
- * exception and it never fails the gate on its own.
- */
-function isNewDebt(suppression: ReconciledSuppression): boolean {
-  return (
-    suppression.guardKind === "directive" &&
-    (suppression.disposition === "new" || suppression.disposition === "materially-changed")
-  );
 }
 
 /**

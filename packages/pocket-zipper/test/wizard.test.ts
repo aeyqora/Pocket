@@ -45,6 +45,32 @@ function singleDebt(r: FixtureRepo): void {
   r.write("app.js", `export const a = 1;\n${debtLine}console.log(1);\n`);
 }
 
+/**
+ * A repo whose working tree turns one governed rule off in the flat config. The
+ * baseline governs `no-console` and `no-debugger` at error; the head turns
+ * `no-console` off and leaves `no-debugger` alone. A `config-off` reconciles to
+ * `new` like any unpaired suppression and sits at line 1 of the config file, so
+ * `--from eslint.config.mjs:1` reaches it directly.
+ */
+function configOffRepo(): FixtureRepo {
+  const r = repo();
+  r.write("eslint.config.mjs", eslintConfig({ "no-console": "error", "no-debugger": "error" }));
+  r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+  r.write("app.js", "export const a = 1;\n");
+  r.commit("base");
+  r.write("eslint.config.mjs", eslintConfig({ "no-console": "off", "no-debugger": "error" }));
+  return r;
+}
+
+/**
+ * One new governed `no-debugger` suppression, directive on line 2. Deliberately
+ * off the rule the config turned off: a directive for a `config-off` rule is
+ * unused rather than debt, so debt on `no-console` would prove nothing here.
+ */
+function debuggerDebt(r: FixtureRepo): void {
+  r.write("app.js", "export const a = 1;\n// eslint-disable-next-line no-debugger\ndebugger;\n");
+}
+
 /** Two same-file twins (one pool), directives on lines 2 and 4. */
 function twinDebt(r: FixtureRepo): void {
   r.write("app.js", `export const a = 1;\n${debtLine}console.log(1);\n${debtLine}console.log(2);\n`);
@@ -1063,6 +1089,33 @@ describe("the wizard: non-interactive flags", () => {
     );
     assert.equal(res.status, 1);
     assert.equal(res.stderr, "no new debt at app.js:9\n");
+  });
+
+  it("offers no new debt at all when the only new thing is a config-off", () => {
+    // A new config-off reconciles to `new`, exactly as a new directive does, and
+    // sits at line 1 of the config file. It is a policy change rather than debt:
+    // no record may name a `config-off`, so authoring one here would write a
+    // record the validator refuses on the next read.
+    const r = configOffRepo();
+    const res = r.runCli(
+      ["exception", "add", "--from", "eslint.config.mjs:1", "--reason", "Needed."],
+      { json: false },
+    );
+    assert.equal(res.status, 1);
+    assert.equal(res.stderr, "no new debt at eslint.config.mjs:1\n");
+    assert.ok(!existsSync(join(r.dir, ".pocket-zipper/exceptions.yml")));
+  });
+
+  it("lists only the directive when a config-off lands beside new debt", () => {
+    const r = configOffRepo();
+    debuggerDebt(r);
+    const res = runWizard(r, "1\n");
+    // The numbered list is the whole offer, and it must carry the directive and
+    // not the config-off. A config-off in it would be a selection that can only
+    // end in a record nothing can match. Matched on the config file's own name:
+    // the list renders it as `eslint.config.mjs:1  no-console  (config-off, new)`.
+    assert.match(res.stdout, /1\) app\.js:\d+\s+no-debugger\s+\(next-line, new\)/);
+    assert.ok(!res.stdout.includes("eslint.config.mjs"), res.stdout);
   });
 
   it("refuses a --from that cannot pick between two suppressions on one line", () => {

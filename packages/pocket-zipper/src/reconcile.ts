@@ -77,6 +77,22 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
 }
 
 /**
+ * The disposition half of **new debt**, on its own: a suppression with no
+ * continuous baseline counterpart, or a materially-changed one. Stated apart
+ * from exceptability, which is a property of **Suppression type** and lives in
+ * `exception-match`, because the two are different questions — a new `config-off`
+ * answers this one and fails the other.
+ *
+ * Disposition-only on purpose: the head partitions cleanly by it. Every
+ * suppression is unpaired, exceptable, or both, and no suppression is neither.
+ */
+export function isUnpaired(suppression: { readonly disposition: Disposition }): boolean {
+  return (
+    suppression.disposition === "new" || suppression.disposition === "materially-changed"
+  );
+}
+
+/**
  * A head directive H text-matched to baseline twin B is materially-changed
  * (the tomb) when H's comment is newborn, B's guarded statement is diff-removed,
  * and neither guarded statement survives in the other tree.
