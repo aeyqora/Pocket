@@ -4,10 +4,11 @@ import { fileURLToPath } from "node:url";
 import { evaluate } from "./pipeline.js";
 import { renderReport } from "./report.js";
 import { runValidate } from "./validate-command.js";
+import { runExceptionAdd } from "./wizard.js";
 import type { Mode } from "./types.js";
 
-/** The evaluation commands write a JSON record; `validate` prints diagnostics. */
-type Command = Mode | "validate";
+/** The evaluation commands write a JSON record; `validate` prints diagnostics; `exception add` runs the wizard. */
+type Command = Mode | "validate" | "exception add";
 
 /**
  * The flags each command reads. `validate` reads none: it is a working-tree
@@ -19,6 +20,7 @@ const FLAGS: Record<Command, readonly string[]> = {
   check: ["--base", "--json", "--verbose"],
   "pre-commit": ["--json", "--verbose"],
   validate: [],
+  "exception add": ["--from", "--reason", "--reference"],
 };
 
 function isCommand(arg: string | undefined): arg is Command {
@@ -30,20 +32,35 @@ interface Args {
   baseRef: string;
   jsonPath: string | null;
   verbose: boolean;
+  /** `exception add` only: the non-interactive selector and answers. */
+  from: string | null;
+  reason: string | null;
+  reference: string | null;
 }
 
 function parseArgs(argv: string[]): Args | { error: string } | { help: true } {
-  const [command, ...rest] = argv;
-  if (command === "--help" || command === "-h" || command === undefined) {
+  const first = argv[0];
+  if (first === "--help" || first === "-h" || first === undefined) {
     return { help: true };
   }
-  if (!isCommand(command)) {
+  // `exception add` is the one two-word command; everything else is one word.
+  const command: Command | undefined =
+    first === "exception" && argv[1] === "add"
+      ? "exception add"
+      : isCommand(first)
+        ? first
+        : undefined;
+  if (command === undefined) {
     return { error: usage() };
   }
+  const rest = command === "exception add" ? argv.slice(2) : argv.slice(1);
   const flags = FLAGS[command];
   let baseRef = "";
   let jsonPath: string | null = null;
   let verbose = false;
+  let from: string | null = null;
+  let reason: string | null = null;
+  let reference: string | null = null;
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i]!;
     if (arg === "--help" || arg === "-h") {
@@ -62,12 +79,26 @@ function parseArgs(argv: string[]): Args | { error: string } | { help: true } {
       if (!jsonPath) return { error: "--json requires a path\n" + usage() };
     } else if (arg === "--verbose") {
       verbose = true;
+    } else if (arg === "--from") {
+      from = rest[++i] ?? "";
+      if (!from) return { error: "--from requires <file:line>\n" + usage() };
+    } else if (arg === "--reason") {
+      reason = rest[++i] ?? "";
+      if (!reason) return { error: "--reason requires <text>\n" + usage() };
+    } else if (arg === "--reference") {
+      reference = rest[++i] ?? "";
+      if (!reference) return { error: "--reference requires <link>\n" + usage() };
     }
   }
   if (command === "check" && !baseRef) {
     return { error: "check requires --base <ref>\n" + usage() };
   }
-  return { command, baseRef, jsonPath, verbose };
+  // The wizard's flags travel together: `--from` selects the suppression,
+  // `--reason` and `--reference` answer the interview it selects for.
+  if (command === "exception add" && (reason !== null || reference !== null) && from === null) {
+    return { error: "--reason and --reference require --from <file:line>\n" + usage() };
+  }
+  return { command, baseRef, jsonPath, verbose, from, reason, reference };
 }
 
 function usage(): string {
@@ -76,6 +107,7 @@ function usage(): string {
     "  pocket-zipper check --base <ref> [--json <path>] [--verbose]",
     "  pocket-zipper pre-commit [--json <path>] [--verbose]",
     "  pocket-zipper validate",
+    "  pocket-zipper exception add [--from <file:line> --reason <text> --reference <link>]",
   ].join("\n");
 }
 
@@ -95,6 +127,23 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (parsed.command === "validate") {
     const result = await runValidate({ cwd: process.cwd(), now: new Date() });
     process.stdout.write(result.report);
+    return result.exitCode;
+  }
+
+  // `exception add` runs the authoring wizard: prompts on stdin, transcript on
+  // stdout, and no evaluation record — its write is a proposal to the working
+  // tree, never a verdict.
+  if (parsed.command === "exception add") {
+    const result = await runExceptionAdd({
+      cwd: process.cwd(),
+      now: new Date(),
+      ...(parsed.from === null ? {} : { from: parsed.from }),
+      ...(parsed.reason === null ? {} : { reason: parsed.reason }),
+      ...(parsed.reference === null ? {} : { reference: parsed.reference }),
+      input: process.stdin,
+      output: process.stdout,
+      stderr: process.stderr,
+    });
     return result.exitCode;
   }
 

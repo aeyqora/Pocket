@@ -135,7 +135,7 @@ function readProtected(root: string, path: string, findings: Finding[]): string 
 }
 
 /** A file's text, or null when it is not there at all. Throws on any other failure. */
-function readIfPresent(root: string, path: string): string | null {
+export function readIfPresent(root: string, path: string): string | null {
   try {
     return readFileSync(join(root, path), "utf8");
   } catch (err) {

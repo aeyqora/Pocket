@@ -161,6 +161,34 @@ export class Git {
     );
   }
 
+  /**
+   * The working tree against HEAD: every tracked change, staged or not, plus
+   * the untracked files. The proposed change the authoring surface reads — a
+   * wizard session is a working-tree session, so its debt is what sits in the
+   * tree, never only what the index carries.
+   *
+   * A path can appear on both sides — the `git rm --cached` shape, where HEAD
+   * carries the file, the index does not, and the disk still does. The diff
+   * alone calls it deleted (the index is what it diffs against); the disk is
+   * the truth this map is for, so the file reads as modified and recognition
+   * decides what actually changed. Untracked files enter as plain additions;
+   * binary detection for them is the reader's (a NUL-bearing file reads as
+   * absent), since `diff --numstat` has no word to say about a file no tree
+   * carries.
+   */
+  worktreeChangeMap(): ChangeMap {
+    const map = this.buildChangeMap(
+      ["diff", "--name-status", "-z", "-M", "HEAD", "--"],
+      ["diff", "--numstat", "-z", "-M", "HEAD", "--"],
+    );
+    const untracked = this.run(["ls-files", "--others", "--exclude-standard", "-z"]).stdout;
+    for (const path of untracked.split("\0")) {
+      if (path.length === 0) continue;
+      map.files.set(path, map.files.has(path) ? "M" : "A");
+    }
+    return map;
+  }
+
   private buildChangeMap(nameStatusArgs: string[], numstatArgs: string[]): ChangeMap {
     return parseChangeMap(
       this.run(nameStatusArgs).stdout,

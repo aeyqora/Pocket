@@ -67,6 +67,16 @@ const FINGERPRINT_RE = /^v1:sha256:[0-9a-f]{64}$/;
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /**
+ * The date grammar's shape half: YYYY-MM-DD as written. Stated beside
+ * `isCalendarDate` (the existence half) so the authoring surface's date prompt
+ * refuses a malformed date with the same grammar the registry's dates are
+ * judged by — one grammar, not two that can drift.
+ */
+export function isIsoDateForm(value: string): boolean {
+  return DATE_RE.test(value);
+}
+
+/**
  * A finding is one thing wrong with a protected file, addressed precisely enough
  * to fix without hunting: where it is, what it is called, and what was expected
  * instead. Severity is two-tier, and the tier is the whole policy:
@@ -779,9 +789,11 @@ function parseErrorMessage(message: string): string {
 /**
  * Real calendar validity, not a regex: `2026-02-30` is well-formed and does not
  * exist. The year is set explicitly so a four-digit year below 100 is not folded
- * into the 1900s the way `Date.UTC` would fold it.
+ * into the 1900s the way `Date.UTC` would fold it. Shared with the authoring
+ * surface, which refuses a calendar-invalid date at the prompt instead of at
+ * the write.
  */
-function isCalendarDate(value: string): boolean {
+export function isCalendarDate(value: string): boolean {
   const match = DATE_RE.exec(value);
   if (!match) return false;
   const year = Number(match[1]);

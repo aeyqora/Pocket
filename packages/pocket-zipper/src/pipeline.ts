@@ -40,7 +40,9 @@ import type {
   ExceptionRecord,
   LogicalSuppression,
   Mode,
+  Policy,
   RecordError,
+  ReconciledSuppression,
   SuppressionType,
 } from "./types.js";
 
@@ -136,32 +138,18 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         changeMap.files.has(PROTECTED_CONFIG) || changeMap.files.has(PROTECTED_REGISTRY);
 
       const analysis = await analyzeTrees({
-        git,
-        options,
-        trees,
         baselineDir,
         headDir,
         baselineSession,
         headSession,
         changeMap,
+        baselineContent: (path) => git.fileAt(trees.baselineCommit, path),
+        headContent: (path) => readHeadContent(git, trees, options, headDir, path),
       });
 
-      const governedHead = computeGovernedSet(policy, analysis.applicableHead);
-      const governedBaseline = computeGovernedSet(policy, analysis.applicableBaseline);
-
-      const baselineSuppressions = analysis.baselineSuppressions.filter((s) =>
-        governedBaseline.includes(s.rule),
-      );
-      const headSuppressions = analysis.headSuppressions.filter((s) =>
-        governedHead.includes(s.rule),
-      );
-
-      const { head, removed: baseline } = reconcile({
-        headSuppressions,
-        baselineSuppressions,
-        lineDiffs: analysis.lineDiffs,
-        baselineIndex: analysis.baselineIndex,
-        headIndex: analysis.headIndex,
+      const { head, removed: baseline, governedHead, governedBaseline } = reconcileGoverned({
+        policy,
+        analysis,
       });
 
       // The gate's failure term, before anything is authorized. Coverage cannot
@@ -364,6 +352,44 @@ function expiryPolicyMessage(
   return `newly written expires ${record.expires} for ${record.rule} in ${record.file} runs past the baseline ${maxExpiry} maximum (on or before ${expiryHorizon(now, maxExpiry)})`;
 }
 
+/** The governed, reconciled half of one analysis: what every evaluation and every authoring session reads off it. */
+export interface GovernedReconciliation {
+  /** The governed rules of the head side — the evaluation record's `governedRules`. */
+  governedHead: string[];
+  /** The governed rules of the baseline side — the policy-change detector's allowlist. */
+  governedBaseline: string[];
+  /** The reconciled proposed-change side, governed rules only. */
+  head: ReconciledSuppression[];
+  /** The baseline suppressions the change deleted. */
+  removed: LogicalSuppression[];
+}
+
+/**
+ * The post-analysis half the evaluation and the authoring surface share:
+ * narrow both sides to the governed set, then reconcile continuity. The two
+ * disagree only about what they cover the reconciled debt against — the
+ * evaluation's baseline registry (plus its same-change additions), the
+ * wizard's working-tree registry — so coverage stays with each caller.
+ */
+export function reconcileGoverned(input: {
+  policy: Policy;
+  analysis: Analysis;
+}): GovernedReconciliation {
+  const { policy, analysis } = input;
+  const governedHead = computeGovernedSet(policy, analysis.applicableHead);
+  const governedBaseline = computeGovernedSet(policy, analysis.applicableBaseline);
+  const { head, removed } = reconcile({
+    headSuppressions: analysis.headSuppressions.filter((s) => governedHead.includes(s.rule)),
+    baselineSuppressions: analysis.baselineSuppressions.filter((s) =>
+      governedBaseline.includes(s.rule),
+    ),
+    lineDiffs: analysis.lineDiffs,
+    baselineIndex: analysis.baselineIndex,
+    headIndex: analysis.headIndex,
+  });
+  return { governedHead, governedBaseline, head, removed };
+}
+
 interface ResolvedTrees {
   baselineCommit: string;
   baselineRef: string;
@@ -452,17 +478,28 @@ function assertGitPosture(git: Git, mode: Mode): void {
 }
 
 interface AnalyzeInput {
-  git: Git;
-  options: EvaluateOptions;
-  trees: ResolvedTrees;
   baselineDir: string;
   headDir: string;
   baselineSession: EslintSession;
   headSession: EslintSession;
   changeMap: ReturnType<Git["changeMap"]>;
+  /**
+   * Reads the baseline side of one changed path — the head commit's blob for
+   * `check` and `pre-commit`, the wizard's HEAD for the working tree it reads
+   * against. Returns null where the baseline does not carry the path.
+   */
+  baselineContent: (path: string) => string | null;
+  /**
+   * Reads the proposed-change side of one changed path — the one thing the
+   * three callers of this engine legitimately disagree about: `check` reads
+   * the head commit's blob, `pre-commit` the staged blob with a worktree
+   * fallback, the wizard the working tree itself. Returns null where the side
+   * does not carry the path.
+   */
+  headContent: (path: string) => string | null;
 }
 
-interface Analysis {
+export interface Analysis {
   baselineSuppressions: LogicalSuppression[];
   headSuppressions: LogicalSuppression[];
   applicableBaseline: string[];
@@ -474,16 +511,23 @@ interface Analysis {
   headIndex: Set<string>;
 }
 
-async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
+/**
+ * The one recognition engine every inventory runs through: baseline and head
+ * ESLint sessions over the changed paths, the config-level suppressions, the
+ * severity bands, and the line indexes the tomb judgment reads. Exported for
+ * the wizard, which recomputes the working tree's debt with the same engine
+ * the gate reads with — the only injected part is how each side of the diff is
+ * read.
+ */
+export async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
   const {
-    git,
-    options,
-    trees,
     baselineDir,
     headDir,
     baselineSession,
     headSession,
     changeMap,
+    baselineContent,
+    headContent,
   } = input;
 
   const baselineSuppressions: LogicalSuppression[] = [];
@@ -498,9 +542,8 @@ async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
     if (isSkippedPath(newPath)) continue;
     const oldPath = changeMap.renames.get(newPath) ?? newPath;
 
-    const baseContent = status === "A" ? null : git.fileAt(trees.baselineCommit, oldPath);
-    const headContent =
-      status === "D" ? null : readHeadContent(git, trees, options, headDir, newPath);
+    const baseContent = status === "A" ? null : baselineContent(oldPath);
+    const headContent = status === "D" ? null : input.headContent(newPath);
 
     // Line movement is judged on identity-canonicalized text (whitespace- and
     // justification-insensitive), so re-indentation and justification edits

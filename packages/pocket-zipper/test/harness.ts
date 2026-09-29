@@ -91,12 +91,12 @@ export class FixtureRepo {
     else this.git(["checkout", "-q", ref]);
   }
 
-  runCli(args: string[], opts: { json?: boolean } = {}): RunResult {
+  runCli(args: string[], opts: { json?: boolean; input?: string } = {}): RunResult {
     const jsonPath = join(
       tmpdir(),
       `pocket-zipper-record-${process.pid}-${Date.now()}-${this.counter++}.json`,
     );
-    return runCliIn(this.dir, args, jsonPath, opts.json !== false);
+    return runCliIn(this.dir, args, jsonPath, opts.json !== false, opts.input);
   }
 
   cleanup(): void {
@@ -109,6 +109,7 @@ export function runCliIn(
   args: string[],
   jsonPath?: string,
   writeJson = true,
+  input?: string,
 ): RunResult {
   const target = jsonPath ?? join(tmpdir(), `pocket-zipper-record-${process.pid}-${Date.now()}.json`);
   const fullArgs = [...args];
@@ -116,6 +117,7 @@ export function runCliIn(
   const res: SpawnSyncReturns<string> = spawnSync(process.execPath, [CLI, ...fullArgs], {
     cwd: dir,
     encoding: "utf8",
+    ...(input === undefined ? {} : { input }),
   });
   let record: EvaluationRecord | null = null;
   if (existsSync(target)) {

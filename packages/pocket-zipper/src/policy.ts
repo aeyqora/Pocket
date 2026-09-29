@@ -57,6 +57,19 @@ export function isDurationLiteral(value: unknown): value is DurationLiteral {
 }
 
 /**
+ * The literal spelled for a transcript — `30d` as "30 days", `2mo` as
+ * "2 months" — the one place the authoring surface's "(N days from today)"
+ * parenthetical is derived, so it can never disagree with the policy's own
+ * grammar.
+ */
+export function describeDuration(literal: DurationLiteral): string {
+  const match = DURATION_RE.exec(literal)!;
+  const n = Number(match[1]);
+  const unit = match[2] === "mo" ? "month" : "day";
+  return `${n} ${unit}${n === 1 ? "" : "s"}`;
+}
+
+/**
  * Tolerant, non-throwing view of a policy document. Shared by strict validation
  * (`parsePolicy`) and policy-change detection so the extraction lives once.
  * Bad documents are never thrown from here: each condition is surfaced as a
@@ -326,7 +339,7 @@ export function addDuration(isoDate: string, literal: DurationLiteral): string {
   const target = literal.endsWith("mo")
     ? addCalendarMonths(year, month, day, value)
     : addDays(year, month, day, value);
-  return formatIso(target);
+  return isoDay(target);
 }
 
 function addDays(year: number, month: number, day: number, days: number): Date {
@@ -343,10 +356,15 @@ function addCalendarMonths(year: number, month: number, day: number, months: num
   return new Date(Date.UTC(targetYear, targetMonth, Math.min(day, lastDayOfTarget)));
 }
 
-function formatIso(dt: Date): string {
-  const y = dt.getUTCFullYear();
-  const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(dt.getUTCDate()).padStart(2, "0");
+/**
+ * A date's UTC day as YYYY-MM-DD — the one spelling of "today" the expiry
+ * arithmetic and the authoring surface share, so a prefilled date and the day
+ * it was prefilled on can never disagree.
+ */
+export function isoDay(date: Date): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
 
@@ -356,7 +374,7 @@ function formatIso(dt: Date): string {
  * and the expiry-horizon check can never disagree about a date.
  */
 export function expiryHorizon(now: Date, literal: DurationLiteral): string {
-  return addDuration(formatIso(now), literal);
+  return addDuration(isoDay(now), literal);
 }
 
 /**
