@@ -249,8 +249,10 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       };
 
       // The addresses behind those counts: every unused baseline record, with
-      // the line span and text that make deletion find-in-one-glance, where its
-      // suppression lives now, and whether this change is what orphaned it.
+      // the registry line range and its own text that make deletion
+      // find-in-one-glance, where its suppression lives now, and whether this
+      // change is what orphaned it.
+      //
       // Derived from the baseline registry rather than the evaluation's union,
       // so a pointer never names a record the file does not carry; a record
       // riding the change under combined landing has no address in the baseline

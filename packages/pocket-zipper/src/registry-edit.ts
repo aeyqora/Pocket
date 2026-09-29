@@ -109,10 +109,10 @@ function removeField(raw: string, pair: Pair): Cut | null {
 
 /**
  * The two line-boundary offsets, shared by every module that has to name or cut
- * a span of the registry document. The read side (a delete-ready pointer naming
- * a record's lines) and the write side (a renewal cutting a field's line) must
- * agree on where a line begins and ends, or a pointer and the edit it invites
- * would describe different ranges.
+ * a range of the registry document. The read side (a delete-ready pointer
+ * naming a record's lines) and the write side (a renewal cutting a field's
+ * line) must agree on where a line begins and ends, or a pointer and the edit
+ * it invites would describe different ranges.
  */
 
 /** The offset where the line containing `offset` begins. */

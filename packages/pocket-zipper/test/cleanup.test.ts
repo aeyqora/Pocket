@@ -86,7 +86,7 @@ function clearingChange(r: FixtureRepo): void {
 }
 
 describe("the FAIL cleanup section: a delete-ready pointer per unused record", () => {
-  it("names the entry, the line span, and the record's full text", async () => {
+  it("names the entry, the registry's line range, and the record's full text", async () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write(REGISTRY, record());
@@ -99,8 +99,8 @@ describe("the FAIL cleanup section: a delete-ready pointer per unused record", (
     assert.equal(res.status, 1);
     const [pointer] = pointers(res.stdout);
     // The pointer is the spec's literal and nothing else: entry, of how many,
-    // the file, the line span. A CI step and a maintainer's muscle memory both
-    // key on this exact string.
+    // the registry file, the line range. A CI step and a maintainer's muscle
+    // memory both key on this exact string.
     assert.equal(pointer?.trim(), `entry 1 of 1 · ${REGISTRY}:1-8`);
     // Status and location ride on the next line, so they never break the
     // pointer's greppable shape.
@@ -115,8 +115,8 @@ describe("the FAIL cleanup section: a delete-ready pointer per unused record", (
     assert.match(block, new RegExp(`expires: ${IN_WINDOW}`));
   });
 
-  it("gives each record its own span, so a pointer never names a live record's lines", async () => {
-    // Two records, both unused. A span that ran past its record would name the
+  it("gives each record its own range, so a pointer never names a live record's lines", async () => {
+    // Two records, both unused. A range that ran past its record would name the
     // second record's lines for the first, and cutting the first would take a
     // record still in use with it.
     const r = repo();
@@ -142,7 +142,7 @@ describe("the FAIL cleanup section: a delete-ready pointer per unused record", (
     assert.equal(res.status, 1);
     const derived = await unused(r);
     assert.deepEqual(
-      derived.map((u) => [u.entry, u.entries, u.span, u.status]),
+      derived.map((u) => [u.entry, u.entries, u.registryLines, u.status]),
       [
         [1, 2, { start: 1, end: 8 }, "dangling"],
         [2, 2, { start: 9, end: 16 }, "dangling"],
@@ -220,6 +220,37 @@ describe("a record listed next to its suppression shows where it is now", () => 
       res.stdout,
       /spent; at app\.js:4 \(record says 2, currently at 4\)/,
     );
+  });
+
+  it("keeps the record's own location in the source file, and its address in the registry", async () => {
+    // The two line numbers a record carries index *different files*, and
+    // conflating them is the easy mistake: `line: 2` is a line of app.js (the
+    // suppression), while `registryLines` is a range of exceptions.yml (the
+    // record). Neither is derivable from the other, so the pointer names the
+    // registry file explicitly and never presents the two as one number.
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(REGISTRY, record({ line: 2 }));
+    r.write("app.js", `export const a = 1;\n${noConsole}console.log(1);\n`);
+    r.commit("base");
+    r.branch("base");
+    failingChange(r);
+
+    const [entry] = await unused(r);
+    // The record's stored `line`: the suppression, in the source file.
+    assert.equal(entry?.recorded, 2);
+    assert.equal(entry?.live, null);
+    // The record's address: itself, in the registry file. Lines 1–9 of
+    // exceptions.yml (nine, because this record carries the `line` field),
+    // which has nothing to do with line 2 of app.js.
+    assert.deepEqual(entry?.registryLines, { start: 1, end: 9 });
+
+    const res = r.runCli(["check", "--base", "base"]);
+    const lines = res.stdout.split("\n");
+    const pointer = pointers(res.stdout)[0]!;
+    // The pointer names the registry; the location clause names the source.
+    assert.equal(pointer.trim(), `entry 1 of 1 · ${REGISTRY}:1-9`);
+    assert.match(lines[lines.indexOf(pointer) + 1]!, /last known: 2/);
   });
 
   it("says last known where nothing matches the record any more", async () => {

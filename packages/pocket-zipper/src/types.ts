@@ -155,12 +155,19 @@ export interface UnusedException {
   entry: number;
   entries: number;
   /**
-   * The record's line span in the registry, inclusive — or null where the
-   * document gave no offsets to measure from. Null prints the entry number
-   * alone: a pointer is an instruction to cut specific lines, and a span nobody
-   * verified is worse than none.
+   * The lines this record occupies **in the registry file**, inclusive — or
+   * null where the document gave no offsets to measure from. Null prints the
+   * entry number alone: a pointer is an instruction to cut specific lines, and
+   * a range nobody verified is worse than none.
+   *
+   * Named for the file it indexes because `recorded` and `live` on this same
+   * type are lines in a *different* file — the record's `line` field (ticket 03)
+   * points into the source file, naming the suppression. This one points into
+   * `.pocket-zipper/exceptions.yml`, naming the record. They are unrelated
+   * numbers, neither derivable from the other, and storing this one would make
+   * it stale the moment anyone edits the file above it.
    */
-  span: { start: number; end: number } | null;
+  registryLines: { start: number; end: number } | null;
   /** The record's own text, exactly as the registry writes it. */
   text: string;
   /**

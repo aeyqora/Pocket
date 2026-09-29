@@ -65,6 +65,12 @@ entry 3 of 8 · .pocket-zipper/exceptions.yml:12-18
 lives. Paste-as-is and delete. (Spent/expired records print at their live location instead;
 dangling records print `last known: N` when the line has drifted.)
 
+Two different files carry a line number for a record, and they are not interchangeable. The
+pointer's `exceptions.yml:12-18` is **the record's** location in the registry. A record's own
+`line:` field is a line of the **source** file, naming the suppression it excepts — that is the
+one `last known: N` and `at src/api.ts:41` refer to. The two never agree: line 2 of `app.js` and
+lines 1–9 of `exceptions.yml` describe different things, and neither tells you the other.
+
 ## The cleanup rollup and CI glue
 
 On pass with `--verbose`, the report ends with a one-line greppable rollup:

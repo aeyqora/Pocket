@@ -74,14 +74,14 @@ export function unusedExceptions(input: UnusedExceptionsInput): UnusedException[
   const total = entries.length;
 
   const unused: UnusedException[] = [];
-  for (const { index, record, span, text } of entries) {
+  for (const { index, record, registryLines, text } of entries) {
     const status = statuses.get(record);
     if (status === undefined || status === "used") continue;
     unused.push({
       status,
       entry: index,
       entries: total,
-      span,
+      registryLines,
       text,
       live: liveLocation(record, live),
       recorded: record.line ?? null,
@@ -138,13 +138,18 @@ function clearedBy(
  * The locate-and-delete pointer, in the exact form the spec fixes:
  * `entry N of M · .pocket-zipper/exceptions.yml:lines`. Nothing else rides on
  * this line — a CI step and a maintainer's muscle memory both key on it, and a
- * status spliced in after the span would break the first for no gain.
+ * status spliced in after the range would break the first for no gain.
+ *
+ * Every number on it indexes the *registry* file. The record's own `line` field
+ * indexes the source file and means something else entirely; see
+ * `UnusedException.registryLines`.
  */
 export function cleanupPointer(unused: UnusedException): string {
+  const lines = unused.registryLines;
   const where =
-    unused.span === null
+    lines === null
       ? ""
-      : `:${unused.span.start === unused.span.end ? unused.span.start : `${unused.span.start}-${unused.span.end}`}`;
+      : `:${lines.start === lines.end ? lines.start : `${lines.start}-${lines.end}`}`;
   return `  entry ${unused.entry} of ${unused.entries} · ${PROTECTED_REGISTRY}${where}`;
 }
 

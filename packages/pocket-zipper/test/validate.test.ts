@@ -64,9 +64,13 @@ function withBareKey(lines: string[], key: string): string[] {
 describe("a registry entry's own extent", () => {
   const ONE = registry(entryLines());
 
-  it("spans the list marker through the last field, and no further", () => {
+  it("ranges the list marker through the last field, and no further", () => {
+    // `registryLines` are lines in the *registry* — where the record is. The
+    // record's own `line` field is a different number in a different file: it
+    // names the suppression, in the source. The two never agree and never
+    // substitute for each other.
     const { entries } = validateRegistry(ONE);
-    assert.deepEqual(entries[0]?.span, { start: 1, end: 8 });
+    assert.deepEqual(entries[0]?.registryLines, { start: 1, end: 8 });
   });
 
   it("carries the record's text exactly as written", () => {
@@ -91,17 +95,17 @@ describe("a registry entry's own extent", () => {
     ]);
     const { entries, findings } = validateRegistry(folded);
     assert.deepEqual(findings, []);
-    assert.deepEqual(entries[0]?.span, { start: 1, end: 10 });
+    assert.deepEqual(entries[0]?.registryLines, { start: 1, end: 10 });
     assert.match(entries[0]!.text, / {4}and the second/);
   });
 
-  it("gives each entry its own span, so a pointer names one record's lines", () => {
+  it("gives each entry its own range, so a pointer names one record's lines", () => {
     const two = registry(entryLines(), ["# a comment between records", ...entryLines({ fingerprint: FP_OTHER })]);
     const { entries } = validateRegistry(two);
     // The comment belongs to neither record, and the second entry starts after
     // it — so the first entry's span stops before the comment.
-    assert.deepEqual(entries[0]?.span, { start: 1, end: 8 });
-    assert.deepEqual(entries[1]?.span, { start: 10, end: 17 });
+    assert.deepEqual(entries[0]?.registryLines, { start: 1, end: 8 });
+    assert.deepEqual(entries[1]?.registryLines, { start: 10, end: 17 });
     assert.doesNotMatch(entries[0]!.text, /a comment between records/);
   });
 });

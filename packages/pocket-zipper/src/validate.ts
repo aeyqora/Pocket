@@ -191,15 +191,16 @@ export interface RegistryEntry {
   /** Where each declared field is, for a finding about that field. */
   readonly fields: ReadonlyMap<string, Position>;
   /**
-   * The lines the entry occupies, inclusive of its list marker and its last
-   * field — the span a delete-ready pointer names, measured from the source
-   * text rather than from the fields, because a record is deleted by cutting
-   * lines and a span stopping at the last field would leave the `- ` behind.
+   * The lines this entry occupies **in the registry document**, inclusive of
+   * its list marker and its last field — the range a delete-ready pointer
+   * names, measured from the source text rather than from the fields, because a
+   * record is deleted by cutting lines and a range stopping at the last field
+   * would leave the `- ` behind.
    *
    * Null when the document gave no offsets to measure from. A pointer with no
-   * span prints the entry number alone rather than a range nobody verified.
+   * range prints the entry number alone rather than lines nobody verified.
    */
-  readonly span: LineSpan | null;
+  readonly registryLines: LineRange | null;
   /**
    * The entry's own text, exactly as the document writes it — the half of
    * "delete-ready" that is not a line number. The whole record, so a reader can
@@ -208,7 +209,13 @@ export interface RegistryEntry {
   readonly text: string;
 }
 
-export interface LineSpan {
+/**
+ * An inclusive line range in a document. Named for what it ranges over rather
+ * than for the word "span", which in this package would sit next to
+ * `ExceptionRecord.line` — which ranges over the *source* file, naming a
+ * suppression, and is a different number in a different file.
+ */
+export interface LineRange {
   readonly start: number;
   readonly end: number;
 }
@@ -577,7 +584,7 @@ function readEntry(item: unknown, index: number, raw: string, at: Positioner): E
   const fields = new Map(
     [...declared].map(([name, ref]) => [name, ref.position] as const),
   );
-  return done({ index, record, position, fields, ...entrySpan(item, raw, at) });
+  return done({ index, record, position, fields, ...registryLinesOf(item, raw, at) });
 }
 
 /**
@@ -587,31 +594,31 @@ function readEntry(item: unknown, index: number, raw: string, at: Positioner): E
  * folded continuation lines and a trailing comment-free record both come out
  * right, where a count of the entry's keys would not.
  */
-function entrySpan(
+function registryLinesOf(
   item: unknown,
   raw: string,
   at: Positioner,
-): { span: LineSpan | null; text: string } {
+): { registryLines: LineRange | null; text: string } {
   const range = (item as { range?: [number, number, number] } | null | undefined)?.range;
   const start = at(item).line;
   // No offsets from the parser and no position from the line counter means this
-  // document cannot say where the record is. The span is then null rather than
+  // document cannot say where the record is. The range is then null rather than
   // a guess: a pointer is an instruction to cut specific lines, and inventing
   // `1-1` would send a maintainer to the top of the file with a record's
-  // title on it. Every reader treats a null span as "print no lines", which
+  // title on it. Every reader treats a null range as "print no lines", which
   // degrades to the entry number alone — findable by counting, never wrong.
   if (range === undefined || start === null) {
-    return { span: null, text: "" };
+    return { registryLines: null, text: "" };
   }
   // The parser's end offset sits *after* the entry's last byte, which for a
   // record ending a line is already the next line's start. Counting lines
-  // through the text from the entry's first line is what keeps the span on the
+  // through the text from the entry's first line is what keeps the range on the
   // record rather than one line past it. The trailing newline is dropped: the
   // text is a record to read, not a line range to paste.
   const slice = raw
     .slice(lineStartOf(raw, range[0]), lineEndOf(raw, Math.max(range[0], range[2] - 1)))
     .replace(/\r?\n$/, "");
-  return { span: { start, end: start + terminators(slice) }, text: slice };
+  return { registryLines: { start, end: start + terminators(slice) }, text: slice };
 }
 
 /**
