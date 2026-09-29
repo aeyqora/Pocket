@@ -91,7 +91,7 @@ rule ESLint doesn't know — removing a plugin must not brick every evaluation),
 `DANGLING_EXCEPTION`, `SPENT_EXCEPTION`, `EXPIRED_EXCEPTION` (see the cleaning guide),
 `POOL_COUNTS` and `RENEWAL_BY_APPEND` (shapes of pool mismatch), `HOST_MISMATCH` and
 `OWNERS_FILE_READINESS` (combined-landing corroborations, see
-[Landing an exception](landing-an-exception.md#the-host-declaration-and-validates-corroborations)).
+[Landing an exception](landing-an-exception.md#fail-open-modes-to-know)).
 
 The tier line: format invariants cannot be violated intentionally — a broken record fails
 closed; referential checks can go stale legitimately — a record pointing at a removed rule
@@ -122,7 +122,7 @@ partial credit: a renewal that shortens an overlong record but still exceeds the
 until it reaches compliance. To allow a longer horizon, bump `maxExpiry` in its own
 protected policy PR first — the record lands from the next baseline. Permanents are
 orthogonal: `maxExpiry` applies to temporaries only. See the
-[expiry policy in the config reference](config-reference.md#exceptions-defaultExpiry--maxExpiry).
+[expiry policy in the config reference](config-reference.md#duration-literals-exceptionsdefaultexpiry--maxexpiry).
 
 ## `pocket-zipper validate`
 
@@ -146,8 +146,8 @@ for a local verdict on your staged change; `check` is the authoritative CI gate.
 
 ## The wizard: `pocket-zipper exception add`
 
-The wizard is the machine-authored authoring surface — one shared engine behind two
-front doors:
+The wizard is the machine-authored authoring surface — one shared engine behind two front
+doors:
 
 - the **post-failure ride-along** — after a local `check` FAILs, the flow offers to create
   an exception for the flagged debt (`create an exception for this debt? [y/N]`; Enter
@@ -163,27 +163,23 @@ pocket-zipper exception add --from src/components/Search.tsx:83 \
     --reference ".../issues/123"
 ```
 
-What the human types is deliberately small: the match fields (`fingerprint`, `rule`,
+What the human types is deliberately small. The match fields (`fingerprint`, `rule`,
 `suppression_type`, `file`, `line`) are **never hand-copied** — they are prefilled from a
-working-tree inventory recomputed with the same engine `check` reads with. The author only
-answers the reason (required — an empty answer is refused), the reference (optional — Enter
-to skip), and the expiry. `N` twin suppressions earn `N` records: `Do these N exceptions all
-share one reason? [Y/n]` — one interview for all, or per-record interviews in selection
-order. The expiry is one decision for the whole write, on a three-rung ladder:
+working-tree inventory recomputed with the same engine `check` reads with. The author
+answers only the reason (required — an empty answer is refused), the reference (optional —
+Enter to skip), and one expiry decision for the whole write, on a three-rung ladder:
 
 1. accept the prefilled default — `a default expiry of <date> (30 days from today) is set — accept it? [Y/n]` (Enter accepts, echoing `expiry: <date>`, or `new expiry: <date>` on a renewal);
 2. `make this a permanent exception? [y/N]` — `y` answers `permanent exceptions require an approver.` and echoes `expiry: permanent — no expires`;
 3. `new expiry — YYYY-MM-DD, no later than <max>:` — past and beyond-max dates are distinct refusals, and after any refusal the permanent question is re-offered as the escape hatch.
 
-Rung 1 is held to the same ceiling as rung 3: a `defaultExpiry` that rounds past the
-maximum is refused exactly like a hand-typed date (`✘ EXPIRY_POLICY — …`), with the
-permanent question re-offered. A malformed or calendar-invalid date at the prompt restates
-the format and asks again; only a past or beyond-max date escalates.
+`N` twin suppressions earn `N` records: `Do these N exceptions all share one reason? [Y/n]`
+— one interview for all, or per-record interviews in selection order.
 
 Every `[Y/n]`/`[y/N]` honors Enter as its default. The write prompt's Enter declines:
-`nothing written — the proposed record stays unwritten.` The wizard validates its own output
-through the shared validator and **refuses to write a defect-producing record**; the write
-itself is a proposal to the working tree:
+`nothing written — the proposed record stays unwritten.` The wizard validates its own
+output through the shared validator and **refuses to write a defect-producing record**; the
+write itself is a proposal to the working tree:
 `it takes effect only once the change is approved and merged.` It is never the authorizing
 step — landing guidance follows the
 [posture your repo runs](landing-an-exception.md).
@@ -194,10 +190,13 @@ in place, or converts it to a permanent — never an append.
 
 **Blocked without config.** If the repo has no `.pocket-zipper/config.yml` at the baseline,
 the flow reports itself blocked (exit 1) and hands off to the repo's authorizers — the tool
-never scaffolds config, and `check` itself is happy to run zero-config. The
-developer-facing narration-off transcript is frozen in the prototype
-(`.scratch/exception-flow/prototypes/06-exception-creation-wizard/index.html`);
-this page's quoted prompts are the canonical copy.
+never scaffolds config, and `check` itself is happy to run zero-config.
+
+For the full flow — the flags, the exit codes, a complete worked transcript, what it
+refuses, and what it will not do — see
+[Authoring an exception](authoring-an-exception.md). This page's quoted prompts are the
+canonical copy; the developer-facing narration-off wording was frozen in the ticket-06
+prototype, and the built CLI is the reference.
 
 ## Next steps
 

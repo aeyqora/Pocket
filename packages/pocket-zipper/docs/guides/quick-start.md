@@ -116,8 +116,7 @@ pocket-zipper exception add [--from <file:line> --reason <text> --reference <lin
   non-interactive flags for scripted/agented use. It is the second front door of the same
   engine a failing local `check` offers you, and the only command that writes to your
   working tree: it appends the records it proposed to `exceptions.yml`, which still have to
-  land through review. See
-  [the wizard](exceptions.md#the-wizard-pocket-zipper-exception-add).
+  land through review. See [Authoring an exception](authoring-an-exception.md).
 - `--json <path>` writes the evaluation record and leaves stdout for the human report.
 - `--verbose` reports even on pass: the disposition summary, the per-rule pool counts, new
   debt authorized by an exception, and unused-exception cleanup — in both modes. On a pass

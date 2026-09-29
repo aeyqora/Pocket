@@ -13,14 +13,16 @@ If you're new here, read them in this order:
 3. **[Handling a failure](handling-a-failure.md)** — read the report, then fix the code
    or authorize the suppression with an exception approved by your authorized approvers.
 4. **[Exceptions: the registry format](exceptions.md)** — the record schema, when the
-   registry is read and fails closed, `validate`, and the wizard.
-5. **[Landing an exception](landing-an-exception.md)** — strict two-step vs combined
+   registry is read and fails closed, and the finding vocabulary.
+5. **[Authoring an exception](authoring-an-exception.md)** — run the wizard: both front
+   doors, the flags, the exit codes, a worked transcript, and what it will not do.
+6. **[Landing an exception](landing-an-exception.md)** — strict two-step vs combined
    landing, and what your git host can guarantee per path.
-6. **[Pre-commit hook](pre-commit.md)** — get the verdict locally before you push.
-7. **CI quick-starts** — put the authoritative gate in your pipeline:
+7. **[Pre-commit hook](pre-commit.md)** — get the verdict locally before you push.
+8. **CI quick-starts** — put the authoritative gate in your pipeline:
    [GitHub Actions](ci/github.md), [GitLab CI/CD](ci/gitlab.md),
    [Bitbucket Cloud](ci/bitbucket.md).
-8. **[Troubleshooting](troubleshooting.md)** — exit codes, error codes, and the
+9. **[Troubleshooting](troubleshooting.md)** — exit codes, error codes, and the
    problems people actually hit.
 
 The registry-adjacent references: **[Config reference](config-reference.md)** for the
@@ -41,7 +43,9 @@ question: does this change add suppression debt no exception covers. The last tw
 registry's own surfaces: `validate` tells you whether the two protected files are readable
 and worth reviewing (exit 2 on a defect, 0 on hygiene alone, never a strict mode), and
 `exception add` is a guided ride that authors a record for you — offered too, at the end of
-a local failing `check`.
+a local failing `check`. Its exit codes are its own: `0` finished, `1` refused or blocked,
+`2` usage error or an unreadable tree. See
+[Authoring an exception](authoring-an-exception.md).
 
 ## The mental model
 

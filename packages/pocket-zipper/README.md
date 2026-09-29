@@ -94,6 +94,8 @@ maintainer's sweep.
 
 `exception add` is the only command that writes to your working tree: it appends the
 records it proposed to `exceptions.yml`, which still have to land through review.
+[Authoring an exception](docs/guides/authoring-an-exception.md) is its guide — both front
+doors, the flags, the exit codes, a worked transcript, and what it will not do.
 
 ## Documentation
 
@@ -102,6 +104,7 @@ records it proposed to `exceptions.yml`, which still have to land through review
   [onboarding an existing codebase](docs/guides/onboarding-existing-codebase.md),
   [handling a failure](docs/guides/handling-a-failure.md),
   [exceptions: the registry format](docs/guides/exceptions.md),
+  [authoring an exception](docs/guides/authoring-an-exception.md),
   [landing an exception](docs/guides/landing-an-exception.md),
   [cleaning up unused exceptions](docs/guides/cleaning-up-unused-exceptions.md),
   [config reference](docs/guides/config-reference.md),

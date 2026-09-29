@@ -62,9 +62,8 @@ debt.
 An **exception** is a committed record that authorizes exactly one logical suppression.
 The report prints a ready-to-fill template for each offending suppression; fill in the
 human fields (the machine-readable ones are prefilled). The easiest path is the
-[wizard](exceptions.md#the-wizard-pocket-zipper-exception-add) — `pocket-zipper exception
-add` — which is the ride-along after this very failure. Filling the record by hand works
-too:
+[wizard](authoring-an-exception.md) — `pocket-zipper exception add` — which is the
+ride-along after this very failure. Filling the record by hand works too:
 
 ### Exception record fields
 

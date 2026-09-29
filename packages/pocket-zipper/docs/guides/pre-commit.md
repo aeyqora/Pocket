@@ -76,6 +76,6 @@ the target branch. Treat the hook as a convenience, not a substitute.
 
 - [CI quick-starts](ci/github.md) — put the authoritative check in your pipeline.
 - [Handling a failure](handling-a-failure.md) — what to do when the hook fails.
-- [Exceptions: the registry format](exceptions.md) — `validate` and the wizard, the
-  pre-commit siblings for registry work.
+- [Exceptions: the registry format](exceptions.md) — `validate` and the finding vocabulary.
+- [Authoring an exception](authoring-an-exception.md) — the wizard, for registry work.
 - [Troubleshooting](troubleshooting.md) — when the hook runs oddly or fails to resolve git state.
