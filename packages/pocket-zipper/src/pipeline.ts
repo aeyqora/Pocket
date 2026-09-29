@@ -16,11 +16,13 @@ import {
   expiryPolicyRefusals,
   overlongRecords,
 } from "./registry.js";
+import { unusedExceptions } from "./cleanup.js";
 import {
   PROTECTED_CONFIG,
   PROTECTED_REGISTRY,
   errorRecords,
   loadRegistry,
+  loadRegistryEntries,
 } from "./validate.js";
 import { detectPolicyChange, type PolicyChangeResult } from "./policy-change.js";
 import {
@@ -49,6 +51,7 @@ import type {
   RecordError,
   ReconciledSuppression,
   SuppressionType,
+  UnusedException,
 } from "./types.js";
 
 export { TOOL_NAME, TOOL_VERSION, SCHEMA_VERSION } from "./record.js";
@@ -80,6 +83,12 @@ export interface EvaluateResult {
    * where nothing is overlong to name.
    */
   maxExpiry: DurationLiteral | undefined;
+  /**
+   * Every unused record, with the delete-ready pointer that finds it. Travels
+   * beside the record rather than inside it: the record is a frozen statistics
+   * artifact, and these addresses are for whoever is reading the report.
+   */
+  unused: UnusedException[];
 }
 
 export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult> {
@@ -109,6 +118,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         report: "",
         suggestedExpiry: undefined,
         maxExpiry: initialPolicy.exceptions.maxExpiry,
+        unused: [],
       };
     }
 
@@ -126,7 +136,11 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
 
       const baselineRegistryRaw = git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY);
       const policy = parsePolicy(baselinePolicyRaw, knownRules);
-      const registry = loadRegistry(baselineRegistryRaw);
+      // One read, two shapes: the records the gate matches on, and the entries
+      // carrying their positions and text for the cleanup pointers. Reading the
+      // file twice would be a second chance to disagree with itself.
+      const registryEntries = loadRegistryEntries(baselineRegistryRaw);
+      const registry = registryEntries.map((entry) => entry.record);
 
       const changeMap =
         options.mode === "pre-commit"
@@ -234,6 +248,20 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         overlong: overlong.length,
       };
 
+      // The addresses behind those counts: every unused baseline record, with
+      // the line span and text that make deletion find-in-one-glance, where its
+      // suppression lives now, and whether this change is what orphaned it.
+      // Derived from the baseline registry rather than the evaluation's union,
+      // so a pointer never names a record the file does not carry; a record
+      // riding the change under combined landing has no address in the baseline
+      // to point at, and is reported the next run, once the file carries it.
+      const unused = unusedExceptions({
+        entries: registryEntries,
+        statuses: coverage.statuses,
+        live: coverage.head,
+        removed: baseline,
+      });
+
       const summary = summarize(coverage.head, baseline.length);
 
       // The expiry policy: a newly written date past the **baseline** maximum
@@ -297,6 +325,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         report: "",
         suggestedExpiry: suggestedExpiry(now, policy.exceptions.defaultExpiry),
         maxExpiry: policy.exceptions.maxExpiry,
+        unused,
       };
     } finally {
       for (const dir of tmpDirs) git.cleanup(dir);
@@ -306,13 +335,13 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       // A defective registry read reports one error per defect, so the record
       // names every thing wrong with the file rather than only the first.
       errors.push(...errorRecords(err));
-      return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined };
+      return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined, unused: [] };
     }
     errors.push({
       code: "INTERNAL_ERROR",
       message: err instanceof Error ? err.message : String(err),
     });
-    return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined };
+    return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined, unused: [] };
   }
 }
 

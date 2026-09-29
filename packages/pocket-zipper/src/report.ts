@@ -1,3 +1,4 @@
+import { renderCleanupSection, renderOverlongLine } from "./cleanup.js";
 import { poolCountLine, remediationFields } from "./registry.js";
 import { DEFAULT_MAX_EXPIRY } from "./policy.js";
 import type {
@@ -7,6 +8,7 @@ import type {
   InventoryEntry,
   PoolCount,
   RecordError,
+  UnusedException,
 } from "./types.js";
 
 export interface ReportOptions {
@@ -25,7 +27,34 @@ export interface ReportOptions {
    * default policy.
    */
   maxExpiry?: DurationLiteral;
+  /**
+   * Who is reading the cleanup section, which decides whether it prints the
+   * addresses or the rollup. A FAIL's reader is the author of the change, who
+   * has to find the record; a verbose pass is a CI log, which wants the line a
+   * repo's own step greps for. Defaults to the change author — the reader every
+   * FAIL has and the only one the report is ever *for*.
+   */
+  audience?: CleanupAudience;
+  /**
+   * Every unused record, with the pointer that finds it. Resolved by the
+   * pipeline and passed alongside the record rather than inside it: the record
+   * is a frozen statistics artifact, and these addresses are for a reader.
+   */
+  unused?: readonly UnusedException[];
 }
+
+/**
+ * The three surfaces the cleanup section has to answer to. One enumeration
+ * rather than two booleans, because the two are not free: which of the tally
+ * and the addresses a reader gets is a single question about who they are.
+ */
+export type CleanupAudience =
+  /** `check` FAIL — the addresses, under a pointer to the cleaning guide. */
+  | "change-author"
+  /** `check` / `pre-commit` `--verbose` PASS — the greppable rollup. */
+  | "ci-log"
+  /** `validate` — both: the addresses, and the rollup a CI step greps. */
+  | "maintainer-sweep";
 
 const RED = "\u001b[31m";
 const GREEN = "\u001b[32m";
@@ -38,7 +67,8 @@ function color(text: string, code: string, tty: boolean): string {
 }
 
 export function renderReport(record: EvaluationRecord, options: ReportOptions): string {
-  const { verbose, tty, suggestedExpiry, maxExpiry } = options;
+  const { verbose, tty, suggestedExpiry, maxExpiry, audience = "change-author" } = options;
+  const unused = options.unused ?? [];
   const lines: string[] = [];
 
   if (record.verdict === "excluded") {
@@ -60,7 +90,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
       lines.push(renderDispositionSummary(record.summary.dispositions));
       lines.push(...renderPoolCounts(record.summary.cleanup.poolCounts));
       lines.push(...renderAuthorizedDebt(record.inventory));
-      lines.push(...renderCleanup(record.summary.cleanup, maxExpiry));
+      lines.push(...renderCleanup(record.summary.cleanup, unused, maxExpiry, "ci-log"));
     }
     // A pass can still carry recorded signals, such as a config-off policy
     // change that was routed to review. Buried in the JSON record it would be
@@ -93,7 +123,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
   }
 
   lines.push(...renderAuthorizedDebt(record.inventory));
-  lines.push(...renderCleanup(record.summary.cleanup, maxExpiry));
+  lines.push(...renderCleanup(record.summary.cleanup, unused, maxExpiry, "change-author"));
   lines.push(...renderErrors(record.errors));
 
   return joinLines(lines);
@@ -152,33 +182,28 @@ function renderPoolCounts(pools: PoolCount[]): string[] {
 }
 
 /**
- * The cleanup block, in two sentences. An overlong record is not an *unused*
- * one — it authorizes right up to its date — so it gets its own line beside the
- * unused tally rather than a place inside it, and it prints only when the count
- * is nonzero: a well-kept registry with one far-future record is hygiene to
- * report, not a standing comment on every run.
+ * The cleanup block for one audience, in the shared wording. A FAIL names each
+ * record's delete-ready pointer, because a FAIL is the report a change's author
+ * is reading *now* and a dangling record they cannot find is a record nobody
+ * deletes; a verbose pass prints the greppable rollup instead, the line a
+ * repo's own CI greps to build whatever notification shape that host supports.
+ * Neither surface deletes anything: every line is a pointer for a human to
+ * action in a protected PR.
  */
 function renderCleanup(
   cleanup: EvaluationSummary["cleanup"],
+  unused: readonly UnusedException[],
   maxExpiry: DurationLiteral | undefined,
+  audience: CleanupAudience,
 ): string[] {
-  const lines: string[] = [];
-  if (
-    cleanup.danglingExceptions > 0 ||
-    cleanup.spentExceptions > 0 ||
-    cleanup.expiredExceptions > 0
-  ) {
-    lines.push(
-      `Unused exceptions: dangling ${cleanup.danglingExceptions}, spent ${cleanup.spentExceptions}, expired ${cleanup.expiredExceptions}`,
-    );
-  }
-  if (cleanup.overlongExceptions > 0) {
-    lines.push(
-      `  Overlong exceptions: ${cleanup.overlongExceptions} (expires past the ${maxExpiry ?? DEFAULT_MAX_EXPIRY} maximum)`,
-    );
-  }
-  if (lines.length === 0) return [];
-  return ["", ...lines];
+  const ceiling = maxExpiry ?? DEFAULT_MAX_EXPIRY;
+  // The section leads with the tally it accounts for; the overlong line rides
+  // beneath it, on the evaluation surfaces only. It is hygiene like the rest:
+  // a far-future date still authorizes, and only a change that newly writes one
+  // is refused.
+  const section = renderCleanupSection({ ...cleanup, unused }, { maxExpiry: ceiling, audience });
+  const body = [...section.slice(1), ...renderOverlongLine(cleanup.overlongExceptions, ceiling)];
+  return body.length === 0 ? [] : ["", ...body];
 }
 
 function renderProblem(

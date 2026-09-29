@@ -56,6 +56,56 @@ function withBareKey(lines: string[], key: string): string[] {
   return [...lines, `  ${key}:`];
 }
 
+/**
+ * The record's own line span and text: what a delete-ready pointer names, and
+ * what it shows the maintainer before they cut. Measured from the source, so a
+ * block-scalar reason and a comment between records both come out right.
+ */
+describe("a registry entry's own extent", () => {
+  const ONE = registry(entryLines());
+
+  it("spans the list marker through the last field, and no further", () => {
+    const { entries } = validateRegistry(ONE);
+    assert.deepEqual(entries[0]?.span, { start: 1, end: 8 });
+  });
+
+  it("carries the record's text exactly as written", () => {
+    const { entries } = validateRegistry(ONE);
+    assert.equal(entries[0]?.text, ONE.trimEnd());
+  });
+
+  it("counts a folded scalar's continuation lines as part of the record", () => {
+    // A three-line reason is three lines of the record: a span that stopped at
+    // the `reason:` key would tell a maintainer to leave half a record behind.
+    const folded = registry([
+      "- rule: no-console",
+      "  suppression_type: next-line",
+      `  fingerprint: ${FP}`,
+      "  file: app.js",
+      "  type: temporary",
+      "  reason: >",
+      "    the first line",
+      "    and the second",
+      "  reference: \"#1\"",
+      "  expires: 2026-12-01",
+    ]);
+    const { entries, findings } = validateRegistry(folded);
+    assert.deepEqual(findings, []);
+    assert.deepEqual(entries[0]?.span, { start: 1, end: 10 });
+    assert.match(entries[0]!.text, / {4}and the second/);
+  });
+
+  it("gives each entry its own span, so a pointer names one record's lines", () => {
+    const two = registry(entryLines(), ["# a comment between records", ...entryLines({ fingerprint: FP_OTHER })]);
+    const { entries } = validateRegistry(two);
+    // The comment belongs to neither record, and the second entry starts after
+    // it — so the first entry's span stops before the comment.
+    assert.deepEqual(entries[0]?.span, { start: 1, end: 8 });
+    assert.deepEqual(entries[1]?.span, { start: 10, end: 17 });
+    assert.doesNotMatch(entries[0]!.text, /a comment between records/);
+  });
+});
+
 function registry(...entries: string[][]): string {
   return entries.map((lines) => lines.join("\n")).join("\n") + "\n";
 }
@@ -459,10 +509,23 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
     return r;
   }
 
-  /** `validate`'s own exit code and diagnostic lines, with no JSON record asked for. */
+  /**
+   * `validate`'s own exit code and output lines, with no JSON record asked for.
+   * The report is the findings followed, when there are unused records, by the
+   * delete-ready cleanup pointers — so `findings` pulls the diagnostic lines back
+   * out for the tests that pin the finding set exactly and have no business also
+   * pinning the pointers.
+   */
   function validate(r: FixtureRepo): { status: number; lines: string[] } {
     const res = r.runCli(["validate"], { json: false });
     return { status: res.status, lines: res.stdout.trimEnd().split("\n") };
+  }
+
+  /** The report's diagnostic lines, without the cleanup pointers beneath them. */
+  function findingsOf(res: { lines: string[] }): string[] {
+    return res.lines.filter(
+      (line) => line.startsWith(`${REGISTRY}:`) || line.startsWith(`${CONFIG}:`),
+    );
   }
 
   it("passes a repository that governs nothing", () => {
@@ -650,12 +713,12 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
           expires: LONG_PAST,
         }),
     );
-    const { status, lines } = validate(r);
-    assert.equal(status, 0);
+    const res = validate(r);
+    assert.equal(res.status, 0);
     // Entry 3 carries two: the rule id is unknown *and* nothing can match a
     // record naming it. Both are true, and neither is a failure.
-    assert.equal(lines[0], "pocket-zipper: OK (0 defects, 5 hygiene findings)");
-    assert.deepEqual(lines.slice(2), [
+    assert.equal(res.lines[0], "pocket-zipper: OK (0 defects, 5 hygiene findings)");
+    assert.deepEqual(findingsOf(res), [
       `${REGISTRY}:18:3  UNKNOWN_RULE  entry 3 · rule  'rule' names a rule ESLint does not know here — expected a core rule or one a configured plugin contributes, got no-such-rule`,
       `${REGISTRY}:25:3  OVERLONG_EXCEPTION  entry 3 · expires  'expires' runs past the policy's 3mo maximum — expected on or before ${addDuration(TODAY, "3mo")} (3mo from today), got ${BEYOND_HORIZON}`,
       `${REGISTRY}:10:3  DANGLING_EXCEPTION  entry 2  no suppression matches this record in app.js`,
@@ -683,7 +746,7 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
     const first = validate(one);
     assert.equal(first.status, 0);
     assert.equal(first.lines[0], "pocket-zipper: OK (0 defects, 2 hygiene findings)");
-    assert.deepEqual(first.lines.slice(2), [
+    assert.deepEqual(findingsOf(first), [
       `${REGISTRY}:9:3  POOL_COUNTS  entry 2  For this rule at this file: 2 matching records, 1 used, 1 leftover`,
       `${REGISTRY}:9:3  DANGLING_EXCEPTION  entry 2  no suppression matches this record in app.js`,
     ]);

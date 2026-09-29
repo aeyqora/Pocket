@@ -178,6 +178,9 @@ describe("record: buildRecord", () => {
     assert.equal(out.summary.dispositions.removed, 1);
     assert.equal(out.summary.newDebt.authorized, 1);
     assert.equal(out.summary.newDebt.unauthorized, 0);
+    // The cleanup addresses deliberately do NOT ride in the record: schema v1 is
+    // frozen, and the record keeps the counts while the addresses travel beside
+    // it for whoever reads the report.
     assert.deepEqual(out.summary.cleanup, {
       danglingExceptions: 2,
       spentExceptions: 3,

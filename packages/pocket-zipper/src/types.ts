@@ -135,6 +135,46 @@ export interface EvaluationRecord {
   errors: RecordError[];
 }
 
+/**
+ * One unused record, as the cleanup surfaces print it: where it is in the
+ * registry (entry number, how many the registry holds, the line span it
+ * occupies), the record's own text, where its suppression lives now, and
+ * whether this change is what made it unused. Every field here exists so a
+ * maintainer can find the record and delete it in one glance — the core never
+ * deletes it, so a pointer that does not land on the record is a broken
+ * pointer, not a rough edge.
+ *
+ * A report-only shape, deliberately not part of the evaluation record: the
+ * record's schema is frozen at v1, and the addresses are for a human reading a
+ * report, not for a statistics artifact. The record keeps the *counts*; this
+ * carries the records they tally.
+ */
+export interface UnusedException {
+  status: Exclude<ExceptionStatus, "used">;
+  /** 1-based position in the registry, alongside how many records it holds. */
+  entry: number;
+  entries: number;
+  /**
+   * The record's line span in the registry, inclusive — or null where the
+   * document gave no offsets to measure from. Null prints the entry number
+   * alone: a pointer is an instruction to cut specific lines, and a span nobody
+   * verified is worse than none.
+   */
+  span: { start: number; end: number } | null;
+  /** The record's own text, exactly as the registry writes it. */
+  text: string;
+  /**
+   * Where the suppression this record excepts lives now, when one still does.
+   * Null for a dangling record, which is exactly what makes its stored `line`
+   * a *last known* location rather than a stale one.
+   */
+  live: { file: string; line: number } | null;
+  /** The record's stored `line` — capture-time orientation, never identity. */
+  recorded: number | null;
+  /** This change removed the suppression the record excepted. */
+  clearedByThisChange: boolean;
+}
+
 export interface EvaluationSummary {
   policy: { enabled: boolean; allowlist: string[] | null };
   governedRules: string[];

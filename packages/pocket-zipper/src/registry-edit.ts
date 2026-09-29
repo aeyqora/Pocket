@@ -107,16 +107,30 @@ function removeField(raw: string, pair: Pair): Cut | null {
     : { from, to: end, text: "" };
 }
 
+/**
+ * The two line-boundary offsets, shared by every module that has to name or cut
+ * a span of the registry document. The read side (a delete-ready pointer naming
+ * a record's lines) and the write side (a renewal cutting a field's line) must
+ * agree on where a line begins and ends, or a pointer and the edit it invites
+ * would describe different ranges.
+ */
+
 /** The offset where the line containing `offset` begins. */
-function lineStart(raw: string, offset: number): number {
+export function lineStart(raw: string, offset: number): number {
   const before = raw.lastIndexOf("\n", offset - 1);
   return before === -1 ? 0 : before + 1;
 }
 
 /** The offset of the line terminator at or after `offset`, or the end of the text. */
-function lineEnd(raw: string, offset: number): number {
+export function lineEnd(raw: string, offset: number): number {
   const at = raw.indexOf("\n", offset);
   return at === -1 ? raw.length : at;
+}
+
+/** The offset just past the line containing `offset` — its whole text, terminator included. */
+export function lineAfter(raw: string, offset: number): number {
+  const at = raw.indexOf("\n", offset);
+  return at === -1 ? raw.length : at + 1;
 }
 
 /** 1 for a bare newline, 2 for a CRLF — the whole terminator, or the removal leaves half of one. */

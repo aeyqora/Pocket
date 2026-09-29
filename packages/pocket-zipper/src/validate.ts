@@ -190,6 +190,27 @@ export interface RegistryEntry {
   readonly position: Position;
   /** Where each declared field is, for a finding about that field. */
   readonly fields: ReadonlyMap<string, Position>;
+  /**
+   * The lines the entry occupies, inclusive of its list marker and its last
+   * field — the span a delete-ready pointer names, measured from the source
+   * text rather than from the fields, because a record is deleted by cutting
+   * lines and a span stopping at the last field would leave the `- ` behind.
+   *
+   * Null when the document gave no offsets to measure from. A pointer with no
+   * span prints the entry number alone rather than a range nobody verified.
+   */
+  readonly span: LineSpan | null;
+  /**
+   * The entry's own text, exactly as the document writes it — the half of
+   * "delete-ready" that is not a line number. The whole record, so a reader can
+   * confirm the pointer lands on the record they think it does before cutting.
+   */
+  readonly text: string;
+}
+
+export interface LineSpan {
+  readonly start: number;
+  readonly end: number;
 }
 
 export interface RegistryValidation {
@@ -296,12 +317,22 @@ export function validateRegistry(raw: string | null): RegistryValidation {
  * delta to judge.
  */
 export function loadRegistry(raw: string | null): ExceptionRecord[] {
+  return loadRegistryEntries(raw).map((entry) => entry.record);
+}
+
+/**
+ * The same fail-closed read, keeping each record's position and text rather
+ * than only its meaning. The cleanup surfaces need the addresses, not just the
+ * records, and a second parse to get them would be a second chance to disagree
+ * with the read the gate already made.
+ */
+export function loadRegistryEntries(raw: string | null): RegistryEntry[] {
   const { entries, findings } = validateRegistry(raw);
   const defects = defectsOf(findings);
   if (defects.length > 0) {
     throw new RegistryDefectError(defects);
   }
-  return entries.map((entry) => entry.record);
+  return entries;
 }
 
 /**
@@ -546,8 +577,61 @@ function readEntry(item: unknown, index: number, raw: string, at: Positioner): E
   const fields = new Map(
     [...declared].map(([name, ref]) => [name, ref.position] as const),
   );
-  return done({ index, record, position, fields });
+  return done({ index, record, position, fields, ...entrySpan(item, raw, at) });
 }
+
+/**
+ * The entry's own extent in the document: the lines it occupies and the text on
+ * them. Measured from the source, from the start of the line the entry begins
+ * on to the end of the line its last written byte is on — a block scalar's
+ * folded continuation lines and a trailing comment-free record both come out
+ * right, where a count of the entry's keys would not.
+ */
+function entrySpan(
+  item: unknown,
+  raw: string,
+  at: Positioner,
+): { span: LineSpan | null; text: string } {
+  const range = (item as { range?: [number, number, number] } | null | undefined)?.range;
+  const start = at(item).line;
+  // No offsets from the parser and no position from the line counter means this
+  // document cannot say where the record is. The span is then null rather than
+  // a guess: a pointer is an instruction to cut specific lines, and inventing
+  // `1-1` would send a maintainer to the top of the file with a record's
+  // title on it. Every reader treats a null span as "print no lines", which
+  // degrades to the entry number alone — findable by counting, never wrong.
+  if (range === undefined || start === null) {
+    return { span: null, text: "" };
+  }
+  // The parser's end offset sits *after* the entry's last byte, which for a
+  // record ending a line is already the next line's start. Counting lines
+  // through the text from the entry's first line is what keeps the span on the
+  // record rather than one line past it. The trailing newline is dropped: the
+  // text is a record to read, not a line range to paste.
+  const slice = raw
+    .slice(lineStartOf(raw, range[0]), lineEndOf(raw, Math.max(range[0], range[2] - 1)))
+    .replace(/\r?\n$/, "");
+  return { span: { start, end: start + terminators(slice) }, text: slice };
+}
+
+/**
+ * How many lines a record's text runs past its first: one per line terminator
+ * inside it. An N-line record carries N−1, and its last line is the one the
+ * terminator does not exist for.
+ */
+function terminators(text: string): number {
+  let lines = 0;
+  for (const ch of text) if (ch === "\n") lines++;
+  return lines;
+}
+
+import { lineAfter, lineStart } from "./registry-edit.js";
+
+/** The offset where the line containing `offset` begins. */
+const lineStartOf = lineStart;
+
+/** The offset just past the line's terminator, or the end of the text. */
+const lineEndOf = lineAfter;
 
 /** Document order, with a finding that has no position reading as the first. */
 function byPosition(a: Finding, b: Finding): number {

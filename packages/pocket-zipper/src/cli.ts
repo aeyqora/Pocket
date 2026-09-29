@@ -201,6 +201,7 @@ export async function main(
     tty: io.tty,
     suggestedExpiry: result.suggestedExpiry,
     maxExpiry: result.maxExpiry,
+    unused: result.unused,
   });
   if (report.length > 0) io.output.write(report);
 

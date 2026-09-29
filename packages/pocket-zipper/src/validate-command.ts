@@ -1,10 +1,17 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { combinedLandingFacts } from "./combined-landing.js";
+import { renderCleanupSection, unusedExceptions, type CleanupCounts } from "./cleanup.js";
 import { EslintSession } from "./eslint.js";
-import { DEFAULT_POLICY, parsePolicy } from "./policy.js";
+import { DEFAULT_POLICY, expiryHorizon, parsePolicy } from "./policy.js";
 import { configPluginRuleNames, recognizeFile, type RecognizeFileResult } from "./recognize.js";
-import { allocateExceptions, isExpired, type UnclaimedRecord } from "./registry.js";
+import {
+  allocateExceptions,
+  isExpired,
+  isOverlong,
+  utilizationCounts,
+  type UnclaimedRecord,
+} from "./registry.js";
 import {
   PROTECTED_CONFIG,
   PROTECTED_REGISTRY,
@@ -21,10 +28,12 @@ import {
   type RegistryEntry,
 } from "./validate.js";
 import type {
+  DurationLiteral,
   ExceptionRecord,
   ExceptionStatus,
   LogicalSuppression,
   Policy,
+  UnusedException,
 } from "./types.js";
 
 export interface ValidateOptions {
@@ -56,7 +65,21 @@ export async function runValidate(options: ValidateOptions): Promise<ValidateRes
   const configRaw = readProtected(cwd, PROTECTED_CONFIG, findings);
   const registryRaw = readProtected(cwd, PROTECTED_REGISTRY, findings);
   if (configRaw === null && registryRaw === null) {
-    return { findings, report: renderValidateReport(findings), exitCode: exitCodeOf(findings) };
+    // A repository that governs nothing has nothing to clean: the section is
+    // empty rather than absent, so the report's shape does not depend on what
+    // the repository happens to carry.
+    const counts: CleanupCounts = {
+      danglingExceptions: 0,
+      spentExceptions: 0,
+      expiredExceptions: 0,
+      overlongExceptions: 0,
+      unused: [],
+    };
+    return {
+      findings,
+      report: renderValidateReport(findings, { counts, maxExpiry: DEFAULT_POLICY.exceptions.maxExpiry }),
+      exitCode: exitCodeOf(findings),
+    };
   }
 
   // One ESLint session answers both tree-dependent questions: which rule ids
@@ -72,6 +95,12 @@ export async function runValidate(options: ValidateOptions): Promise<ValidateRes
   findings.push(...registryFindings);
   const scanned = await liveSuppressions(entries, cwd, session);
   const { live, statuses, unclaimed } = judge(entries, scanned, now);
+  // The same delete-ready pointers `check` prints on a FAIL, derived from the
+  // same module — a maintainer's sweep is this command, and it should not have
+  // to read a FAIL to learn where a record lives. `cleared by this change` is
+  // absent here by construction: a working-tree lint has no change, so it has
+  // nothing to be the author of.
+  const unused = unusedExceptions({ entries, statuses, live: scanned.live });
   const ctx: HygieneContext = {
     now,
     maxExpiry: policy.exceptions.maxExpiry,
@@ -87,7 +116,39 @@ export async function runValidate(options: ValidateOptions): Promise<ValidateRes
   // the checkout says about itself, which no registry reading can speak to.
   findings.push(...combinedLandingHygiene(await combinedLandingFacts(cwd, policy)));
 
-  return { findings, report: renderValidateReport(findings), exitCode: exitCodeOf(findings) };
+  const report = renderValidateReport(findings, {
+    counts: cleanupCountsOf(statuses, entries, ctx, unused),
+    maxExpiry: policy.exceptions.maxExpiry,
+  });
+  return { findings, report, exitCode: exitCodeOf(findings) };
+}
+
+/**
+ * The cleanup section's tallies, as this command can know them — read off the
+ * same status map the hygiene findings were, so the tally and the findings
+ * beneath it cannot disagree.
+ *
+ * `spent` is always zero here, and honestly so: spending is a judgment about a
+ * change read against a baseline, and a working-tree lint has no baseline. The
+ * `overlong` count reads this command's own working-tree maximum, which is
+ * right for a pre-push lint and deliberately differs from `check`'s, which
+ * answers about the baseline.
+ */
+function cleanupCountsOf(
+  statuses: ReadonlyMap<ExceptionRecord, ExceptionStatus>,
+  entries: readonly RegistryEntry[],
+  ctx: HygieneContext,
+  unused: readonly UnusedException[],
+): CleanupCounts {
+  const horizon = expiryHorizon(ctx.now, ctx.maxExpiry);
+  const tally = utilizationCounts(statuses);
+  return {
+    danglingExceptions: tally.dangling,
+    spentExceptions: tally.spent,
+    expiredExceptions: tally.expired,
+    overlongExceptions: entries.filter((entry) => isOverlong(entry.record, horizon)).length,
+    unused,
+  };
 }
 
 /** A defect fails closed; hygiene never fails on its own. */
@@ -102,7 +163,35 @@ export function exitCodeOf(findings: readonly Finding[]): number {
  * then what each record's relationship to the tree says. The verdict line
  * carries both counts so CI can branch on the two tiers without parsing them.
  */
-export function renderValidateReport(findings: readonly Finding[]): string {
+/**
+ * The cleanup section's own inputs. Named like every other seam in this
+ * codebase, because a bag of two fields with no name is a bag nobody can
+ * document, and this one carries the two questions a reader of the report has
+ * to be able to ask about it.
+ */
+export interface ValidateReportCleanup {
+  /** The tallies and the addresses, derived from this run's own statuses. */
+  counts: CleanupCounts;
+  /** The working tree's policy maximum, named by the overlong line. */
+  maxExpiry: DurationLiteral;
+}
+
+/**
+ * Every finding, one diagnostic line each. Order is by pass, not by position:
+ * the config's defect first, then the registry's defects in document order,
+ * then what each record's own text says, then what its pool's arithmetic says,
+ * then what each record's relationship to the tree says. The verdict line
+ * carries both counts so CI can branch on the two tiers without parsing them.
+ *
+ * The cleanup section follows the findings, and is what a maintainer is really
+ * here for: the per-record delete-ready pointers, plus the greppable rollup a
+ * repo's CI step greps for. Both are hygiene — this report's exit code is
+ * decided by the defects alone.
+ */
+export function renderValidateReport(
+  findings: readonly Finding[],
+  cleanup: ValidateReportCleanup,
+): string {
   const defects = defectsOf(findings).length;
   const hygiene = findings.length - defects;
   const lines = [
@@ -112,6 +201,12 @@ export function renderValidateReport(findings: readonly Finding[]): string {
     lines.push("");
     for (const finding of findings) lines.push(renderFinding(finding));
   }
+  lines.push(
+    ...renderCleanupSection(cleanup.counts, {
+      maxExpiry: cleanup.maxExpiry,
+      audience: "maintainer-sweep",
+    }),
+  );
   return lines.join("\n") + "\n";
 }
 

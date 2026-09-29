@@ -290,6 +290,25 @@ function isClaimable(h: ReconciledSuppression): boolean {
  * twins need a record each and a lookalike elsewhere is unauthorized debt that
  * leaves the record unused.
  */
+/**
+ * How many records fell to each utilization status. One tally, so the counts
+ * `check` publishes and the counts `validate` prints cannot be two hand-rolled
+ * versions of the same question that drift apart. `used` is carried too — a
+ * well-kept registry is a count worth having even where nothing is unused.
+ */
+export function utilizationCounts(
+  statuses: ReadonlyMap<ExceptionRecord, ExceptionStatus>,
+): Record<ExceptionStatus, number> {
+  const counts: Record<ExceptionStatus, number> = {
+    used: 0,
+    dangling: 0,
+    spent: 0,
+    expired: 0,
+  };
+  for (const status of statuses.values()) counts[status]++;
+  return counts;
+}
+
 export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage {
   const { head, records, now } = input;
   const statuses = new Map<ExceptionRecord, ExceptionStatus>();
@@ -342,8 +361,7 @@ export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage 
     else statuses.set(record, "dangling");
   }
 
-  const counts = { used: 0, expired: 0, dangling: 0, spent: 0 };
-  for (const status of statuses.values()) counts[status]++;
+  const counts = utilizationCounts(statuses);
   return { head: covered, statuses, counts, pools };
 }
 
