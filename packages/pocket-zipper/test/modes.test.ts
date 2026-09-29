@@ -291,9 +291,9 @@ describe("pre-commit mode", () => {
   });
 
   /**
-   * The pre-commit side of the protected-file trigger. `CONTEXT.md` says the
-   * proposed change in this mode is the staged index; the worktree is read only
-   * for what the index does not carry.
+   * The pre-commit side of the protected-file trigger. In this mode the proposed
+   * change is the staged index; the worktree is read only for what the index does
+   * not carry.
    */
   it("judges nothing when a registry in the worktree is not staged", () => {
     const r = repo();

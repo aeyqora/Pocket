@@ -5,8 +5,9 @@ import type { Disposition, LogicalSuppression } from "./types.js";
  * The continuity matcher: given two suppressions with the same canonical
  * identity, deciding whether they are the *same* suppression across two trees.
  *
- * This is where suppression continuity (`CONTEXT.md`) is decided. Identity —
- * form plus normalized rule tokens, hashed into a fingerprint — is `identity.ts`;
+ * This is where **suppression continuity** is decided: whether two logical
+ * suppressions in different trees are the same suppression. Identity — form plus
+ * normalized rule tokens, hashed into a fingerprint — is `identity.ts`;
  * what this module adds is the judgment that two things carrying one identity
  * are one suppression, and that the code beneath a directive is never part of it.
  *

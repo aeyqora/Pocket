@@ -12,8 +12,8 @@ import type {
 /**
  * The exception match judgment, and the two predicates that compose into it.
  *
- * **Exception match** (`CONTEXT.md`) is the judgment that a record covers a
- * logical suppression. **New debt** is the judgment that the gate blocks on. Both
+ * An **exception match** is the judgment that a record covers a logical
+ * suppression. **New debt** is the judgment that the gate blocks on. Both
  * live here because they are one question asked in two orders — first *is this
  * new?*, then *could a record ever cover it?* — and the two halves were once
  * spelled inline at four sites with three different answers.
@@ -44,8 +44,9 @@ type DebtFields = {
  * canonical identity, in the same shape a suppression's is.
  *
  * This states the *record side* of the key; the suppression side is
- * `identity.ts`'s `matchKey`, and `Fingerprint` is a suppression-side concept
- * (`CONTEXT.md`). The two produce the same shape, which is why the registry
+ * `identity.ts`'s `matchKey`, and a **fingerprint** is a suppression-side concept
+ * — the deterministic, versioned, line-independent digest that keys a logical
+ * suppression's identity. The two produce the same shape, which is why the registry
  * refuses a `config-off` record (`validate`): a record's `suppression_type`
  * participates in the key, so a `config-off` suppression's key can never equal
  * any record's.
@@ -92,9 +93,8 @@ export function isExceptable(suppression: { readonly guardKind: GuardKind }): bo
 }
 
 /**
- * New debt, as `CONTEXT.md` defines it: a logical suppression with no continuous
- * baseline counterpart, or a materially-changed one, *that an exception could
- * authorize*.
+ * New debt: a logical suppression with no continuous baseline counterpart, or a
+ * materially-changed one, *that an exception could authorize*.
  *
  * The disposition half is `isUnpaired`; the exceptability half is why a new
  * `config-off` is not counted here. Callers that want the unexceptable

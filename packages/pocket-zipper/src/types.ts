@@ -130,9 +130,10 @@ export interface PoolCount {
  * that the addresses are for a reader rather than for a statistics artifact. That
  * argument holds for a person and not for a script: a machine holding a v1
  * record could learn that two records were dangling and could not learn which
- * two. The pointers are the tool's whole cleanup output (`CONTEXT.md`), so they
- * are now part of the published answer, and the human report renders the same
- * list rather than deriving its own.
+ * two. The pointers are the whole of the tool's cleanup output — the core never
+ * deletes a record, so a pointer is the only route from "this record authorizes
+ * nothing" to "cut these lines" — so they are now part of the published answer,
+ * and the human report renders the same list rather than deriving its own.
  */
 export interface EvaluationRecord {
   schemaVersion: 2;
