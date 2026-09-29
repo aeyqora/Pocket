@@ -77,8 +77,11 @@ gate is exactly when the numbers matter.
 stdout stays human by contrast. It carries the report — the verdict, dispositions, and
 the per-file NEW and MATERIALLY-CHANGED suppressions with copy-paste exception records —
 not the machine-readable detail. So in CI, the failed step's log is the human report, and
-the artifact is the durable record. Pocket Zipper writes nothing to the working tree
-except the file you point `--json` at.
+the artifact is the durable record. The gate itself writes nothing to the working tree
+except the file you point `--json` at; the one command that does write is the authoring
+wizard, `pocket-zipper exception add`, which appends its proposed records to
+`.pocket-zipper/exceptions.yml` in the working tree — a proposal the change still has to
+carry through review.
 
 ## 5. The `.pocket-zipper/**` protection prerequisite
 

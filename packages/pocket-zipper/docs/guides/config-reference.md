@@ -27,8 +27,11 @@ allowSameChangeExceptions: false   # fallback; host required iff this is true
   fall-back. `host` is documented as required **only** when the opt-in is flipped on.
 
 An **absent** `config.yml` behaves as `enabled: true` with no allowlist, zero-config, for
-reads. It matters the moment someone tries to *write* an exception — that's when a missing
-config blocks the flow and points at onboarding.
+reads — `check` runs against a repo that has never written one, and the two expiry keys
+fall back to `30d` / `3mo`. It matters the moment someone tries to *write* an exception:
+`pocket-zipper exception add` is blocked without a baseline config and hands off to the
+repo's authorizers, because governance is not a mid-flow decision the wizard may make. See
+[Onboarding an existing codebase](onboarding-existing-codebase.md) for landing one.
 
 ## Per-key reference
 
@@ -80,9 +83,13 @@ See [Landing an exception](landing-an-exception.md) for the full treatment. Esse
 - **`validate` corroborates, never guarantees.** The two hygiene findings — a host–remote
   cross-check (known domains only — `github.com` / `gitlab.com` / `bitbucket.org`; warn-only
   because custom-domain, self-hosted, mirror, and no-remote checkouts aren't classifiable,
-  and the GitLab *tier* isn't in the remote) and a registry-path ownership hint against the
-  working tree's owners file — detect declared-vs-observed *config* mismatches. The core never
-  reads host or approval state.
+  and the GitLab *tier* isn't in the remote) and an ownership check against the working
+  tree's owners file — detect declared-vs-observed *config* mismatches. They are not gated
+  the same way: `HOST_MISMATCH` fires whenever a `host` is declared, because a forward
+  declaration is legal, while `OWNERS_FILE_READINESS` fires only when the opt-in is on, and
+  emits one finding per protected path (the config and the registry are approved
+  separately, so a repository owning only one of them has exactly the one-gap fail-open
+  this exists to surface). The core never reads host or approval state.
 
 ## Migration note — unknown-key rejection (upgrade)
 

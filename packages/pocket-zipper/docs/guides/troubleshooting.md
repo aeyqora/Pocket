@@ -117,7 +117,11 @@ have a baseline counterpart. Grandfather them instead of writing exceptions: fol
   is the semantic authority for which rules apply where.
 - **git** 2.43 or newer, with a full clone. Rename detection (`-M`) and NUL-delimited
   output (`-z`) are spelled explicitly. No `user.name`/`user.email` is required.
-- Pocket Zipper never writes to the working tree except the file you point `--json` at.
+- `check`, `pre-commit`, and `validate` never write to your working tree except the file
+  you point `--json` at. The one exception is the authoring wizard,
+  `pocket-zipper exception add`, which appends the records it proposed to
+  `.pocket-zipper/exceptions.yml` — a proposal to your working tree that still has to land
+  through review.
 
 ## The evaluation record
 

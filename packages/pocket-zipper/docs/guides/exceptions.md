@@ -8,7 +8,8 @@ reference, and — for the default, expiring kind — a deadline.
 This page is the registry companion to [What the gate counts](suppression-types.md). It
 covers the record format (which fields are required and which are optional), when the
 registry is read and what fails closed, the defect-vs-hygiene finding vocabulary, and the
-two authoring surfaces: `pocket-zipper validate` and the wizard.
+two working surfaces: `pocket-zipper validate`, which lints the two protected files before
+you push, and `pocket-zipper exception add`, the wizard that authors records for you.
 
 ## Record format
 
@@ -54,9 +55,12 @@ Three things to know:
 
 ## When the registry is read — and what fails closed
 
-The registry loader runs on **every evaluation**, and it reads the *baseline* registry —
-never a record staged or committed in the change being evaluated (one-merge lag). In
-practice the loader runs in these places:
+The registry loader runs on **every evaluation**, and it reads the *baseline* registry — the
+registry as the last merge left it, never a record staged or committed in the change being
+evaluated (one-merge lag). There is exactly one sanctioned exception to that, and it is
+narrow: a repo whose *baseline* config opts into [combined landing](landing-an-exception.md#combined-landing-opt-in)
+may let a single **additive** record ride the change it authorizes, and only that record
+joins coverage. In practice the loader runs in these places:
 
 | Surface | Registry read | Posture |
 |---|---|---|
@@ -145,8 +149,11 @@ for a local verdict on your staged change; `check` is the authoritative CI gate.
 The wizard is the machine-authored authoring surface — one shared engine behind two
 front doors:
 
-- the **post-failure ride-along** — after `check` FAILs, the flow offers to create an
-  exception for the flagged debt (the failing suppression is pre-selected, no session choice);
+- the **post-failure ride-along** — after a local `check` FAILs, the flow offers to create
+  an exception for the flagged debt (`create an exception for this debt? [y/N]`; Enter
+  declines). The failing suppressions are pre-selected, so there is no session choice and
+  nothing to re-identify. The offer is made only where someone can answer it: a terminal,
+  and not on a `--json` run, whose output belongs to whatever reads the record.
 - the **dedicated command** — `pocket-zipper exception add` (`1` new debt / `2` renew),
   with non-interactive flags for scripted and agented use:
 
@@ -157,31 +164,38 @@ pocket-zipper exception add --from src/components/Search.tsx:83 \
 ```
 
 What the human types is deliberately small: the match fields (`fingerprint`, `rule`,
-`suppression_type`, `file`, `line`) are **never hand-copied** — they are prefilled from the
-failure inventory. The author only answers the reason (required — an empty answer is
-refused), the reference (optional — Enter to skip), and the expiry. `N` twin suppressions
-earn `N` records: `Do these N exceptions all share one reason? [Y/n]` — one interview for
-all, or per-record interviews in selection order. The expiry is one decision for the whole
-write, on a three-rung ladder:
+`suppression_type`, `file`, `line`) are **never hand-copied** — they are prefilled from a
+working-tree inventory recomputed with the same engine `check` reads with. The author only
+answers the reason (required — an empty answer is refused), the reference (optional — Enter
+to skip), and the expiry. `N` twin suppressions earn `N` records: `Do these N exceptions all
+share one reason? [Y/n]` — one interview for all, or per-record interviews in selection
+order. The expiry is one decision for the whole write, on a three-rung ladder:
 
-1. accept the prefilled default — `a default expiry of <date> (30 days from today) is set — accept it? [Y/n]` (Enter accepts);
-2. `make this a permanent exception? [y/N]` — `y` answers `permanent exceptions require an approver.` and proceeds;
+1. accept the prefilled default — `a default expiry of <date> (30 days from today) is set — accept it? [Y/n]` (Enter accepts, echoing `expiry: <date>`, or `new expiry: <date>` on a renewal);
+2. `make this a permanent exception? [y/N]` — `y` answers `permanent exceptions require an approver.` and echoes `expiry: permanent — no expires`;
 3. `new expiry — YYYY-MM-DD, no later than <max>:` — past and beyond-max dates are distinct refusals, and after any refusal the permanent question is re-offered as the escape hatch.
+
+Rung 1 is held to the same ceiling as rung 3: a `defaultExpiry` that rounds past the
+maximum is refused exactly like a hand-typed date (`✘ EXPIRY_POLICY — …`), with the
+permanent question re-offered. A malformed or calendar-invalid date at the prompt restates
+the format and asks again; only a past or beyond-max date escalates.
 
 Every `[Y/n]`/`[y/N]` honors Enter as its default. The write prompt's Enter declines:
 `nothing written — the proposed record stays unwritten.` The wizard validates its own output
 through the shared validator and **refuses to write a defect-producing record**; the write
-itself is a proposal:
+itself is a proposal to the working tree:
 `it takes effect only once the change is approved and merged.` It is never the authorizing
 step — landing guidance follows the
 [posture your repo runs](landing-an-exception.md).
 
-**Renewal edits, never appends.** The renew branch lists existing records by `file:line` +
-expiry and edits the chosen record's `expires` in place.
+**Renewal edits, never appends.** The renew branch lists every temporary record by
+`file:line` + `expires` (with how long it has left) and edits the chosen record's `expires`
+in place, or converts it to a permanent — never an append.
 
-**Blocked without config.** If the repo has no `.pocket-zipper/config.yml`, the flow reports
-itself blocked and hands off to the repo's authorizers — the tool never scaffolds config.
-The developer-facing narration-off transcript is frozen in the prototype
+**Blocked without config.** If the repo has no `.pocket-zipper/config.yml` at the baseline,
+the flow reports itself blocked (exit 1) and hands off to the repo's authorizers — the tool
+never scaffolds config, and `check` itself is happy to run zero-config. The
+developer-facing narration-off transcript is frozen in the prototype
 (`.scratch/exception-flow/prototypes/06-exception-creation-wizard/index.html`);
 this page's quoted prompts are the canonical copy.
 

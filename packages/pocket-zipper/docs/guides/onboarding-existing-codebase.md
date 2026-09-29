@@ -30,10 +30,10 @@ Land this through your **protected policy PR** — the same review path that wil
 guard exceptions. See [Protecting the policy](#protecting-the-policy) below and
 [CI wiring principles §5](../ci/principles.md#5-the-pocket-zipper-protection-prerequisite).
 
-While `enabled: false`, Pocket Zipper evaluates nothing, exits 0, and skips policy
-validation entirely (structural config checks still run — a typo'd key during onboarding
-fails fast instead of lying dormant until flip-on, per the config reference's validation
-rules).
+While `enabled: false`, Pocket Zipper evaluates nothing, exits 0 with the verdict
+`excluded`, and only the ESLint-dependent allowlist check is skipped. The config's
+structural checks still run, so a typo'd key during onboarding fails fast instead of lying
+dormant until flip-on (per the config reference's validation rules).
 
 ## Step 2 — mass-suppress in ordinary PRs
 

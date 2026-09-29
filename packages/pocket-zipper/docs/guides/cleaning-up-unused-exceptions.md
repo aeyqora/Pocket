@@ -35,6 +35,9 @@ From the shared validator's vocabulary (see [the registry format](exceptions.md#
    removes suppressions derives the records it cleared and annotates them on the report and
    pre-commit output:
    `cleared by this change — record now unused; remove it in a protected PR`.
+   The annotation is derived from the change, so `validate` never prints it — a
+   working-tree lint has no diff, and nothing can be the author of a record's becoming
+   unused.
 2. **Delete the record** in a protected policy PR. Deleting a record never broadens the
    registry and never self-authorizes — it is an ordinary edit, verifiably **not** a
    `POLICY_CHANGE` — so it can: (a) ride the same change as the fix (if your repo allows
@@ -46,7 +49,7 @@ unclaimed matches it, and the check makes that legible.
 
 ## The delete-ready pointer
 
-On a FAIL report and in `validate` hygiene findings, a record with no unclaimed matching
+On a FAIL report and in `pocket-zipper validate`, a record with no unclaimed matching
 suppression is printed ready to delete:
 
 ```text
@@ -73,10 +76,18 @@ lines 1–9 of `exceptions.yml` describe different things, and neither tells you
 
 ## The cleanup rollup and CI glue
 
-On pass with `--verbose`, the report ends with a one-line greppable rollup:
-`pocket-zipper-cleanup: N dangling, M spent`. It is deliberately bare — counts only, no
-handles — because repo CI glue turns it into *your* notification shape. Three example
-wirings, all reading the line from the CI log:
+`pocket-zipper validate` is the maintainer's sweep, and it is the one surface that prints
+both: the per-record pointers above and the greppable rollup beneath them. A `check` or
+`pre-commit` `--verbose` **pass** prints the rollup alone, because its reader is a CI log
+that wants the line a repo's own step greps; a FAIL prints the pointers instead, because
+its reader is the change's author, who has to find the record. Either way the line is
+deliberately bare — counts only, no handles — because repo CI glue turns it into *your*
+notification shape. It appears only when there is something unused to count; a clean
+registry says nothing at all:
+
+`pocket-zipper-cleanup: N dangling, M spent`
+
+Three example wirings, all reading the line from the CI log:
 
 - **GitHub Actions** — a step that greps the check log for `^pocket-zipper-cleanup:` and
   posts its match as a PR comment (or annotates the run) when the counts are non-zero.

@@ -64,11 +64,19 @@ landing one merge before the first combined PR. And edits to an existing record'
 identity-critical fields (`rule` / `suppression_type` / `fingerprint` / `file`) —
 including a re-point to a renamed file, which reads as an identity edit and never as a
 fresh grant — stay on the protected track in *both* postures: the delta reads `edit`,
-so `POLICY_CHANGE` fires on same-change consumption. A plain renewal (an in-place
-expiry edit) is protected by the gate rather than by the signal: it changes the delta
-not at all, no `POLICY_CHANGE` fires, and the baseline's expired record authorizes
-nothing — so the debt the renewal would cover reads as plain unauthorized new debt and
-fails the gate on its own.
+so `POLICY_CHANGE` fires on same-change consumption.
+
+A plain renewal (an in-place `expires` edit) is protected by the gate rather than by the
+signal, and the distinction is worth being exact about. `expires` is not part of the
+`(file, match key)` slot the delta is compared on, so a renewal opens no new slot at all:
+the delta is not a weakening, **no `POLICY_CHANGE` is raised in either posture**, and the
+coverage union a combined landing builds has nothing to add. What stops the renewal is the
+gate itself — the baseline's expired record authorizes nothing, so the debt the renewal
+would cover reads as plain unauthorized new debt and fails on its own (exit 1). A renewal
+of a still-valid record is quieter: it exits 0, silently. In both cases the fresh
+authorization is **branch protection on `.pocket-zipper/**`** — a renewal is an edit to a
+protected file, so it lands through the same review as any other, and the approval that
+covered the original record does not carry forward.
 
 ## What each host can actually guarantee
 

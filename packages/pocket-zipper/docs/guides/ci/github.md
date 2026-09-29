@@ -74,6 +74,51 @@ exception and the suppression it authorizes) — an explicit `allowSameChangeExc
 config plus the per-path protection above. What that guarantees, and which failure modes
 it inherits, is in [Landing an exception](../landing-an-exception.md).
 
+## Registry work and the cleanup signal
+
+The gate job above is the only thing the merge depends on. Three surfaces sit beside it,
+none of which change the verdict:
+
+- **Exit codes.** `0` pass (and hygiene-only `validate`), `1` gate FAIL — unauthorized new
+  debt, a `POLICY_CHANGE`, or an `EXPIRY_POLICY` — `2` fail-closed (`GIT_ERROR`,
+  `ESLINT_ERROR`, `CONFIG_ERROR`, `INTERNAL_ERROR`, or a registry/config defect). Keep the
+  step's default behavior: the CLI already exits with the right code.
+- **Lint the protected files before you push**, with
+  `npx pocket-zipper validate`. It reads the working tree's `config.yml` and
+  `exceptions.yml`, prints every finding, and is the maintainer's sweep: unused records
+  come with a delete-ready `entry N of M · .pocket-zipper/exceptions.yml:lines` pointer.
+  Defects exit 2, hygiene alone exits 0 — so it is safe to run as a second, non-required
+  job or a PR-comment step.
+- **Author records, never hand-write them**, with
+  `npx pocket-zipper exception add` (or accept the ride-along a local `check` FAIL offers
+  on a terminal). It prefills the match fields and writes a proposed record to the working
+  tree; the change still has to be approved like any other.
+- **Surface the cleanup rollup.** Add `--verbose` to the check step and pipe its line into
+  a PR comment. It is bare counts, by design — the core posts nothing. Extend the
+  `Pocket Zipper` step of the pipeline above; `tee` keeps the log for the grep and the
+  step's exit code, which a bare pipe would swallow:
+
+```yaml
+      - name: Pocket Zipper
+        run: |
+          npx pocket-zipper check \
+            --base origin/${{ github.base_ref || 'main' }} \
+            --json pocket-zipper.json \
+            --verbose | tee pocket-zipper.log
+      - name: Comment the cleanup rollup
+        if: always()
+        run: |
+          line="$(grep -m1 '^pocket-zipper-cleanup:' pocket-zipper.log || true)"
+          [ -n "$line" ] || exit 0
+          [ "$line" = "pocket-zipper-cleanup: 0 dangling, 0 spent" ] && exit 0
+          gh pr comment --body "$line"
+```
+
+The commenting step also needs write permission it does not have by default — add
+`issues: write` (or `pull-requests: write`) to the workflow's `permissions:` block, or
+attach it to a job that declares it. A stricter team can make a non-zero cleanup **fail
+CI** instead — the tool itself never fails on hygiene alone.
+
 ## Deep reference
 
 This page is the copy-paste path. For the trigger/checkout/base-ref semantics, fork-PR

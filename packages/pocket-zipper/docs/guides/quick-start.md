@@ -113,11 +113,18 @@ pocket-zipper exception add [--from <file:line> --reason <text> --reference <lin
   tree — run it when you're writing or editing the registry. Defects exit 2; hygiene alone
   exits 0. See [the registry format](exceptions.md#pocket-zipper-validate).
 - `exception add` is the wizard for authoring an exception (new debt or renewal), with
-  non-interactive flags for scripted/agented use. See
+  non-interactive flags for scripted/agented use. It is the second front door of the same
+  engine a failing local `check` offers you, and the only command that writes to your
+  working tree: it appends the records it proposed to `exceptions.yml`, which still have to
+  land through review. See
   [the wizard](exceptions.md#the-wizard-pocket-zipper-exception-add).
 - `--json <path>` writes the evaluation record and leaves stdout for the human report.
-- `--verbose` reports even on pass: the disposition summary, new debt authorized by an
-  exception, and unused-exception cleanup (dangling, spent, expired) — in both modes.
+- `--verbose` reports even on pass: the disposition summary, the per-rule pool counts, new
+  debt authorized by an exception, and unused-exception cleanup — in both modes. On a pass
+  it also ends with the greppable rollup
+  `pocket-zipper-cleanup: N dangling, M spent`, which is the line a repo's own CI step
+  greps for; see
+  [cleaning up unused exceptions](cleaning-up-unused-exceptions.md#the-cleanup-rollup-and-ci-glue).
 
 ## Next steps
 

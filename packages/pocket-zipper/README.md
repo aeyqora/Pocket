@@ -84,8 +84,16 @@ pocket-zipper exception add [--from <file:line> --reason <text> --reference <lin
 
 A passing run is quiet by design: one verdict line from `check`, silence from `pre-commit`.
 Add `--verbose` (either mode) and the pass report shows what was recorded — the disposition
-summary, any new debt an exception authorized, and unused-exception cleanup — the same
-vocabulary the fail report uses, so you never have to parse the JSON to see the state.
+summary, the per-rule pool counts, any new debt an exception authorized, and
+unused-exception cleanup — the same vocabulary the fail report uses, so you never have to
+parse the JSON to see the state. A pass with something unused ends with the greppable rollup
+`pocket-zipper-cleanup: N dangling, M spent`, which is the line a repo's own CI step greps
+for; `validate` is the one command that prints both that line and the per-record
+`entry N of M · .pocket-zipper/exceptions.yml:lines` pointers, so it is the registry
+maintainer's sweep.
+
+`exception add` is the only command that writes to your working tree: it appends the
+records it proposed to `exceptions.yml`, which still have to land through review.
 
 ## Documentation
 

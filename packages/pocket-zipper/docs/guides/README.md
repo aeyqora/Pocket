@@ -27,6 +27,22 @@ The registry-adjacent references: **[Config reference](config-reference.md)** fo
 canonical default and every key, and **[Cleaning up unused exceptions](cleaning-up-unused-exceptions.md)**
 for keeping the registry honest.
 
+## The command surface
+
+```sh
+pocket-zipper check --base <ref> [--json <path>] [--verbose]   # the gate; run it in CI
+pocket-zipper pre-commit [--json <path>] [--verbose]           # the staged index, locally
+pocket-zipper validate                                         # lint both protected files
+pocket-zipper exception add [--from <file:line> --reason <text> --reference <link>]
+```
+
+The first two are the same evaluation against two different baselines, and they answer one
+question: does this change add suppression debt no exception covers. The last two are the
+registry's own surfaces: `validate` tells you whether the two protected files are readable
+and worth reviewing (exit 2 on a defect, 0 on hygiene alone, never a strict mode), and
+`exception add` is a guided ride that authors a record for you — offered too, at the end of
+a local failing `check`.
+
 ## The mental model
 
 Pocket Zipper compares two trees, not two diffs:
