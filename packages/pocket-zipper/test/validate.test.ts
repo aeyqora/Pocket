@@ -1,12 +1,13 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { configYaml, createRepo, eslintConfig, exceptionYaml, NEXT_LINE_NO_CONSOLE_FP, NEXT_LINE_NO_DEBUGGER_FP, type FixtureRepo } from "./harness.js";
+import { configYaml, repo as harnessRepo, cleanupRepos, eslintConfig, exceptionYaml, NEXT_LINE_NO_CONSOLE_FP, NEXT_LINE_NO_DEBUGGER_FP, type FixtureRepo } from "./harness.js";
 import { addDuration } from "../src/policy.js";
 import { defectsOf, renderFinding, type Finding } from "../src/finding.js";
 import { errorRecords, loadRegistry, recordHygiene, statusHygiene, validateRegistry, type HygieneContext } from "../src/validate.js";
-
 import { PocketZipperError } from "../src/errors.js";
 import type { ExceptionRecord, ExceptionStatus } from "../src/types.js";
+
+after(cleanupRepos);
 
 /**
  * The two protected files' constants, spelled here rather than imported so a
@@ -492,13 +493,13 @@ const BEYOND_HORIZON = addDuration(TODAY, "6mo");
 const LONG_PAST = "2000-01-01";
 
 describe("pocket-zipper validate through the CLI fixture seam", () => {
-  const repos: FixtureRepo[] = [];
-  after(() => repos.forEach((r) => r.cleanup()));
-
-  /** A repo with a real ESLint config, a real suppression, and no registry yet. */
+  /**
+   * A repo with a real ESLint config, a real suppression, and no registry yet.
+   * Wraps the harness's `repo`, which registers its own cleanup, to add this
+   * file's standard starting shape.
+   */
   function repo(): FixtureRepo {
-    const r = createRepo();
-    repos.push(r);
+    const r = harnessRepo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error", "no-debugger": "error" }));
     r.write("app.js", '// eslint-disable-next-line no-console\nconsole.log("hi");\n');
     r.write(CONFIG, "enabled: true\nexceptions:\n  defaultExpiry: 30d\n  maxExpiry: 3mo\n");
@@ -525,8 +526,7 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
   }
 
   it("passes a repository that governs nothing", () => {
-    const r = createRepo();
-    repos.push(r);
+    const r = harnessRepo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write("app.js", "export const a = 1;\n");
     assert.deepEqual(validate(r), {
@@ -891,8 +891,7 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
   });
 
   it("judges nothing, and does not crash, when the tree has no usable ESLint", () => {
-    const r = createRepo();
-    repos.push(r);
+    const r = harnessRepo();
     // No flat config: the ESLint session cannot lint, so no record gets a verdict.
     r.write("app.js", '// eslint-disable-next-line no-console\nconsole.log("hi");\n');
     r.write(
@@ -938,7 +937,7 @@ describe("pocket-zipper validate through the CLI fixture seam", () => {
   });
 
   it("advertises itself in the usage text, so it is discoverable without a README", () => {
-    const res = repos[0]!.runCli(["--help"], { json: false });
+    const res = repo().runCli(["--help"], { json: false });
     assert.equal(res.status, 0);
     assert.match(res.stdout, /^ {2}pocket-zipper validate$/m);
   });
@@ -975,8 +974,6 @@ const COVERS_POLICY_PATH = ".pocket-zipper/** @repo-owner\n";
  * can fail a run. That last part is asserted in every test here.
  */
 describe("validate: the combined-landing corroborations", () => {
-  const repos: FixtureRepo[] = [];
-  after(() => repos.forEach((r) => r.cleanup()));
 
   /**
    * A repo shaped like a declaration under test: the config declares, the remote
@@ -990,8 +987,7 @@ describe("validate: the combined-landing corroborations", () => {
     remote?: string;
     owners?: string | null;
   } = {}): FixtureRepo {
-    const r = createRepo();
-    repos.push(r);
+    const r = harnessRepo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write("app.js", "export const a = 1;\n");
     r.write(
@@ -1175,8 +1171,7 @@ describe("validate: the combined-landing corroborations", () => {
   });
 
   it("stays silent on a repository that governs nothing", () => {
-    const r = createRepo();
-    repos.push(r);
+    const r = harnessRepo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write("app.js", "export const a = 1;\n");
     r.write(OWNERS, `${COVERS_POLICY_PATH}app.js @repo-owner\n`);

@@ -1,21 +1,17 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  createRepo,
   configYaml,
   eslintConfig,
   hasErrorCode,
-  type FixtureRepo,
+  repo,
+  cleanupRepos,
+  PROTECTED_REGISTRY,
+  PROTECTED_CONFIG,
 } from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
+after(cleanupRepos);
 
 const disabled = "// eslint-disable-next-line no-console\n";
 
@@ -37,7 +33,7 @@ describe("governed scope and lock enablement", () => {
   it("exits 0 with a minimal excluded record when enabled is false", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: false }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -57,7 +53,7 @@ describe("governed scope and lock enablement", () => {
       "eslint.config.mjs",
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-debugger"] }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -76,7 +72,7 @@ describe("governed scope and lock enablement", () => {
   it("accepts a recognized-but-inapplicable forward-declared rule", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-var"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-var"] }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -99,7 +95,7 @@ describe("governed scope and lock enablement", () => {
         "",
       ].join("\n"),
     );
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["jsx-a11y/no-autofocus"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["jsx-a11y/no-autofocus"] }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -120,7 +116,7 @@ describe("governed scope and lock enablement", () => {
         "",
       ].join("\n"),
     );
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["jsx-a11y/no-autofocuss"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["jsx-a11y/no-autofocuss"] }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -132,7 +128,7 @@ describe("governed scope and lock enablement", () => {
   it("fails closed on an unrecognized allowlist rule", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-such-rule-xyz"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-such-rule-xyz"] }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -317,7 +313,7 @@ describe("config-level off recognition", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       [
         "- rule: no-console",
         "  suppression_type: config-off",
@@ -347,7 +343,7 @@ describe("governed set details", () => {
       "eslint.config.mjs",
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-debugger"] }));
     r.write("app.js", `${disabled}console.log(1);\n`);
     r.commit("base");
     r.branch("base");
@@ -372,7 +368,7 @@ describe("governed set details", () => {
       "eslint.config.mjs",
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-debugger"] }));
     r.write("app.js", `${disabled}console.log(1);\n`);
     r.commit("base");
     r.branch("base");
@@ -398,7 +394,7 @@ describe("the effective policy is baseline-authoritative", () => {
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-debugger"] }));
     r.write("app.js", `${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -414,11 +410,11 @@ describe("the effective policy is baseline-authoritative", () => {
   it("evaluates the enablement flip under the old policy, then grandfathers it", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: false }));
     r.write("app.js", `${disabled}console.log(1);\n`);
     r.commit("A");
     r.branch("baseA");
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.commit("B");
     r.branch("baseB");
 
@@ -441,12 +437,12 @@ describe("the effective policy is baseline-authoritative", () => {
       "eslint.config.mjs",
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-debugger"] }));
     r.write("app.js", `${disabled}console.log(1);\n`);
     r.commit("A");
     r.branch("baseA");
     r.write(
-      ".pocket-zipper/config.yml",
+      PROTECTED_CONFIG,
       configYaml({ governedRules: ["no-debugger", "no-console"] }),
     );
     r.write("app.js", `${disabled}console.log(1);\nconst b = 2;\n`);
@@ -471,7 +467,7 @@ describe("the effective policy is baseline-authoritative", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write(
-      ".pocket-zipper/config.yml",
+      PROTECTED_CONFIG,
       "enabled: false\ngovernedRules: [no-such-rule-xyz]\n",
     );
     r.write("app.js", "export const a = 1;\n");

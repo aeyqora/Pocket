@@ -1,17 +1,21 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  createRepo,
   configYaml,
   eslintConfig,
   exceptionYaml,
   hasErrorCode,
   NEXT_LINE_NO_CONSOLE_FP,
   NEXT_LINE_NO_DEBUGGER_FP,
-  type FixtureRepo,
-  type RunResult,
+  repo,
+  cleanupRepos,
+  PROTECTED_REGISTRY,
+  PROTECTED_CONFIG,
 } from "./harness.js";
+import type { FixtureRepo, RunResult } from "./harness.js";
 import { addDuration, parsePolicy } from "../src/policy.js";
+
+after(cleanupRepos);
 
 /**
  * The guarded one-PR opt-in: a repo whose **baseline** config declares
@@ -26,15 +30,6 @@ import { addDuration, parsePolicy } from "../src/policy.js";
  * here, and neither is which record paired with which — the observable for a
  * cross-file re-point is the clause on the `POLICY_CHANGE` line.
  */
-
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
 
 const disabled = "// eslint-disable-next-line no-console\n";
 const noDebugger = "// eslint-disable-next-line no-debugger\n";
@@ -101,12 +96,12 @@ function onBaseline(
     eslintConfig({ "no-console": "error", "no-debugger": "error" }),
   );
   r.write(
-    ".pocket-zipper/config.yml",
+    PROTECTED_CONFIG,
     posture === "combined"
       ? configYaml({ allowSameChangeExceptions: true, host: opts.host ?? "github" })
       : configYaml({ enabled: true }),
   );
-  if (opts.registry) r.write(".pocket-zipper/exceptions.yml", opts.registry);
+  if (opts.registry) r.write(PROTECTED_REGISTRY, opts.registry);
   r.write("app.js", opts.app ?? "export const a = 1;\n");
   r.commit("base");
   r.branch("base");
@@ -136,7 +131,7 @@ function rideAdditiveRecord(
   opts: { expires?: string; file?: string } = {},
 ): void {
   const file = opts.file ?? "app.js";
-  r.write(".pocket-zipper/exceptions.yml", record({ expires: opts.expires, file }));
+  r.write(PROTECTED_REGISTRY, record({ expires: opts.expires, file }));
   r.write(file, `export const a = 1;\n${disabled}console.log(1);\n`);
 }
 
@@ -178,7 +173,7 @@ describe("combined landing: the additive same-change exception", () => {
   it("legalizes nothing when the same change turns the opt-in on", () => {
     const r = twoStep();
     r.write(
-      ".pocket-zipper/config.yml",
+      PROTECTED_CONFIG,
       configYaml({ enabled: true, allowSameChangeExceptions: true, host: "github" }),
     );
     rideAdditiveRecord(r);
@@ -207,7 +202,7 @@ describe("combined landing: the additive same-change exception", () => {
 
   it("reports a riding record with nothing consuming it as cleanup debt, not as a policy change", () => {
     const r = combinedOnHost();
-    r.write(".pocket-zipper/exceptions.yml", record());
+    r.write(PROTECTED_REGISTRY, record());
     r.commit("head");
     const res = check(r);
     // A record riding in a change that consumes nothing is still a record: it
@@ -229,7 +224,7 @@ describe("combined landing: the additive same-change exception", () => {
     // something the baseline record did not, so the delta is an edit and the
     // exception — which reads the additive shape only — never applies.
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       record({ expires: "2099-01-01" }),
     );
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
@@ -244,7 +239,7 @@ describe("combined landing: the additive same-change exception", () => {
     const r = twoStep({
       registry: record({ rule: "no-debugger", fingerprint: NEXT_LINE_NO_DEBUGGER_FP }),
     });
-    r.write(".pocket-zipper/exceptions.yml", record({ expires: "2099-01-01" }));
+    r.write(PROTECTED_REGISTRY, record({ expires: "2099-01-01" }));
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = check(r);
@@ -262,7 +257,7 @@ describe("combined landing: the additive same-change exception", () => {
     // never joins the union. What the coverage pass sees is the baseline's own
     // expired record, which authorizes nothing — the gate fails, and there is
     // no `POLICY_CHANGE` to point at, because the delta names no new grant.
-    r.write(".pocket-zipper/exceptions.yml", record({ expires: WITHIN_HORIZON }));
+    r.write(PROTECTED_REGISTRY, record({ expires: WITHIN_HORIZON }));
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = check(r);
@@ -280,7 +275,7 @@ describe("combined landing: the additive same-change exception", () => {
     // the renewed record in behind it and let one PR both renew and consume.
     const r = combinedOnHost({ registry: record({ expires: LONG_PAST }) });
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       // The renewal, rewritten to a date inside the horizon.
       record({ expires: WITHIN_HORIZON }) +
         // A genuine additive record: a match key the baseline never carried.
@@ -328,7 +323,7 @@ describe("combined landing: the additive same-change exception", () => {
         registry: record(),
         app: `export const a = 1;\n${disabled}console.log(1);\n`,
       });
-      r.remove(".pocket-zipper/exceptions.yml");
+      r.remove(PROTECTED_REGISTRY);
       r.write("app.js", "export const a = 1;\n");
       r.commit("head");
       const res = check(r);
@@ -350,7 +345,7 @@ describe("combined landing: the additive same-change exception", () => {
 
   it("refuses a riding record the loader cannot read, as a config defect alone", () => {
     const r = combinedOnHost();
-    r.write(".pocket-zipper/exceptions.yml", MALFORMED_REGISTRY);
+    r.write(PROTECTED_REGISTRY, MALFORMED_REGISTRY);
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = check(r);
@@ -366,7 +361,7 @@ describe("combined landing: the additive same-change exception", () => {
 function withBaselineConfig(config: string): FixtureRepo {
   const r = repo();
   r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-  r.write(".pocket-zipper/config.yml", config);
+  r.write(PROTECTED_CONFIG, config);
   r.write("app.js", "export const a = 1;\n");
   r.commit("base");
   r.branch("base");
@@ -447,7 +442,7 @@ describe("the combined-landing pair in the config", () => {
   it("does not evaluate the head's contradiction, which bites only once it is the baseline", () => {
     const r = twoStep();
     r.write(
-      ".pocket-zipper/config.yml",
+      PROTECTED_CONFIG,
       configYaml({ enabled: true, allowSameChangeExceptions: true, host: "bitbucket-cloud" }),
     );
     rideAdditiveRecord(r);
@@ -493,7 +488,7 @@ describe("a record re-pointed across files", () => {
     r.git(["mv", "app.js", "lib.js"]);
     r.write("lib.js", `export const a = 1;\n${disabled}console.log(1);\n${noDebugger}debugger;\n`);
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       record({ type: "permanent", file: "lib.js" }) +
         record({ rule: "no-debugger", fingerprint: NEXT_LINE_NO_DEBUGGER_FP, file: "lib.js", type: "permanent" }),
     );
@@ -514,7 +509,7 @@ describe("a record re-pointed across files", () => {
     // reached across files too eagerly would read it as an edit and refuse a
     // change that widened nothing.
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       record() + record({ file: "lib.js" }),
     );
     r.write("lib.js", `export const a = 1;\n${disabled}console.log(1);\n`);

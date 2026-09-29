@@ -7,7 +7,6 @@ import { readIfPresent, readProtectedDocument } from "../src/protected-document.
 import { defectsOf } from "../src/finding.js";
 import { PROTECTED_REGISTRY } from "../src/validate.js";
 
-
 /**
  * A repo-shaped directory to read out of. Removed on exit, so a test that
  * replaces a file with a directory cannot leave one behind.

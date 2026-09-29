@@ -1,25 +1,21 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  createRepo,
   configYaml,
   eslintConfig,
   exceptionYaml,
   hasErrorCode,
   NEXT_LINE_NO_CONSOLE_FP,
   NEXT_LINE_NO_DEBUGGER_FP,
-  type FixtureRepo,
+  repo,
+  cleanupRepos,
+  PROTECTED_REGISTRY,
+  PROTECTED_CONFIG,
 } from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 import { addDuration } from "../src/policy.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
+after(cleanupRepos);
 
 const disabled = "// eslint-disable-next-line no-console\n";
 const noDebugger = "// eslint-disable-next-line no-debugger\n";
@@ -63,11 +59,11 @@ describe("policy-change detection through the pipeline", () => {
   it("fails when a weakening edit is consumed by new debt in the same change", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: false }));
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -78,11 +74,11 @@ describe("policy-change detection through the pipeline", () => {
   it("fails when removal of an explicitly-true enabled key is consumed", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/config.yml", "# policy unchanged beyond removing the flag\n");
+    r.write(PROTECTED_CONFIG, "# policy unchanged beyond removing the flag\n");
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -93,7 +89,7 @@ describe("policy-change detection through the pipeline", () => {
   it("does not fire when no protected file is touched", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -107,9 +103,9 @@ describe("policy-change detection through the pipeline", () => {
   it("fires even when the consumed debt is authorized by an exception", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -121,7 +117,7 @@ describe("policy-change detection through the pipeline", () => {
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: false }));
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -137,11 +133,11 @@ describe("policy-change detection through the pipeline", () => {
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
     r.write(
-      ".pocket-zipper/config.yml",
+      PROTECTED_CONFIG,
       configYaml({ governedRules: ["no-console", "no-debugger"] }),
     );
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-debugger",
         suppressionType: "next-line",
@@ -153,7 +149,7 @@ describe("policy-change detection through the pipeline", () => {
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-debugger"] }));
     r.write("app.js", `export const a = 1;\n${noDebugger}\ndebugger;\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -169,7 +165,7 @@ describe("policy-change detection through the pipeline", () => {
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-debugger",
         suppressionType: "next-line",
@@ -181,7 +177,7 @@ describe("policy-change detection through the pipeline", () => {
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-debugger"] }));
     r.write("app.js", `export const a = 1;\n${noDebugger}\ndebugger;\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -193,12 +189,12 @@ describe("policy-change detection through the pipeline", () => {
   it("fires when the exception registry broadens and is consumed", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -217,10 +213,10 @@ describe("policy-change detection through the pipeline", () => {
   it("does not fire when an appended record is a twin of one the registry already has", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -239,7 +235,7 @@ describe("policy-change detection through the pipeline", () => {
     // broadening compared records rather than keys, this would read as a
     // weakening and the same change would fail.
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -272,9 +268,9 @@ describe("policy-change detection through the pipeline", () => {
       "eslint.config.mjs",
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-debugger",
         suppressionType: "next-line",
@@ -287,7 +283,7 @@ describe("policy-change detection through the pipeline", () => {
     r.commit("base");
     r.branch("base");
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -308,14 +304,14 @@ describe("a registry the change made unreadable", () => {
   it("refuses a pure policy change that lands a malformed registry", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
     // No code change, no debt, no directive — the change is the registry, and
     // the registry is malformed. Today this lands with `errors: []` and exit
     // 0: the one shape in which a broken registry merges.
-    r.write(".pocket-zipper/exceptions.yml", MALFORMED_REGISTRY);
+    r.write(PROTECTED_REGISTRY, MALFORMED_REGISTRY);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 2);
@@ -330,14 +326,14 @@ describe("a registry the change made unreadable", () => {
   it("reports the defect alone, never beside a policy change", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
     // The same malformed registry, beside debt the change introduced. A file
     // that cannot be read has no delta to judge, so this change has nothing to
     // report about policy at all — one tier of error, not two.
-    r.write(".pocket-zipper/exceptions.yml", MALFORMED_REGISTRY);
+    r.write(PROTECTED_REGISTRY, MALFORMED_REGISTRY);
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -351,12 +347,12 @@ describe("the shape the registry weakening is reported as", () => {
   it("names a new grant consumed by new debt an additive weakening", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -378,9 +374,9 @@ describe("the shape the registry weakening is reported as", () => {
   it("names a re-pointed record consumed by new debt an identity edit", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -396,7 +392,7 @@ describe("the shape the registry weakening is reported as", () => {
     // re-pointed at different debt, which authorizes something the baseline
     // record did not.
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -418,9 +414,9 @@ describe("the shape the registry weakening is reported as", () => {
   it("reads a removal and an addition in the same file as an edit, not a new grant", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-debugger",
         suppressionType: "next-line",
@@ -437,7 +433,7 @@ describe("the shape the registry weakening is reported as", () => {
     // A reader comparing the two sets sees a key the baseline never had, and
     // the honest name for that is an edit.
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -459,7 +455,7 @@ describe("the shape the registry weakening is reported as", () => {
   it("records a new grant with nothing to consume as an additive policy change that passes", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -468,7 +464,7 @@ describe("the shape the registry weakening is reported as", () => {
     // shape is named on this side of the gate too. The date is inside the
     // maximum, so the expiry policy has nothing to say about it.
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -491,12 +487,12 @@ describe("the shape the registry weakening is reported as", () => {
   it("reports a new grant and a beyond-max date as one policy change and one expiry refusal", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -560,7 +556,7 @@ describe("config-level severity weakenings as policy changes", () => {
       "eslint.config.mjs",
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
-    r.write(".pocket-zipper/config.yml", configYaml({ governedRules: ["no-debugger"] }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-debugger"] }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");

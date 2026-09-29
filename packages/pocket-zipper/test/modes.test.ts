@@ -3,24 +3,20 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  createRepo,
   configYaml,
   eslintConfig,
   exceptionYaml,
   hasErrorCode,
   NEXT_LINE_NO_CONSOLE_FP,
-  type FixtureRepo,
+  repo,
+  cleanupRepos,
+  PROTECTED_REGISTRY,
+  PROTECTED_CONFIG,
 } from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 import { addDuration } from "../src/policy.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
+after(cleanupRepos);
 
 const disabled = "// eslint-disable-next-line no-console\n";
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -229,7 +225,7 @@ describe("pre-commit mode", () => {
   it("authorizes a staged suppression from the committed registry", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
+    r.write(PROTECTED_REGISTRY, noConsoleException());
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
@@ -242,7 +238,7 @@ describe("pre-commit mode", () => {
   it("surfaces authorized debt and dispositions on a verbose pass", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
+    r.write(PROTECTED_REGISTRY, noConsoleException());
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
@@ -260,7 +256,7 @@ describe("pre-commit mode", () => {
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
-    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
+    r.write(PROTECTED_REGISTRY, noConsoleException());
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.stage();
     const res = r.runCli(["pre-commit"]);
@@ -277,7 +273,7 @@ describe("pre-commit mode", () => {
     // The record is staged, nothing else: the refusal is the expiry policy's,
     // judged against HEAD's maximum, not a debt failure.
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -302,12 +298,12 @@ describe("pre-commit mode", () => {
   it("judges nothing when a registry in the worktree is not staged", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     // Written and never staged, beside an empty staged diff. The proposed
     // change is the index, and it carries nothing.
-    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
+    r.write(PROTECTED_REGISTRY, noConsoleException());
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     const res = r.runCli(["pre-commit"]);
     assert.equal(res.status, 0);
@@ -317,10 +313,10 @@ describe("pre-commit mode", () => {
   it("judges nothing from a worktree registry it could not stage", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
-    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
+    r.write(PROTECTED_REGISTRY, noConsoleException());
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     // A locked index is not a thing an author does on purpose; it is what a
     // hook racing another writer looks like. It is here because it is the one
@@ -347,7 +343,7 @@ describe("pre-commit mode", () => {
     // `configWeakened` reports a weakening for a file the change never carried.
     // The firing side is already pinned by "fails when a weakening edit is
     // consumed by new debt in the same change"; what this closes is the gate.
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: false }));
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     writeFileSync(join(r.dir, ".git", "index.lock"), "");
     const res = r.runCli(["pre-commit"]);
@@ -358,13 +354,13 @@ describe("pre-commit mode", () => {
   it("judges the same registry once it is staged", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     // The mirror of the two tests above, and the guard on them: the same
     // registry, the same date, one `stage()` apart. If the trigger had been
     // satisfied by switching the check off, this would pass too.
-    r.write(".pocket-zipper/exceptions.yml", noConsoleException());
+    r.write(PROTECTED_REGISTRY, noConsoleException());
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.stage();
     const res = r.runCli(["pre-commit"]);

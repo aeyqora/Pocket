@@ -5,14 +5,19 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync }
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRepo, eslintConfig, type FixtureRepo } from "./harness.js";
+import {
+  eslintConfig,
+  repo,
+  cleanupRepos,
+} from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 import { EMPTY_TREE } from "../src/git.js";
 import { TOOL_VERSION } from "../src/record.js";
 import type { EvaluationRecord } from "../src/types.js";
 
+after(cleanupRepos);
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
 
 describe("package contract", () => {
   it("ships the pocket-zipper binary with only the YAML runtime dependency", () => {
@@ -63,8 +68,7 @@ describe("package contract", () => {
 
       // Fresh repo -> empty-tree baseline -> staged first commit with a
       // governed suppression -> exit 1 under the default (enabled) policy.
-      const fixture = createRepo();
-      repos.push(fixture);
+      const fixture = repo();
       fixture.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
       fixture.write("app.js", "// eslint-disable-next-line no-console\nconsole.log(1);\n");
       fixture.stage();

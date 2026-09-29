@@ -5,16 +5,18 @@ import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { main, type CommandIo } from "../src/cli.js";
 import {
-  createRepo,
   configYaml,
   eslintConfig,
   NEXT_LINE_NO_CONSOLE_FP,
-  type FixtureRepo,
+  repo,
+  cleanupRepos,
+  PROTECTED_REGISTRY,
+  PROTECTED_CONFIG,
 } from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 import { addDuration } from "../src/policy.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
+after(cleanupRepos);
 
 /**
  * A repo with a committed change that adds governed debt: the shape a developer's
@@ -22,10 +24,9 @@ after(() => repos.forEach((r) => r.cleanup()));
  * compared. Returns the ref to check against.
  */
 function failingRepo(): { repo: FixtureRepo; base: string } {
-  const r = createRepo();
-  repos.push(r);
+  const r = repo();
   r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-  r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+  r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
   r.write("app.js", "export const a = 1;\n");
   r.commit("base");
   const base = r.rev("HEAD");
@@ -36,10 +37,9 @@ function failingRepo(): { repo: FixtureRepo; base: string } {
 
 /** The same repo, failing on two same-file twins: the multi-debt ride-along. */
 function twinFailingRepo(): { repo: FixtureRepo; base: string } {
-  const r = createRepo();
-  repos.push(r);
+  const r = repo();
   r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-  r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+  r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
   r.write("app.js", "export const a = 1;\n");
   r.commit("base");
   const base = r.rev("HEAD");
@@ -167,7 +167,7 @@ describe("the ride-along: the post-failure door into the wizard", () => {
         "    reference: https://github.com/org/repo/issues/123",
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception record written to .pocket-zipper/exceptions.yml",
+        `✎ exception record written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         "",
         "Next steps",
@@ -179,7 +179,7 @@ describe("the ride-along: the post-failure door into the wizard", () => {
     // The prefill is the report's own record: the same fingerprint, the same
     // line, the same concrete date the report suggested — one `now` behind both.
     assert.equal(
-      r.read(".pocket-zipper/exceptions.yml"),
+      r.read(PROTECTED_REGISTRY),
       t(
         "- rule: no-console",
         "  suppression_type: next-line",
@@ -234,7 +234,7 @@ describe("the ride-along: the post-failure door into the wizard", () => {
         `  • no-console @ app.js:4 — next-line (new) — expires ${defaultExpiry}`,
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception records written to .pocket-zipper/exceptions.yml",
+        `✎ exception records written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         "",
         "Next steps",
@@ -244,7 +244,7 @@ describe("the ride-along: the post-failure door into the wizard", () => {
       ),
     );
     // One record per suppression, the pair the twins need: two records, not one.
-    assert.equal(r.read(".pocket-zipper/exceptions.yml").split("- rule:").length - 1, 2);
+    assert.equal(r.read(PROTECTED_REGISTRY).split("- rule:").length - 1, 2);
   });
 
   it("runs one ride-along per invocation, then hands over to the command", async () => {
@@ -273,7 +273,7 @@ describe("the ride-along: the post-failure door into the wizard", () => {
         "❯ n",
       ),
     );
-    assert.ok(!existsSync(join(r.dir, ".pocket-zipper/exceptions.yml")));
+    assert.ok(!existsSync(join(r.dir, PROTECTED_REGISTRY)));
   });
 
   it("asks nothing where the report is machine-bound, so a gate never blocks", async () => {
@@ -283,7 +283,7 @@ describe("the ride-along: the post-failure door into the wizard", () => {
     const res = await checkAtTerminal(r, base, "y\n", false);
     assert.equal(res.exitCode, 1);
     assert.equal(res.stdout, t(...failReport(addDuration(today(), "30d"))));
-    assert.ok(!existsSync(join(r.dir, ".pocket-zipper/exceptions.yml")));
+    assert.ok(!existsSync(join(r.dir, PROTECTED_REGISTRY)));
   });
 
   it("asks nothing on a --json run at a terminal, where the record is the reader", async () => {
@@ -306,14 +306,13 @@ describe("the ride-along: the post-failure door into the wizard", () => {
     );
     assert.equal(exitCode, 1);
     assert.equal(stdout, t(...failReport(addDuration(today(), "30d"))));
-    assert.ok(!existsSync(join(r.dir, ".pocket-zipper/exceptions.yml")));
+    assert.ok(!existsSync(join(r.dir, PROTECTED_REGISTRY)));
   });
 
   it("offers nothing on a passing check", async () => {
-    const r = createRepo();
-    repos.push(r);
+    const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     const res = await checkAtTerminal(r, r.rev("HEAD"), "y\n");

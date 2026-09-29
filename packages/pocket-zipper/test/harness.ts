@@ -16,6 +16,17 @@ import type { EvaluationRecord } from "../src/types.js";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const CLI = join(ROOT, "dist", "cli.js");
 
+/**
+ * The two protected files, re-exported from the module that owns them so a test
+ * names the same path the tool does.
+ *
+ * `validate.test.ts` deliberately does *not* import these: it re-spells both, so
+ * that renaming a protected file in the source surfaces there as a changed
+ * expectation rather than as a silently-changed constant. That is the point of
+ * one file spelling them out, and it only works while the rest import.
+ */
+export { PROTECTED_CONFIG, PROTECTED_REGISTRY } from "../src/validate.js";
+
 export interface RunResult {
   status: number;
   stdout: string;
@@ -132,13 +143,47 @@ export function runCliIn(
   };
 }
 
-export function createRepo(): FixtureRepo {
+/**
+ * Every fixture this file made, cleaned up when the file's tests finish.
+ *
+ * A test file that needs a repo calls `repo()` and nothing else. Registration
+ * used to be the caller's: nineteen files carried the same six lines, and one
+ * more declared the array without ever wiring up the hook, so its fixtures were
+ * never cleaned up at all.
+ *
+ * Call it once per test file, from that file's own `after`:
+ *
+ * ```ts
+ * import { after } from "node:test";
+ * import { cleanupRepos, repo } from "./harness.js";
+ *
+ * after(cleanupRepos);
+ * ```
+ *
+ * Keeping the hook in the test file rather than on a `process` exit handler is
+ * deliberate: cleanup should happen when the file's tests are done, not whenever
+ * the runner happens to end, and the two-line call is what buys that.
+ */
+const repos: FixtureRepo[] = [];
+
+/**
+ * A fresh fixture repo — an initialised git repository in a temp directory,
+ * configured with an identity so commits work — registered for cleanup at this
+ * file's `after`.
+ */
+export function repo(): FixtureRepo {
   const dir = mkdtempSync(join(tmpdir(), "pocket-zipper-test-"));
-  const repo = new FixtureRepo(dir);
-  repo.git(["init", "-q", "-b", "main"]);
-  repo.git(["config", "user.email", "test@example.com"]);
-  repo.git(["config", "user.name", "Test"]);
-  return repo;
+  const fixture = new FixtureRepo(dir);
+  fixture.git(["init", "-q", "-b", "main"]);
+  fixture.git(["config", "user.email", "test@example.com"]);
+  fixture.git(["config", "user.name", "Test"]);
+  repos.push(fixture);
+  return fixture;
+}
+
+/** Clean up every fixture this file made. Safe to call more than once. */
+export function cleanupRepos(): void {
+  for (const fixture of repos.splice(0)) fixture.cleanup();
 }
 
 /** A standard flat config enabling a set of core rules at error severity. */

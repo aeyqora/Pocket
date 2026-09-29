@@ -1,15 +1,13 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRepo, eslintConfig, type FixtureRepo } from "./harness.js";
+import {
+  eslintConfig,
+  repo,
+  cleanupRepos,
+} from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
+after(cleanupRepos);
 
 const noConsoleNextLine = "// eslint-disable-next-line no-console\n";
 

@@ -1,25 +1,21 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  createRepo,
   configYaml,
   eslintConfig,
   exceptionYaml,
   hasErrorCode,
   NEXT_LINE_NO_CONSOLE_FP,
   NEXT_LINE_NO_DEBUGGER_FP,
-  type FixtureRepo,
+  repo,
+  cleanupRepos,
+  PROTECTED_REGISTRY,
+  PROTECTED_CONFIG,
 } from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 import { addDuration } from "../src/policy.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
+after(cleanupRepos);
 
 const disabled = "// eslint-disable-next-line no-console\n";
 const nextLineNoDebugger = "// eslint-disable-next-line no-debugger\n";
@@ -64,7 +60,7 @@ describe("the exception registry, resolved against the baseline", () => {
   it("authorizes exactly one logical suppression", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord());
+    r.write(PROTECTED_REGISTRY, baseRecord());
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -86,7 +82,7 @@ describe("the exception registry, resolved against the baseline", () => {
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       baseRecord({ rule: "no-debugger", fingerprint: NEXT_LINE_NO_DEBUGGER_FP }),
     );
     r.write("app.js", "export const a = 1;\n");
@@ -106,7 +102,7 @@ describe("the exception registry, resolved against the baseline", () => {
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/exceptions.yml", baseRecord());
+    r.write(PROTECTED_REGISTRY, baseRecord());
     r.write("app.js", `export const a = 1;\n${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -118,7 +114,7 @@ describe("the exception registry, resolved against the baseline", () => {
   it("reports a matching suppression in another file as unauthorized debt", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ file: "other.js" }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ file: "other.js" }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -137,7 +133,7 @@ describe("the exception registry, resolved against the baseline", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       baseRecord({ file: "other.js", expires: "2000-01-01" }),
     );
     r.write("app.js", "export const a = 1;\n");
@@ -155,7 +151,7 @@ describe("the exception registry, resolved against the baseline", () => {
   it("reports a tomb in another file as debt, not a registry configuration error", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord());
+    r.write(PROTECTED_REGISTRY, baseRecord());
     r.write("app.js", "export const a = 1;\n");
     r.write("legacy.js", `${disabled}console.log("dead");\n`);
     r.commit("base");
@@ -177,7 +173,7 @@ describe("the exception registry, resolved against the baseline", () => {
   it("does not spend a record on an existing suppression in another file", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord());
+    r.write(PROTECTED_REGISTRY, baseRecord());
     r.write("app.js", "export const a = 1;\n");
     r.write("legacy.js", `${disabled}console.log("legacy");\n`);
     r.commit("base");
@@ -198,7 +194,7 @@ describe("the exception registry, resolved against the baseline", () => {
   it("does not spend a record when another file's matching suppression merely moved", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord());
+    r.write(PROTECTED_REGISTRY, baseRecord());
     r.write("app.js", "export const a = 1;\n");
     r.write("legacy.js", `export const l = 1;\n${disabled}console.log("legacy");\n`);
     r.commit("base");
@@ -222,7 +218,7 @@ describe("the exception registry, resolved against the baseline", () => {
   it("fails closed on a malformed registry", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", "- rule: no-console\n  type: temporary\n");
+    r.write(PROTECTED_REGISTRY, "- rule: no-console\n  type: temporary\n");
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -234,7 +230,7 @@ describe("the exception registry, resolved against the baseline", () => {
   it("proceeds with enforcement when the registry is empty", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", "");
+    r.write(PROTECTED_REGISTRY, "");
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -261,11 +257,11 @@ describe("the exception registry, resolved against the baseline", () => {
   it("treats a renewal in the same change as a fresh authorization", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: "2000-01-01" }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: "2000-01-01" }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: "2099-01-01" }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: "2099-01-01" }));
     r.write("app.js", `${disabled}console.log(1);\n`);
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
@@ -278,12 +274,12 @@ describe("the exception registry, resolved against the baseline", () => {
   it("treats temporary-to-permanent in the same change as a fresh authorization", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: "2000-01-01" }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: "2000-01-01" }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       baseRecord({ type: "permanent", expires: undefined }),
     );
     r.write("app.js", `${disabled}console.log(1);\n`);
@@ -321,7 +317,7 @@ describe("the exception registry, resolved against the baseline", () => {
     for (const c of cases) {
       const r = repo();
       r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-      r.write(".pocket-zipper/exceptions.yml", c.yaml);
+      r.write(PROTECTED_REGISTRY, c.yaml);
       r.write("app.js", "export const a = 1;\n");
       r.commit("base");
       r.branch("base");
@@ -336,7 +332,7 @@ describe("the exception registry, resolved against the baseline", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       baseRecord().replace('  reference: "#1"', '  reference: "#1"\n  owner: "@team"'),
     );
     r.write("app.js", "export const a = 1;\n");
@@ -354,7 +350,7 @@ describe("the exception registry, resolved against the baseline", () => {
   it("authorizes a record carrying a line", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ line: 2 }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ line: 2 }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -375,7 +371,7 @@ describe("one record authorizes one twin", () => {
   it("leaves the twin no record covers unauthorized, and states the arithmetic", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord());
+    r.write(PROTECTED_REGISTRY, baseRecord());
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -404,7 +400,7 @@ describe("one record authorizes one twin", () => {
   it("passes a record per twin, and prints the arithmetic only on a verbose pass", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", twinRecords(2));
+    r.write(PROTECTED_REGISTRY, twinRecords(2));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -433,7 +429,7 @@ describe("one record authorizes one twin", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error", "no-debugger": "error" }));
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       baseRecord({ file: "app.js" }) +
         baseRecord({ file: "tools.js" }) +
         baseRecord({ rule: "no-debugger", fingerprint: NEXT_LINE_NO_DEBUGGER_FP, file: "old.js" }),
@@ -475,7 +471,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: BEYOND_HORIZON }));
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
@@ -489,11 +485,11 @@ describe("the expiry policy, judged against the baseline maximum", () => {
   it("refuses a renewal past the maximum", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: IN_WINDOW }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: IN_WINDOW }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: BEYOND_HORIZON }));
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
@@ -505,14 +501,14 @@ describe("the expiry policy, judged against the baseline maximum", () => {
   it("bumping the maximum in the same change legalizes nothing", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ maxExpiry: "3mo" }));
+    r.write(PROTECTED_CONFIG, configYaml({ maxExpiry: "3mo" }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/config.yml", configYaml({ maxExpiry: "12mo" }));
+    r.write(PROTECTED_CONFIG, configYaml({ maxExpiry: "12mo" }));
     // Six months from today: comfortably inside a 12mo policy, past the
     // baseline's 3mo. The baseline's maximum is the only one that binds.
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: BEYOND_HORIZON }));
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
@@ -522,7 +518,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
   it("keeps an overlong baseline record authorizing, and reports it", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: BEYOND_HORIZON }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -545,7 +541,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
   it("does not refuse an overlong record the change never writes", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: BEYOND_HORIZON }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -563,22 +559,22 @@ describe("the expiry policy, judged against the baseline maximum", () => {
   it("lets a non-date edit to an overlong record pass under the tightened maximum", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ maxExpiry: "6mo" }));
+    r.write(PROTECTED_CONFIG, configYaml({ maxExpiry: "6mo" }));
     // Landed under a 6mo policy, then the change tightens the maximum to 3mo.
     // The record runs a year out, so it is past *both* maxima — which is what
     // keeps the overlong count at 1: the count reads the baseline's maximum, so
     // a record only stops counting as overlong once the *baseline* catches up,
     // never when the head tightens. A date merely past the new 3mo would sit
     // inside the baseline's 6mo and count 0, testing nothing here.
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_FAR }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: BEYOND_FAR }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/config.yml", configYaml({ maxExpiry: "3mo" }));
+    r.write(PROTECTED_CONFIG, configYaml({ maxExpiry: "3mo" }));
     // The only registry edit is a `reason` — no date is written, so there is
     // nothing for the expiry policy to newly write and refuse.
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       baseRecord({ expires: BEYOND_FAR }).replace(
         "  reason: needed",
         "  reason: clarified in review",
@@ -594,11 +590,11 @@ describe("the expiry policy, judged against the baseline maximum", () => {
   it("refuses a partial-credit renewal that is shorter but still past the maximum", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_FAR }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: BEYOND_FAR }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: BEYOND_HORIZON }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: BEYOND_HORIZON }));
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
@@ -615,7 +611,7 @@ describe("the expiry policy, judged against the baseline maximum", () => {
   it("counts a long-expired record as expired, never overlong", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", baseRecord({ expires: LONG_PAST }));
+    r.write(PROTECTED_REGISTRY, baseRecord({ expires: LONG_PAST }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");

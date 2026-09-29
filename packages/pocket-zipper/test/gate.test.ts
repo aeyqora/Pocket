@@ -1,21 +1,16 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  createRepo,
   eslintConfig,
   exceptionYaml,
   NEXT_LINE_NO_CONSOLE_FP,
-  type FixtureRepo,
+  repo,
+  cleanupRepos,
+  PROTECTED_REGISTRY,
 } from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
+after(cleanupRepos);
 
 const disabled = "// eslint-disable-next-line no-console\n";
 
@@ -77,7 +72,7 @@ describe("recognition and the first gate verdict", () => {
   it("surfaces authorized debt on a verbose check pass, one line by default", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/exceptions.yml", exceptionYaml({
+    r.write(PROTECTED_REGISTRY, exceptionYaml({
       rule: "no-console",
       suppressionType: "next-line",
       fingerprint: NEXT_LINE_NO_CONSOLE_FP,

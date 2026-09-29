@@ -1,26 +1,21 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  createRepo,
   eslintConfig,
   exceptionYaml,
   NEXT_LINE_NO_CONSOLE_FP,
   NEXT_LINE_NO_DEBUGGER_FP,
-  type FixtureRepo,
+  repo,
+  cleanupRepos,
+  PROTECTED_REGISTRY,
 } from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 import { addDuration } from "../src/policy.js";
 import { evaluate } from "../src/pipeline.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
+after(cleanupRepos);
 
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
-
-const REGISTRY = ".pocket-zipper/exceptions.yml";
+const REGISTRY = PROTECTED_REGISTRY;
 const noConsole = "// eslint-disable-next-line no-console\n";
 
 const TODAY = new Date().toISOString().slice(0, 10);

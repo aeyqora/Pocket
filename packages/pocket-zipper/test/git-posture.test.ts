@@ -5,21 +5,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createRepo,
   eslintConfig,
   runCliIn,
-  type FixtureRepo,
+  repo,
+  cleanupRepos,
 } from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 import { parseNumstat } from "../src/git.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
+after(cleanupRepos);
 
 function git(cwd: string, args: string[]): string {
   const res = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });

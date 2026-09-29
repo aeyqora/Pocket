@@ -1,6 +1,13 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRepo, configYaml, eslintConfig, type FixtureRepo } from "./harness.js";
+import {
+  configYaml,
+  eslintConfig,
+  repo,
+  cleanupRepos,
+  PROTECTED_CONFIG,
+} from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 import {
   DEFAULT_POLICY,
   addDuration,
@@ -9,6 +16,8 @@ import {
   viewPolicy,
 } from "../src/policy.js";
 import type { EvaluationRecord, Policy } from "../src/types.js";
+
+after(cleanupRepos);
 
 const KNOWN = new Set(["no-console"]);
 
@@ -248,20 +257,11 @@ describe("policy: duration arithmetic", () => {
 });
 
 describe("policy config through the CLI fixture seam", () => {
-  const repos: FixtureRepo[] = [];
-  after(() => repos.forEach((r) => r.cleanup()));
-
-  function repo(): FixtureRepo {
-    const r = createRepo();
-    repos.push(r);
-    return r;
-  }
-
   /** A repo whose baseline carries `config`; `check --base base` is run against it. */
   function baselineWithConfig(config: string): FixtureRepo {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", config);
+    r.write(PROTECTED_CONFIG, config);
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");

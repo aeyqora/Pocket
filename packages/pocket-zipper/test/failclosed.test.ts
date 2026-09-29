@@ -1,15 +1,15 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createRepo, configYaml, eslintConfig, type FixtureRepo } from "./harness.js";
+import {
+  configYaml,
+  eslintConfig,
+  repo,
+  cleanupRepos,
+  PROTECTED_CONFIG,
+} from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
+after(cleanupRepos);
 
 describe("fail-closed posture", () => {
   it("fails closed with GIT_ERROR when there is no merge-base", () => {
@@ -30,7 +30,7 @@ describe("fail-closed posture", () => {
   it("fails closed with CONFIG_ERROR on malformed policy", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", "enabled: [not, a, boolean]\n");
+    r.write(PROTECTED_CONFIG, "enabled: [not, a, boolean]\n");
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -45,7 +45,7 @@ describe("fail-closed posture", () => {
       "eslint.config.mjs",
       "export default (() => { throw new Error('config boom'); })();\n",
     );
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: false }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     r.branch("base");
@@ -98,7 +98,7 @@ describe("evaluation record contract", () => {
   it("emits a minimal excluded record for enabled: false", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: false }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     const res = r.runCli(["check", "--base", "main"]);

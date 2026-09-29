@@ -1,25 +1,20 @@
 import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  createRepo,
   configYaml,
   eslintConfig,
   hasErrorCode,
-  type FixtureRepo,
+  repo,
+  cleanupRepos,
+  PROTECTED_CONFIG,
 } from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 import { EMPTY_TREE } from "../src/git.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
+after(cleanupRepos);
 
 const noConsole = "// eslint-disable-next-line no-console\n";
 const noDebugger = "// eslint-disable-next-line no-debugger\n";
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
 
 describe("documented onboarding path", () => {
   it("lands disabled, mass-suppresses, flips under the old policy, then narrows and widens", () => {
@@ -28,7 +23,7 @@ describe("documented onboarding path", () => {
       "eslint.config.mjs",
       eslintConfig({ "no-console": "error", "no-debugger": "error" }),
     );
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: false }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: false }));
     r.write("app.js", `${noConsole}console.log(1);\n`);
     r.commit("land disabled");
     r.branch("land");
@@ -40,7 +35,7 @@ describe("documented onboarding path", () => {
     assert.equal(massSuppress.status, 0);
     assert.equal(massSuppress.record?.verdict, "excluded");
 
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.commit("flip");
     const flip = r.runCli(["check", "--base", "mass"]);
     assert.equal(flip.status, 0);
@@ -57,7 +52,7 @@ describe("documented onboarding path", () => {
     r.branch("after");
 
     r.write(
-      ".pocket-zipper/config.yml",
+      PROTECTED_CONFIG,
       configYaml({ enabled: true, governedRules: ["no-debugger"] }),
     );
     r.write("app.js", `${noConsole}console.log(1);\n${noDebugger}debugger;\nconst a = 2;\n`);
@@ -68,7 +63,7 @@ describe("documented onboarding path", () => {
     r.branch("narrow");
 
     r.write(
-      ".pocket-zipper/config.yml",
+      PROTECTED_CONFIG,
       configYaml({ enabled: true, governedRules: ["no-debugger", "no-console"] }),
     );
     r.write("app.js", `${noConsole}console.log(1);\n${noDebugger}debugger;\nconst a = 3;\n`);

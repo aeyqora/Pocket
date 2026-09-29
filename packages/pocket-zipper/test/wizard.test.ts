@@ -3,26 +3,22 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
-  createRepo,
   configYaml,
   eslintConfig,
   exceptionYaml,
   NEXT_LINE_NO_CONSOLE_FP,
   NEXT_LINE_NO_DEBUGGER_FP,
-  type FixtureRepo,
+  repo,
+  cleanupRepos,
+  PROTECTED_REGISTRY,
+  PROTECTED_CONFIG,
 } from "./harness.js";
+import type { FixtureRepo } from "./harness.js";
 import { addDuration, daysBetween } from "../src/policy.js";
 import { expiryRefusal } from "../src/wizard.js";
 import type { ExceptionRecord, Policy } from "../src/types.js";
 
-const repos: FixtureRepo[] = [];
-after(() => repos.forEach((r) => r.cleanup()));
-
-function repo(): FixtureRepo {
-  const r = createRepo();
-  repos.push(r);
-  return r;
-}
+after(cleanupRepos);
 
 const debtLine = "// eslint-disable-next-line no-console\n";
 
@@ -34,7 +30,7 @@ const debtLine = "// eslint-disable-next-line no-console\n";
 function wizardRepo(opts: { config?: string } = {}): FixtureRepo {
   const r = repo();
   r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
-  if (opts.config !== undefined) r.write(".pocket-zipper/config.yml", opts.config);
+  if (opts.config !== undefined) r.write(PROTECTED_CONFIG, opts.config);
   r.write("app.js", "export const a = 1;\n");
   r.commit("base");
   return r;
@@ -55,7 +51,7 @@ function singleDebt(r: FixtureRepo): void {
 function configOffRepo(): FixtureRepo {
   const r = repo();
   r.write("eslint.config.mjs", eslintConfig({ "no-console": "error", "no-debugger": "error" }));
-  r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+  r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
   r.write("app.js", "export const a = 1;\n");
   r.commit("base");
   r.write("eslint.config.mjs", eslintConfig({ "no-console": "off", "no-debugger": "error" }));
@@ -171,7 +167,7 @@ describe("the wizard: pocket-zipper exception add", () => {
         "    reference: https://github.com/org/repo/issues/123",
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception record written to .pocket-zipper/exceptions.yml",
+        `✎ exception record written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         ...nextSteps,
         "run another session? [y/N]",
@@ -181,7 +177,7 @@ describe("the wizard: pocket-zipper exception add", () => {
     // fingerprint, the ESLint rule, the directive form, the file scope, and the
     // capture-time line all arrive from the inventory.
     assert.equal(
-      r.read(".pocket-zipper/exceptions.yml"),
+      r.read(PROTECTED_REGISTRY),
       t(
         "- rule: no-console",
         "  suppression_type: next-line",
@@ -229,7 +225,7 @@ describe("the wizard: pocket-zipper exception add", () => {
         `  • no-console @ app.js:4 — next-line (new) — expires ${d.default}`,
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception records written to .pocket-zipper/exceptions.yml",
+        `✎ exception records written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         ...nextSteps,
         "run another session? [y/N]",
@@ -238,7 +234,7 @@ describe("the wizard: pocket-zipper exception add", () => {
     // One record per suppression, distinguished only by their capture-time
     // line; the skipped reference is omitted, not written empty.
     assert.equal(
-      r.read(".pocket-zipper/exceptions.yml"),
+      r.read(PROTECTED_REGISTRY),
       t(
         "- rule: no-console",
         "  suppression_type: next-line",
@@ -298,14 +294,14 @@ describe("the wizard: pocket-zipper exception add", () => {
         "    reason:    Reason for the second.",
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception records written to .pocket-zipper/exceptions.yml",
+        `✎ exception records written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         ...nextSteps,
         "run another session? [y/N]",
       ),
     );
-    assert.match(r.read(".pocket-zipper/exceptions.yml"), /reason: Reason for the first\./);
-    assert.match(r.read(".pocket-zipper/exceptions.yml"), /reason: Reason for the second\./);
+    assert.match(r.read(PROTECTED_REGISTRY), /reason: Reason for the first\./);
+    assert.match(r.read(PROTECTED_REGISTRY), /reason: Reason for the second\./);
   });
 
   it("declines at the write prompt and leaves the registry unwritten", () => {
@@ -336,7 +332,7 @@ describe("the wizard: pocket-zipper exception add", () => {
         "run another session? [y/N]",
       ),
     );
-    assert.ok(!existsSync(join(r.dir, ".pocket-zipper/exceptions.yml")));
+    assert.ok(!existsSync(join(r.dir, PROTECTED_REGISTRY)));
   });
 
   it("refuses a past date distinctly, then takes a custom date within the max", () => {
@@ -386,13 +382,13 @@ describe("the wizard: pocket-zipper exception add", () => {
         "    reason:    Needed.",
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception record written to .pocket-zipper/exceptions.yml",
+        `✎ exception record written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         ...nextSteps,
         "run another session? [y/N]",
       ),
     );
-    assert.match(r.read(".pocket-zipper/exceptions.yml"), new RegExp(`expires: ${d.custom}`));
+    assert.match(r.read(PROTECTED_REGISTRY), new RegExp(`expires: ${d.custom}`));
   });
 
   it("refuses a beyond-max date, then escapes to permanent through the approver note", () => {
@@ -429,14 +425,14 @@ describe("the wizard: pocket-zipper exception add", () => {
         "    reason:    Needed.",
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception record written to .pocket-zipper/exceptions.yml",
+        `✎ exception record written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         ...nextSteps,
         "run another session? [y/N]",
       ),
     );
     assert.equal(
-      r.read(".pocket-zipper/exceptions.yml"),
+      r.read(PROTECTED_REGISTRY),
       t(
         "- rule: no-console",
         "  suppression_type: next-line",
@@ -476,7 +472,7 @@ describe("the wizard: pocket-zipper exception add", () => {
         "    reason:    First reason.",
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception record written to .pocket-zipper/exceptions.yml",
+        `✎ exception record written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         ...nextSteps,
         "run another session? [y/N]",
@@ -489,7 +485,7 @@ describe("the wizard: pocket-zipper exception add", () => {
     );
     // The record the first session wrote covers the suppression, so the
     // restarted inventory — the same read the gate makes — lists nothing.
-    assert.match(r.read(".pocket-zipper/exceptions.yml"), /reason: First reason\./);
+    assert.match(r.read(PROTECTED_REGISTRY), /reason: First reason\./);
   });
 
   it("reports itself blocked without a config and hands off to the authorizers", () => {
@@ -500,11 +496,11 @@ describe("the wizard: pocket-zipper exception add", () => {
     assert.equal(
       res.stdout,
       t(
-        "Pocket Zipper isn't configured in this repo (no .pocket-zipper/config.yml)",
+        `Pocket Zipper isn't configured in this repo (no ${PROTECTED_CONFIG})`,
         "nothing can be written here — config is set up by the repo's authorizers at install time, not by this flow",
       ),
     );
-    assert.ok(!existsSync(join(r.dir, ".pocket-zipper/exceptions.yml")));
+    assert.ok(!existsSync(join(r.dir, PROTECTED_REGISTRY)));
   });
 
   it("refuses every unknown answer with a terse restatement of the options", () => {
@@ -548,7 +544,7 @@ describe("the wizard: pocket-zipper exception add", () => {
         "type y to write the exception, or press Enter to leave it unwritten",
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception record written to .pocket-zipper/exceptions.yml",
+        `✎ exception record written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         ...nextSteps,
         "run another session? [y/N]",
@@ -586,7 +582,7 @@ describe("the wizard: pocket-zipper exception add", () => {
         "    reason:    Needed.",
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception record written to .pocket-zipper/exceptions.yml",
+        `✎ exception record written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         "run another session? [y/N]",
       ),
@@ -599,7 +595,7 @@ describe("the wizard: pocket-zipper exception add", () => {
     const res = runWizard(r, "");
     assert.equal(res.status, 1);
     assert.equal(res.stdout, t(...bootMenu));
-    assert.ok(!existsSync(join(r.dir, ".pocket-zipper/exceptions.yml")));
+    assert.ok(!existsSync(join(r.dir, PROTECTED_REGISTRY)));
   });
 
   it("says the gate is disabled and offers nothing to except", () => {
@@ -617,7 +613,7 @@ describe("the wizard: pocket-zipper exception add", () => {
     const r = wizardRepo({ config: configYaml({ enabled: true }) });
     singleDebt(r);
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       [
         "- rule: no-console",
         "  suppression_type: next-line",
@@ -637,7 +633,7 @@ describe("the wizard: pocket-zipper exception add", () => {
       /unknown field 'owner' — removed from the registry format; delete this line/,
     );
     // The defective registry is left exactly as it was found.
-    assert.match(r.read(".pocket-zipper/exceptions.yml"), /owner: "@team"/);
+    assert.match(r.read(PROTECTED_REGISTRY), /owner: "@team"/);
   });
 
   it("takes no interactive session beyond the last prompt of a written record", () => {
@@ -647,7 +643,7 @@ describe("the wizard: pocket-zipper exception add", () => {
     singleDebt(r);
     const res = runWizard(r, "1\n1\nNeeded.\n\n\ny\n");
     assert.equal(res.status, 0);
-    assert.match(r.read(".pocket-zipper/exceptions.yml"), /reason: Needed\./);
+    assert.match(r.read(PROTECTED_REGISTRY), /reason: Needed\./);
   });
 
   it("reads debt in a file the index dropped but the disk keeps", () => {
@@ -679,13 +675,13 @@ describe("the wizard: pocket-zipper exception add", () => {
         "    reason:    Needed.",
         "write the exception? [y/N]",
         "❯ y",
-        "✎ exception record written to .pocket-zipper/exceptions.yml",
+        `✎ exception record written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         ...nextSteps,
         "run another session? [y/N]",
       ),
     );
-    assert.match(r.read(".pocket-zipper/exceptions.yml"), /line: 2/);
+    assert.match(r.read(PROTECTED_REGISTRY), /line: 2/);
   });
 });
 
@@ -708,7 +704,7 @@ function renewableRepo(): { repo: FixtureRepo; registry: string; expires: string
     expires,
     line: 2,
   });
-  r.write(".pocket-zipper/exceptions.yml", registry);
+  r.write(PROTECTED_REGISTRY, registry);
   return { repo: r, registry, expires, today };
 }
 
@@ -744,7 +740,7 @@ describe("the wizard: the renew branch", () => {
     );
     // One record, dated in place: the pool keeps its size, so the hygiene check
     // that accuses a renewal-by-append has nothing to accuse.
-    assert.equal(r.read(".pocket-zipper/exceptions.yml"), registry.replace(expires, d.default));
+    assert.equal(r.read(PROTECTED_REGISTRY), registry.replace(expires, d.default));
     const lint = r.runCli(["validate"], { json: false });
     assert.equal(lint.status, 0);
     assert.doesNotMatch(lint.stdout, /RENEWAL_BY_APPEND/);
@@ -792,7 +788,7 @@ describe("the wizard: the renew branch", () => {
     // Permanent is a field edit too: the type rewritten, the date gone with its
     // line, and still exactly one record in the file.
     assert.equal(
-      r.read(".pocket-zipper/exceptions.yml"),
+      r.read(PROTECTED_REGISTRY),
       registry.replace("  type: temporary\n", "  type: permanent\n").replace(`  expires: ${expires}\n`, ""),
     );
     assert.equal(r.runCli(["validate"], { json: false }).status, 0);
@@ -813,7 +809,7 @@ describe("the wizard: the renew branch", () => {
         expires,
       });
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       record(soon) +
         record(later) +
         record(gone) +
@@ -856,7 +852,7 @@ describe("the wizard: the renew branch", () => {
     );
     // The permanent record is untouched, the records beside the renewed one keep
     // the dates they had, and the file still holds exactly four records.
-    const written = r.read(".pocket-zipper/exceptions.yml");
+    const written = r.read(PROTECTED_REGISTRY);
     assert.equal(written.split("- rule:").length - 1, 4);
     assert.ok(written.includes(`expires: ${soon}`));
     assert.ok(written.includes(`expires: ${gone}`));
@@ -876,7 +872,7 @@ describe("the wizard: the renew branch", () => {
     const today = new Date().toISOString().slice(0, 10);
     const expires = addDuration(today, "10d");
     r.write(
-      ".pocket-zipper/exceptions.yml",
+      PROTECTED_REGISTRY,
       exceptionYaml({
         rule: "no-console",
         suppressionType: "next-line",
@@ -957,7 +953,7 @@ describe("the wizard: the renew branch", () => {
       res.stdout,
       /nothing written — the proposed record stays unwritten\.\nrun another session\? \[y\/N\]\n$/,
     );
-    assert.equal(r.read(".pocket-zipper/exceptions.yml"), registry);
+    assert.equal(r.read(PROTECTED_REGISTRY), registry);
   });
 
   it("says so when the registry holds nothing a renewal could edit", () => {
@@ -1063,12 +1059,12 @@ describe("the wizard: non-interactive flags", () => {
         `  • no-console @ app.js:2 — next-line (new) — expires ${d.default}`,
         "    reason:    Needed for the debug toolbar.",
         "    reference: https://github.com/org/repo/issues/123",
-        "✎ exception record written to .pocket-zipper/exceptions.yml",
+        `✎ exception record written to ${PROTECTED_REGISTRY}`,
         "it takes effect only once the change is approved and merged.",
         ...nextSteps,
       ),
     );
-    assert.match(r.read(".pocket-zipper/exceptions.yml"), /line: 2/);
+    assert.match(r.read(PROTECTED_REGISTRY), /line: 2/);
   });
 
   it("refuses a non-interactive session without a reason", () => {
@@ -1077,7 +1073,7 @@ describe("the wizard: non-interactive flags", () => {
     const res = r.runCli(["exception", "add", "--from", "app.js:2"], { json: false });
     assert.equal(res.status, 1);
     assert.equal(res.stderr, "the reason is required — pass it with --reason <text>\n");
-    assert.ok(!existsSync(join(r.dir, ".pocket-zipper/exceptions.yml")));
+    assert.ok(!existsSync(join(r.dir, PROTECTED_REGISTRY)));
   });
 
   it("refuses a --from that selects no new debt", () => {
@@ -1103,7 +1099,7 @@ describe("the wizard: non-interactive flags", () => {
     );
     assert.equal(res.status, 1);
     assert.equal(res.stderr, "no new debt at eslint.config.mjs:1\n");
-    assert.ok(!existsSync(join(r.dir, ".pocket-zipper/exceptions.yml")));
+    assert.ok(!existsSync(join(r.dir, PROTECTED_REGISTRY)));
   });
 
   it("lists only the directive when a config-off lands beside new debt", () => {
@@ -1121,7 +1117,7 @@ describe("the wizard: non-interactive flags", () => {
   it("refuses a --from that cannot pick between two suppressions on one line", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error", "no-debugger": "error" }));
-    r.write(".pocket-zipper/config.yml", configYaml({ enabled: true }));
+    r.write(PROTECTED_CONFIG, configYaml({ enabled: true }));
     r.write("app.js", "export const a = 1;\n");
     r.commit("base");
     // One directive naming two governed rules: two logical suppressions, one
@@ -1164,6 +1160,6 @@ describe("the wizard: CLI surface", () => {
       assert.equal(res.status, 2, args.join(" "));
       assert.match(res.stderr, /unknown argument|require/, args.join(" "));
     }
-    assert.ok(!existsSync(join(r.dir, ".pocket-zipper/exceptions.yml")));
+    assert.ok(!existsSync(join(r.dir, PROTECTED_REGISTRY)));
   });
 });
