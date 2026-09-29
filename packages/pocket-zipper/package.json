@@ -1,6 +1,6 @@
 {
   "name": "pocket-zipper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Gate a proposed change from adding new ESLint suppression debt.",
   "keywords": [
     "eslint",
@@ -37,7 +37,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=20"

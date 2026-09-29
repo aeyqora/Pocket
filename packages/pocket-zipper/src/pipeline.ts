@@ -80,9 +80,10 @@ export interface EvaluateResult {
    */
   maxExpiry: DurationLiteral | undefined;
   /**
-   * Every unused record, with the delete-ready pointer that finds it. Travels
-   * beside the record rather than inside it: the record is a frozen statistics
-   * artifact, and these addresses are for whoever is reading the report.
+   * Every unused record, with the delete-ready pointer that finds it. Mirrors
+   * `record.unused` rather than replacing it: the report needs them without
+   * unwrapping the record, and both are the same derivation, so they cannot
+   * disagree.
    */
   unused: UnusedException[];
 }
@@ -314,6 +315,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         cleanup,
         poolCounts: coverage.pools,
         exceptionStatuses: coverage.statuses,
+        unused,
         errors,
       });
 

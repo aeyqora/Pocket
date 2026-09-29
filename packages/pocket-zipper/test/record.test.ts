@@ -160,6 +160,7 @@ describe("record: buildRecord", () => {
       cleanup: { expired: 1, dangling: 2, spent: 3, overlong: 0 },
       poolCounts: [],
       exceptionStatuses: new Map([[record, "used"]]),
+      unused: [],
       errors: [{ code: "POLICY_CHANGE", message: "weakened" }],
       ...overrides,
     });
@@ -167,7 +168,7 @@ describe("record: buildRecord", () => {
 
   it("stamps the schema, tool, refs, and summary", () => {
     const out = build();
-    assert.equal(out.schemaVersion, 1);
+    assert.equal(out.schemaVersion, 2);
     assert.equal(out.tool.version, TOOL_VERSION);
     assert.equal(out.mode, "check");
     assert.equal(out.verdict, "fail");
@@ -178,9 +179,6 @@ describe("record: buildRecord", () => {
     assert.equal(out.summary.dispositions.removed, 1);
     assert.equal(out.summary.newDebt.authorized, 1);
     assert.equal(out.summary.newDebt.unauthorized, 0);
-    // The cleanup addresses deliberately do NOT ride in the record: schema v1 is
-    // frozen, and the record keeps the counts while the addresses travel beside
-    // it for whoever reads the report.
     assert.deepEqual(out.summary.cleanup, {
       danglingExceptions: 2,
       spentExceptions: 3,
@@ -199,6 +197,33 @@ describe("record: buildRecord", () => {
     const headEntry = out.inventory.find((e) => e.disposition === "new")!;
     assert.equal(headEntry.lines.head, 5);
     assert.equal(headEntry.exception?.fingerprint, FP);
+  });
+
+  it("publishes the delete-ready pointers the cleanup counts tally", () => {
+    // schema v2. A machine holding the record can now see *which* records the
+    // counts refer to, not only how many there are — which is the whole of the
+    // tool's cleanup output, and the reason v1 kept them out of the JSON was
+    // wrong for anyone but a person reading the report.
+    const pointer = {
+      status: "dangling" as const,
+      entry: 1,
+      entries: 3,
+      registryLines: { start: 2, end: 9 },
+      text: "- rule: no-console\n  suppression_type: next-line\n",
+      live: null,
+      recorded: 7,
+      clearedByThisChange: false,
+    };
+    const out = build({ unused: [pointer] });
+    assert.deepEqual(out.unused, [pointer]);
+    assert.equal(out.unused[0]!.registryLines?.start, 2);
+    assert.equal(out.unused[0]!.live, null, "a dangling record has no live location");
+  });
+
+  it("publishes an empty list rather than omitting the field", () => {
+    // A consumer branching on `unused` should not have to distinguish "no unused
+    // records" from "this record predates v2" by a missing key.
+    assert.deepEqual(build().unused, []);
   });
 
   it("maps registry records to exception entries with their status", () => {

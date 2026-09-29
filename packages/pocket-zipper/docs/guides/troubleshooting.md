@@ -125,11 +125,13 @@ have a baseline counterpart. Grandfather them instead of writing exceptions: fol
 
 ## The evaluation record
 
-`check --json <path>` writes a versioned record (`schemaVersion: 1`) carrying both
+`check --json <path>` writes a versioned record (`schemaVersion: 2`) carrying both
 compared tree ids, the applied policy, per-suppression dispositions, exception matches,
-and granular errors. CI should persist it on failure as well as success — that's the
-durable statistics artifact. See
+the delete-ready pointers for every unused record, and granular errors. CI should persist
+it on failure as well as success — that's the durable statistics artifact. See
 [CI wiring principles §4](../ci/principles.md#4-the-evaluation-record-is-the-statistics-artifact).
+
+`schemaVersion: 2` added the `unused` array. See the changelog for the migration note.
 
 ## Protecting the policy
 

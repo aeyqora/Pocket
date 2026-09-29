@@ -11,7 +11,6 @@ import {
 } from "./harness.js";
 import type { FixtureRepo } from "./harness.js";
 import { addDuration } from "../src/policy.js";
-import { evaluate } from "../src/pipeline.js";
 
 after(cleanupRepos);
 
@@ -36,13 +35,14 @@ function record(overrides: Partial<Parameters<typeof exceptionYaml>[0]> = {}): s
 }
 
 /**
- * The unused records an evaluation derived. Read off the evaluation result
- * rather than the JSON record on purpose: the addresses are a report-only shape,
- * and the record's schema is frozen at v1.
+ * The unused records an evaluation derived, read off the JSON record the way
+ * every other surface reads them. `unused` is part of the record as of
+ * schemaVersion 2; before that it travelled only on `EvaluateResult`, and this
+ * test was the one place that had to bypass the CLI to see a pointer.
  */
 async function unused(r: FixtureRepo, base = "base") {
-  const { unused: derived } = await evaluate({ mode: "check", cwd: r.dir, baseRef: base });
-  return derived;
+  const res = r.runCli(["check", "--base", base, "--verbose"]);
+  return res.record!.unused;
 }
 
 /** The report's delete-ready pointer lines, one per unused record. */

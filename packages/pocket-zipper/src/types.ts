@@ -122,8 +122,20 @@ export interface PoolCount {
   leftover: number;
 }
 
+/**
+ * One evaluation's whole answer, as `--json` publishes it.
+ *
+ * `schemaVersion` 2 added `unused`. v1 kept the cleanup *counts* in `summary`
+ * and left the delete-ready pointers to the human report alone, on the argument
+ * that the addresses are for a reader rather than for a statistics artifact. That
+ * argument holds for a person and not for a script: a machine holding a v1
+ * record could learn that two records were dangling and could not learn which
+ * two. The pointers are the tool's whole cleanup output (`CONTEXT.md`), so they
+ * are now part of the published answer, and the human report renders the same
+ * list rather than deriving its own.
+ */
 export interface EvaluationRecord {
-  schemaVersion: 1;
+  schemaVersion: 2;
   tool: { name: string; version: string };
   mode: Mode;
   verdict: Verdict;
@@ -132,6 +144,11 @@ export interface EvaluationRecord {
   summary: EvaluationSummary;
   inventory: InventoryEntry[];
   exceptions: RecordExceptionEntry[];
+  /**
+   * Every unused baseline record, with the delete-ready pointer that finds it.
+   * Empty unless some record authorizes nothing; see **Unused exception**.
+   */
+  unused: UnusedException[];
   errors: RecordError[];
 }
 
@@ -144,10 +161,10 @@ export interface EvaluationRecord {
  * deletes it, so a pointer that does not land on the record is a broken
  * pointer, not a rough edge.
  *
- * A report-only shape, deliberately not part of the evaluation record: the
- * record's schema is frozen at v1, and the addresses are for a human reading a
- * report, not for a statistics artifact. The record keeps the *counts*; this
- * carries the records they tally.
+ * Published in the record as `unused` since schemaVersion 2. v1 kept only the
+ * counts in `summary`; the addresses were held back on the argument that they
+ * are for a human reader, which turned out to be true for the report and false
+ * for anything consuming the JSON.
  */
 export interface UnusedException {
   status: Exclude<ExceptionStatus, "used">;

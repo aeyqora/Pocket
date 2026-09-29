@@ -84,7 +84,7 @@ describe("evaluation record contract", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     const record = res.record!;
-    assert.equal(record.schemaVersion, 1);
+    assert.equal(record.schemaVersion, 2);
     assert.equal(record.tool.name, "pocket-zipper");
     assert.equal(record.mode, "check");
     assert.equal(record.verdict, "pass");
@@ -92,6 +92,7 @@ describe("evaluation record contract", () => {
     assert.match(record.proposedChange.tree, /^[0-9a-f]{40}$/);
     assert.ok(Array.isArray(record.inventory));
     assert.ok(Array.isArray(record.exceptions));
+    assert.ok(Array.isArray(record.unused));
     assert.ok(Array.isArray(record.errors));
   });
 

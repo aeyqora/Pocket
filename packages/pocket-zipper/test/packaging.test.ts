@@ -38,6 +38,17 @@ describe("package contract", () => {
     assert.equal(TOOL_VERSION, pkg.version);
   });
 
+  it("ships the changelog, so a breaking record schema reaches consumers", () => {
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+      files: string[];
+    };
+    assert.ok(pkg.files.includes("CHANGELOG.md"));
+    const changelog = readFileSync(join(ROOT, "CHANGELOG.md"), "utf8");
+    // The schema bump is only useful if the note that explains it ships too.
+    assert.match(changelog, /schemaVersion: 2/);
+    assert.match(changelog, new RegExp(`## \\[${TOOL_VERSION}\\]`));
+  });
+
   it("packs, unpacks and runs the packaged binary end to end", () => {
     const tmp = mkdtempSync(join(tmpdir(), "pocket-zipper-pack-"));
     try {

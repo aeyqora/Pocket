@@ -12,14 +12,15 @@ import type {
   ReconciledSuppression,
   RecordError,
   RecordExceptionEntry,
+  UnusedException,
   Verdict,
 } from "./types.js";
 import { isNewDebt } from "./exception-match.js";
 import { DEFAULT_POLICY } from "./policy.js";
 
 export const TOOL_NAME = "pocket-zipper";
-export const TOOL_VERSION = "0.2.0";
-export const SCHEMA_VERSION = 1 as const;
+export const TOOL_VERSION = "0.3.0";
+export const SCHEMA_VERSION = 2 as const;
 
 export interface Summary {
   dispositions: EvaluationSummary["dispositions"];
@@ -86,6 +87,13 @@ export interface BuildRecordInput {
   /** The `(rule, file)` pools holding debt to allocate, ordered by rule then file. */
   poolCounts: PoolCount[];
   exceptionStatuses: Map<ExceptionRecord, ExceptionStatus>;
+  /**
+   * Every unused baseline record with its delete-ready pointer. Published as
+   * `unused` since schemaVersion 2; previously carried only on
+   * `EvaluateResult`, where a machine consuming `--json` could see the counts but
+   * not the records they tallied.
+   */
+  unused: UnusedException[];
   errors: RecordError[];
 }
 
@@ -110,6 +118,7 @@ interface RecordParts {
   summary: EvaluationSummary;
   inventory: InventoryEntry[];
   exceptions: RecordExceptionEntry[];
+  unused: UnusedException[];
   errors: RecordError[];
 }
 
@@ -142,6 +151,7 @@ export function buildRecord(input: BuildRecordInput): EvaluationRecord {
     summary,
     inventory: inventoryEntries(input.head, input.removed),
     exceptions,
+    unused: input.unused,
     errors: input.errors,
   });
 }
@@ -155,6 +165,7 @@ export function excludedRecord(input: ExcludedRecordInput): EvaluationRecord {
     summary: emptySummary(input.policy),
     inventory: [],
     exceptions: [],
+    unused: [],
     errors: [],
   });
 }
@@ -168,6 +179,7 @@ export function failureRecord(input: FailureRecordInput): EvaluationRecord {
     summary: emptySummary(),
     inventory: [],
     exceptions: [],
+    unused: [],
     errors: input.errors,
   });
 }
@@ -186,6 +198,7 @@ function recordOf(parts: RecordParts): EvaluationRecord {
     summary: parts.summary,
     inventory: parts.inventory,
     exceptions: parts.exceptions,
+    unused: parts.unused,
     errors: parts.errors,
   };
 }
