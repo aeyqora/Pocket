@@ -32,7 +32,7 @@ import {
   canonicalMovementLine,
   diffLineIndices,
   type LineDiff,
-} from "./identity.js";
+} from "./continuity.js";
 import { reconcile } from "./reconcile.js";
 import { PocketZipperError, gitError } from "./errors.js";
 import type {

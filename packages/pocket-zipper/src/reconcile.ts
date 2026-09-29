@@ -1,4 +1,5 @@
-import { driftDisposition, matchKey, pairPools, type LineDiff } from "./identity.js";
+import { driftDisposition, pairBySimilarity, type LineDiff } from "./continuity.js";
+import { matchKey } from "./identity.js";
 import type {
   Disposition,
   LogicalSuppression,
@@ -27,26 +28,30 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
   const { headSuppressions, baselineSuppressions, lineDiffs, baselineIndex, headIndex } =
     input;
 
-  const groups = new Map<string, { head: LogicalSuppression[]; baseline: LogicalSuppression[] }>();
+  // Grouped by match key, so a directive that moved or was rewritten still
+  // meets its counterpart. This is not a **Pool** (a pool is where records
+  // compete for suppressions): nothing is allocated here, and the matcher
+  // consumes these groups directly.
+  const byMatchKey = new Map<string, { head: LogicalSuppression[]; baseline: LogicalSuppression[] }>();
   for (const s of baselineSuppressions) {
     const k = matchKey(s);
-    const g = groups.get(k) ?? { head: [], baseline: [] };
+    const g = byMatchKey.get(k) ?? { head: [], baseline: [] };
     g.baseline.push(s);
-    groups.set(k, g);
+    byMatchKey.set(k, g);
   }
   for (const s of headSuppressions) {
     const k = matchKey(s);
-    const g = groups.get(k) ?? { head: [], baseline: [] };
+    const g = byMatchKey.get(k) ?? { head: [], baseline: [] };
     g.head.push(s);
-    groups.set(k, g);
+    byMatchKey.set(k, g);
   }
 
   const headOut: ReconciledSuppression[] = [];
   const removedOut: LogicalSuppression[] = [];
   const matchedBaseline = new Set<LogicalSuppression>();
 
-  for (const [, group] of groups) {
-    const pairs = pairPools(group.head, group.baseline);
+  for (const [, group] of byMatchKey) {
+    const pairs = pairBySimilarity(group.head, group.baseline);
     const pairedHead = new Set<LogicalSuppression>();
     for (const p of pairs) {
       pairedHead.add(p.head);

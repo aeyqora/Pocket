@@ -1,10 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  canonicalCodeLine,
   canonicalConfigOffText,
   canonicalDirectiveText,
-  canonicalMovementLine,
   fingerprintOf,
   parseDirectiveArgs,
   scopeKeyOf,
@@ -43,64 +41,6 @@ describe("identity: parseDirectiveArgs", () => {
 
   it("returns no rules for an unnamed directive", () => {
     assert.deepEqual(parseDirectiveArgs("   "), { rules: [], justification: "" });
-  });
-});
-
-describe("identity: canonicalCodeLine", () => {
-  it("collapses whitespace but leaves non-directive code intact", () => {
-    assert.equal(canonicalCodeLine("  foo   --   bar  "), "foo -- bar");
-  });
-
-  it("strips a directive's justification", () => {
-    assert.equal(
-      canonicalCodeLine("// eslint-disable-next-line no-console -- reason"),
-      "// eslint-disable-next-line no-console",
-    );
-  });
-});
-
-describe("identity: canonicalMovementLine", () => {
-  it("strips inline code from a line-form directive", () => {
-    assert.equal(
-      canonicalMovementLine("console.log(1); // eslint-disable-line no-console"),
-      "eslint-disable-line no-console",
-    );
-  });
-
-  it("normalizes rule order and whitespace", () => {
-    assert.equal(
-      canonicalMovementLine("// eslint-disable-next-line no-debugger,  no-console"),
-      "eslint-disable-next-line no-console,no-debugger",
-    );
-  });
-
-  it("dedupes repeated rule tokens", () => {
-    assert.equal(
-      canonicalMovementLine("// eslint-disable-next-line no-console, no-console"),
-      "eslint-disable-next-line no-console",
-    );
-  });
-
-  it("handles the block-comment line form", () => {
-    assert.equal(
-      canonicalMovementLine("/* eslint-disable-line no-console */"),
-      "eslint-disable-line no-console",
-    );
-  });
-
-  it("drops a directive's justification", () => {
-    assert.equal(
-      canonicalMovementLine("// eslint-disable-next-line no-console -- reason"),
-      "eslint-disable-next-line no-console",
-    );
-  });
-
-  it("leaves region directives and plain code on the code-line path", () => {
-    assert.equal(
-      canonicalMovementLine("/* eslint-disable no-console */"),
-      "/* eslint-disable no-console */",
-    );
-    assert.equal(canonicalMovementLine("  a();  "), "a();");
   });
 });
 
