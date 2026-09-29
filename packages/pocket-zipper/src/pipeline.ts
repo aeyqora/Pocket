@@ -17,13 +17,8 @@ import {
   overlongRecords,
 } from "./registry.js";
 import { unusedExceptions } from "./cleanup.js";
-import {
-  PROTECTED_CONFIG,
-  PROTECTED_REGISTRY,
-  errorRecords,
-  loadRegistry,
-  loadRegistryEntries,
-} from "./validate.js";
+import { PROTECTED_CONFIG, PROTECTED_REGISTRY, errorRecords, loadRegistry, loadRegistryEntries } from "./validate.js";
+
 import { detectPolicyChange, type PolicyChangeResult } from "./policy-change.js";
 import {
   buildRecord,

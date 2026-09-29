@@ -4,7 +4,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readIfPresent, readProtectedDocument } from "../src/protected-document.js";
-import { PROTECTED_REGISTRY, defectsOf } from "../src/validate.js";
+import { defectsOf } from "../src/finding.js";
+import { PROTECTED_REGISTRY } from "../src/validate.js";
+
 
 /**
  * A repo-shaped directory to read out of. Removed on exit, so a test that

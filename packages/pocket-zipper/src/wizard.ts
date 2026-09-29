@@ -23,17 +23,9 @@ import {
 } from "./registry.js";
 import { editFields, type FieldEdit } from "./registry-edit.js";
 import { readProtectedDocument } from "./protected-document.js";
-import {
-  PROTECTED_CONFIG,
-  PROTECTED_REGISTRY,
-  defectsOf,
-  isCalendarDate,
-  isIsoDateForm,
-  renderFinding,
-  validateRegistry,
-  type Finding,
-  type RegistryEntry,
-} from "./validate.js";
+import { defectsOf, renderFinding, type Finding } from "./finding.js";
+import { PROTECTED_CONFIG, PROTECTED_REGISTRY, isCalendarDate, isIsoDateForm, validateRegistry, type RegistryEntry } from "./validate.js";
+
 import { PocketZipperError } from "./errors.js";
 import type {
   EvaluationRecord,

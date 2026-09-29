@@ -2,17 +2,9 @@ import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { configYaml, createRepo, eslintConfig, exceptionYaml, NEXT_LINE_NO_CONSOLE_FP, NEXT_LINE_NO_DEBUGGER_FP, type FixtureRepo } from "./harness.js";
 import { addDuration } from "../src/policy.js";
-import {
-  defectsOf,
-  errorRecords,
-  loadRegistry,
-  recordHygiene,
-  renderFinding,
-  statusHygiene,
-  validateRegistry,
-  type Finding,
-  type HygieneContext,
-} from "../src/validate.js";
+import { defectsOf, renderFinding, type Finding } from "../src/finding.js";
+import { errorRecords, loadRegistry, recordHygiene, statusHygiene, validateRegistry, type HygieneContext } from "../src/validate.js";
+
 import { PocketZipperError } from "../src/errors.js";
 import type { ExceptionRecord, ExceptionStatus } from "../src/types.js";
 

@@ -11,21 +11,9 @@ import {
   utilizationCounts,
   type UnclaimedRecord,
 } from "./registry.js";
-import {
-  PROTECTED_CONFIG,
-  PROTECTED_REGISTRY,
-  combinedLandingHygiene,
-  defectsOf,
-  documentDefect,
-  poolHygiene,
-  recordHygiene,
-  renderFinding,
-  statusHygiene,
-  validateRegistry,
-  type Finding,
-  type HygieneContext,
-  type RegistryEntry,
-} from "./validate.js";
+import { defectsOf, documentDefect, renderFinding, type Finding } from "./finding.js";
+import { PROTECTED_CONFIG, PROTECTED_REGISTRY, combinedLandingHygiene, poolHygiene, recordHygiene, statusHygiene, validateRegistry, type HygieneContext, type RegistryEntry } from "./validate.js";
+
 import type {
   DurationLiteral,
   ExceptionRecord,

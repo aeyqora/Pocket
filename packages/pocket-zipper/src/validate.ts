@@ -2,7 +2,8 @@ import { LineCounter, isMap, isScalar, isSeq, parseDocument } from "yaml";
 import type { Pair } from "yaml";
 import { PocketZipperError } from "./errors.js";
 import { hostFamily, ownersCover, type CombinedLandingFacts } from "./combined-landing.js";
-import { matchKey } from "./identity.js";
+import { STATUS_CODES, defectsOf, finding, renderFinding } from "./finding.js";
+import type { Finding, FindingCode, FindingInit, Position } from "./finding.js";
 import { expiryHorizon } from "./policy.js";
 import { countKey, isOverlong, poolCountLine, type UnclaimedRecord } from "./registry.js";
 import type {
@@ -76,110 +77,7 @@ export function isIsoDateForm(value: string): boolean {
   return DATE_RE.test(value);
 }
 
-/**
- * A finding is one thing wrong with a protected file, addressed precisely enough
- * to fix without hunting: where it is, what it is called, and what was expected
- * instead. Severity is two-tier, and the tier is the whole policy:
- *
- * - **defect** — the file is not a valid instance of the format. Fails closed
- *   everywhere it is read (`CONFIG_ERROR`, exit 2). A defective record is never
- *   also classified as hygiene: it has no meaning to classify yet.
- * - **hygiene** — the file is valid but says something worth reviewing. Reported,
- *   and never a failure on its own, so a legitimate transient state (a two-step
- *   landing's dangling record) never blocks anything.
- *
- * The code vocabulary is closed: a defect is one of the six ways a document can
- * be malformed, a hygiene finding one of the eight ways it can be untidy. The
- * severity a code carries is fixed here, so no caller can invent a third tier.
- */
-export type FindingSeverity = "defect" | "hygiene";
 
-export type FindingCode =
-  // defects: the document is not a valid instance of the format
-  | "MALFORMED"
-  | "UNKNOWN_FIELD"
-  | "MISSING_FIELD"
-  | "INVALID_ENUM"
-  | "FINGERPRINT_FORMAT"
-  | "INVALID_DATE"
-  // hygiene: the document is valid but worth reviewing
-  | "UNKNOWN_RULE"
-  | "OVERLONG_EXCEPTION"
-  | "DANGLING_EXCEPTION"
-  | "SPENT_EXCEPTION"
-  | "EXPIRED_EXCEPTION"
-  | "POOL_COUNTS"
-  | "RENEWAL_BY_APPEND"
-  | "HOST_MISMATCH"
-  | "OWNERS_FILE_READINESS";
-
-/*
- * `SPENT_EXCEPTION` is still named here before anything emits it: it needs the
- * allocation-aware judgement of an evaluation, and a working-tree lint cannot
- * tell pre-existing debt from debt this change introduced — it has no baseline
- * (ticket 10's per-record findings).
- */
-
-/**
- * The severity each code carries, in the one place a code is mapped to a tier:
- * a defect is one of the six ways a document can be malformed, a hygiene finding
- * one of the eight ways it can be untidy. Deriving the tier from the code rather
- * than writing it out per finding is what makes a third tier unrepresentable.
- */
-const SEVERITY = {
-  // defects: the document is not a valid instance of the format
-  MALFORMED: "defect",
-  UNKNOWN_FIELD: "defect",
-  MISSING_FIELD: "defect",
-  INVALID_ENUM: "defect",
-  FINGERPRINT_FORMAT: "defect",
-  INVALID_DATE: "defect",
-  // hygiene: the document is valid but worth reviewing
-  UNKNOWN_RULE: "hygiene",
-  OVERLONG_EXCEPTION: "hygiene",
-  DANGLING_EXCEPTION: "hygiene",
-  SPENT_EXCEPTION: "hygiene",
-  EXPIRED_EXCEPTION: "hygiene",
-  POOL_COUNTS: "hygiene",
-  RENEWAL_BY_APPEND: "hygiene",
-  HOST_MISMATCH: "hygiene",
-  OWNERS_FILE_READINESS: "hygiene",
-} as const satisfies Record<FindingCode, FindingSeverity>;
-
-/**
- * How each utilization status is named as a hygiene finding. `used` is absent
- * on purpose: a record in use is the registry working, and there is nothing to
- * report about it.
- */
-const STATUS_CODES = {
-  dangling: "DANGLING_EXCEPTION",
-  spent: "SPENT_EXCEPTION",
-  expired: "EXPIRED_EXCEPTION",
-} as const satisfies Record<Exclude<ExceptionStatus, "used">, FindingCode>;
-
-export interface Finding {
-  readonly code: FindingCode;
-  readonly severity: FindingSeverity;
-  /** The protected file the finding lives in. */
-  readonly path: string;
-  /** 1-based index of the registry entry, or null for the document itself. */
-  readonly entry: number | null;
-  /** The record field the finding is about, or null for the document itself. */
-  readonly field: string | null;
-  readonly line: number | null;
-  readonly column: number | null;
-  /** What is wrong, as a self-contained sentence. */
-  readonly message: string;
-  /** What the format wants instead, when the fix is a shape or a value. */
-  readonly expected?: string;
-  /** What the file actually says, as written. */
-  readonly actual?: string;
-}
-
-export interface Position {
-  readonly line: number | null;
-  readonly column: number | null;
-}
 
 /** One registry record, with the positions a finding about it needs. */
 export interface RegistryEntry {
@@ -227,44 +125,6 @@ export interface RegistryValidation {
   readonly findings: Finding[];
 }
 
-export function isDefect(finding: Finding): boolean {
-  return finding.severity === "defect";
-}
-
-export function defectsOf(findings: readonly Finding[]): Finding[] {
-  return findings.filter(isDefect);
-}
-
-/**
- * The one diagnostic line for a finding, shared by every surface that reports
- * it: the baseline load's `errors[]`, the head-side read, and `validate`. A CI
- * failure reads the same whichever surface produced it.
- */
-export function renderFinding(finding: Finding): string {
-  const where = finding.entry === null ? "document" : `entry ${finding.entry}`;
-  const scope = finding.field === null ? where : `${where} · ${finding.field}`;
-  const location =
-    finding.line === null
-      ? finding.path
-      : `${finding.path}:${finding.line}:${finding.column ?? 1}`;
-  const clause =
-    finding.expected === undefined
-      ? ""
-      : ` — expected ${finding.expected}${finding.actual === undefined ? "" : `, got ${finding.actual}`}`;
-  return `${location}  ${finding.code}  ${scope}  ${finding.message}${clause}`;
-}
-
-/**
- * A defect about a whole protected document, for the one read that fails on a
- * document rather than on an entry: the strict config parse (ticket 01) throws
- * a single message with no position. Built through the same constructor as
- * every other finding, so its severity comes from its code instead of being
- * written out a second time.
- */
-export function documentDefect(path: string, message: string): Finding {
-  return of({ code: "MALFORMED", path, message });
-}
-
 /**
  * Read a registry document into records and findings, never throwing: every
  * problem is a finding, and every finding is reportable. Diagnostics come from
@@ -281,7 +141,7 @@ export function validateRegistry(raw: string | null): RegistryValidation {
 
   for (const err of doc.errors) {
     findings.push(
-      of({
+      finding({
         code: "MALFORMED",
         path: PROTECTED_REGISTRY,
         position: { line: err.linePos?.[0]?.line ?? null, column: err.linePos?.[0]?.col ?? null },
@@ -393,7 +253,7 @@ function documentShapeFindings(contents: unknown, at: Positioner): Finding[] {
     const solePair = contents.items.length === 1 ? contents.items[0] : undefined;
     if (solePair && scalarKeyOf(solePair) === "exceptions") {
       return [
-        of({
+        finding({
           code: "MALFORMED",
           path: PROTECTED_REGISTRY,
           field: "exceptions",
@@ -407,7 +267,7 @@ function documentShapeFindings(contents: unknown, at: Positioner): Finding[] {
     }
   }
   return [
-    of({
+    finding({
       code: "MALFORMED",
       path: PROTECTED_REGISTRY,
       position: at(contents),
@@ -452,7 +312,7 @@ function readEntry(item: unknown, index: number, raw: string, at: Positioner): E
 
   if (!isMap(item)) {
     findings.push(
-      of({
+      finding({
         code: "MALFORMED",
         path: PROTECTED_REGISTRY,
         entry: index,
@@ -475,7 +335,7 @@ function readEntry(item: unknown, index: number, raw: string, at: Positioner): E
     const keyAt = at(pair.key ?? pair.value);
     if (name === null) {
       findings.push(
-        of({
+        finding({
           code: "MALFORMED",
           path: PROTECTED_REGISTRY,
           entry: index,
@@ -490,7 +350,7 @@ function readEntry(item: unknown, index: number, raw: string, at: Positioner): E
     if (!KNOWN_FIELD_SET.has(name)) {
       const removed = REMOVED_FIELDS.get(name);
       findings.push(
-        of({
+        finding({
           code: "UNKNOWN_FIELD",
           path: PROTECTED_REGISTRY,
           entry: index,
@@ -517,7 +377,7 @@ function readEntry(item: unknown, index: number, raw: string, at: Positioner): E
   // `type` wherever the author wrote them.
   const report: Reporter = (ref, init) => {
     findings.push(
-      of({
+      finding({
         ...init,
         path: PROTECTED_REGISTRY,
         entry: index,
@@ -931,7 +791,7 @@ export function recordHygiene(
       init: { code: FindingCode; message: string; expected?: string; actual?: string },
     ): void => {
       findings.push(
-        of({
+        finding({
           ...init,
           path: PROTECTED_REGISTRY,
           entry: index,
@@ -989,7 +849,7 @@ export function statusHygiene(
             ? `no suppression matches this record in ${record.file}`
             : `no suppression matches this record in ${record.file} (last known: line ${record.line})`;
     findings.push(
-      of({
+      finding({
         code: STATUS_CODES[status],
         path: PROTECTED_REGISTRY,
         entry: index,
@@ -1043,7 +903,7 @@ export function poolHygiene(
   const at = (record: ExceptionRecord, init: Omit<FindingInit, "path" | "entry" | "position">): void => {
     const entry = byRecord.get(record);
     if (entry === undefined) return;
-    findings.push(of({ ...init, path: PROTECTED_REGISTRY, entry: entry.index, position: entry.position }));
+    findings.push(finding({ ...init, path: PROTECTED_REGISTRY, entry: entry.index, position: entry.position }));
   };
 
   const counted = new Set<string>();
@@ -1096,7 +956,7 @@ export function combinedLandingHygiene(facts: CombinedLandingFacts): Finding[] {
   const declared = hostFamily(facts.host);
   if (declared !== null && facts.remote !== null && declared !== facts.remote) {
     findings.push(
-      of({
+      finding({
         code: "HOST_MISMATCH",
         path: PROTECTED_CONFIG,
         field: "host",
@@ -1108,7 +968,7 @@ export function combinedLandingHygiene(facts: CombinedLandingFacts): Finding[] {
     for (const path of [PROTECTED_CONFIG, PROTECTED_REGISTRY]) {
       if (facts.owners !== null && ownersCover(facts.owners.text, path)) continue;
       findings.push(
-        of({
+        finding({
           code: "OWNERS_FILE_READINESS",
           path,
           message:
@@ -1120,32 +980,4 @@ export function combinedLandingHygiene(facts: CombinedLandingFacts): Finding[] {
     }
   }
   return findings;
-}
-
-// --- finding construction -------------------------------------------------
-interface FindingInit {
-  readonly code: FindingCode;
-  readonly path: string;
-  readonly entry?: number | null;
-  readonly field?: string | null;
-  readonly position?: Position;
-  readonly message: string;
-  readonly expected?: string;
-  readonly actual?: string;
-}
-
-/** Builds a finding, taking its severity from its code so the two cannot drift. */
-function of(init: FindingInit): Finding {
-  return {
-    code: init.code,
-    severity: SEVERITY[init.code],
-    path: init.path,
-    entry: init.entry ?? null,
-    field: init.field ?? null,
-    line: init.position?.line ?? null,
-    column: init.position?.column ?? null,
-    message: init.message,
-    ...(init.expected === undefined ? {} : { expected: init.expected }),
-    ...(init.actual === undefined ? {} : { actual: init.actual }),
-  };
 }

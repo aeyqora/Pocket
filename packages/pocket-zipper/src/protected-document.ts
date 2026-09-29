@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { documentDefect, type Finding } from "./validate.js";
+import { documentDefect, type Finding } from "./finding.js";
+
 
 /**
  * How this tool reads a file it depends on, keeping *absent* and *unreadable*
