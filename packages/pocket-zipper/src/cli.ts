@@ -4,8 +4,42 @@ import { fileURLToPath } from "node:url";
 import { evaluate } from "./pipeline.js";
 import { renderReport } from "./report.js";
 import { runValidate } from "./validate-command.js";
-import { runExceptionAdd } from "./wizard.js";
+import { offerExceptionAdd, runExceptionAdd } from "./wizard.js";
 import type { Mode } from "./types.js";
+
+/**
+ * Where a command reads and writes. Injected rather than reached for globally so
+ * the interactive branch — the ride-along's offer, and the colour decision — is
+ * observable from a test at all: a piped CLI subprocess is never a terminal, so
+ * `process.stdin.isTTY` cannot be true there, and the branch is the whole point
+ * of a front door. The default is the process's own.
+ */
+export interface CommandIo {
+  cwd: string;
+  input: NodeJS.ReadableStream;
+  output: NodeJS.WritableStream;
+  stderr: NodeJS.WritableStream;
+  /**
+   * True when the report is going to a terminal — the one "is anyone reading"
+   * answer, and the single source for both things that depend on it. The report
+   * is coloured for it, and a question is only asked where the report is
+   * visible: a run whose output is piped (a hook, a CI step, `check --json`) has
+   * nobody to answer, and a gate that blocked on an invisible question would be a
+   * worse gate. A terminal stdout whose stdin cannot answer declines the offer on
+   * its own — the prompter reads end of input as "no".
+   */
+  tty: boolean;
+}
+
+function processIo(): CommandIo {
+  return {
+    cwd: process.cwd(),
+    input: process.stdin,
+    output: process.stdout,
+    stderr: process.stderr,
+    tty: (process.stdout as { isTTY?: boolean }).isTTY === true,
+  };
+}
 
 /** The evaluation commands write a JSON record; `validate` prints diagnostics; `exception add` runs the wizard. */
 type Command = Mode | "validate" | "exception add";
@@ -111,22 +145,25 @@ function usage(): string {
   ].join("\n");
 }
 
-export async function main(argv = process.argv.slice(2)): Promise<number> {
+export async function main(
+  argv = process.argv.slice(2),
+  io: CommandIo = processIo(),
+): Promise<number> {
   const parsed = parseArgs(argv);
   if ("help" in parsed) {
-    process.stdout.write(usage() + "\n");
+    io.output.write(usage() + "\n");
     return 0;
   }
   if ("error" in parsed) {
-    process.stderr.write(parsed.error + "\n");
+    io.stderr.write(parsed.error + "\n");
     return 2;
   }
 
   // `validate` reports findings as diagnostic lines and has no evaluation
   // record to write: it is a working-tree lint, not a comparison of two trees.
   if (parsed.command === "validate") {
-    const result = await runValidate({ cwd: process.cwd(), now: new Date() });
-    process.stdout.write(result.report);
+    const result = await runValidate({ cwd: io.cwd, now: new Date() });
+    io.output.write(result.report);
     return result.exitCode;
   }
 
@@ -135,23 +172,24 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   // tree, never a verdict.
   if (parsed.command === "exception add") {
     const result = await runExceptionAdd({
-      cwd: process.cwd(),
+      cwd: io.cwd,
       now: new Date(),
       ...(parsed.from === null ? {} : { from: parsed.from }),
       ...(parsed.reason === null ? {} : { reason: parsed.reason }),
       ...(parsed.reference === null ? {} : { reference: parsed.reference }),
-      input: process.stdin,
-      output: process.stdout,
-      stderr: process.stderr,
+      input: io.input,
+      output: io.output,
+      stderr: io.stderr,
     });
     return result.exitCode;
   }
 
+  const now = new Date();
   const result = await evaluate({
     mode: parsed.command,
-    cwd: process.cwd(),
+    cwd: io.cwd,
     baseRef: parsed.baseRef,
-    now: new Date(),
+    now,
   });
 
   if (parsed.jsonPath) {
@@ -160,11 +198,27 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
   const report = renderReport(result.record, {
     verbose: parsed.verbose,
-    tty: process.stdout.isTTY === true,
+    tty: io.tty,
     suggestedExpiry: result.suggestedExpiry,
     maxExpiry: result.maxExpiry,
   });
-  if (report.length > 0) process.stdout.write(report);
+  if (report.length > 0) io.output.write(report);
+
+  // The post-failure ride-along: a local `check` FAIL hands whoever is reading
+  // the report the authoring session, the failing suppressions already selected.
+  // Never where the report is machine-bound — `--json` means this run is writing
+  // a record for something else to read. The verdict stands either way:
+  // authoring a record is not the change that authorizes it.
+  if (parsed.command === "check" && io.tty && parsed.jsonPath === null) {
+    await offerExceptionAdd({
+      record: result.record,
+      cwd: io.cwd,
+      now,
+      input: io.input,
+      output: io.output,
+      stderr: io.stderr,
+    });
+  }
   return result.exitCode;
 }
 

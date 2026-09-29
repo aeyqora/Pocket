@@ -6,10 +6,14 @@ import {
   createRepo,
   configYaml,
   eslintConfig,
+  exceptionYaml,
   NEXT_LINE_NO_CONSOLE_FP,
+  NEXT_LINE_NO_DEBUGGER_FP,
   type FixtureRepo,
 } from "./harness.js";
-import { addDuration } from "../src/policy.js";
+import { addDuration, daysBetween } from "../src/policy.js";
+import { expiryRefusal } from "../src/wizard.js";
+import type { ExceptionRecord, Policy } from "../src/types.js";
 
 const repos: FixtureRepo[] = [];
 after(() => repos.forEach((r) => r.cleanup()));
@@ -80,6 +84,14 @@ const nextSteps = [
   "Next steps",
   "  1. land the record in its own PR — an approver reviews and merges it",
   "  2. once merged, land the code change that adds the suppression",
+];
+
+/** A renewal's landing guidance: the protected track, in either landing mode. */
+const renewalSteps = [
+  "",
+  "Next steps",
+  "  1. the renewal updates the existing record's expiry in place",
+  "  2. submit it in a PR — an approver reviews and merges it",
 ];
 
 function pickSingle(): string[] {
@@ -473,15 +485,12 @@ describe("the wizard: pocket-zipper exception add", () => {
     const r = wizardRepo({ config: configYaml({ enabled: true }) });
     singleDebt(r);
     const d = dates();
-    const res = runWizard(r, "2\nx\n1\n9\n1\n\nNeeded.\n\nmaybe\n\nz\ny\nz\n\n");
+    const res = runWizard(r, "x\n1\n9\n1\n\nNeeded.\n\nmaybe\n\nz\ny\nz\n\n");
     assert.equal(res.status, 0);
     assert.equal(
       res.stdout,
       t(
         ...bootMenu,
-        "❯ 2",
-        "renew is not available yet",
-        "choose — 1 (new debt) or 2 (renew):",
         "❯ x",
         "type 1 (new debt) or 2 (renew)",
         "choose — 1 (new debt) or 2 (renew):",
@@ -651,6 +660,354 @@ describe("the wizard: pocket-zipper exception add", () => {
       ),
     );
     assert.match(r.read(".pocket-zipper/exceptions.yml"), /line: 2/);
+  });
+});
+
+/** The date N days back: a duration literal only counts forward, expiry can only be past. */
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** A repo whose working tree holds one debt and one temporary record covering it. */
+function renewableRepo(): { repo: FixtureRepo; registry: string; expires: string; today: string } {
+  const r = wizardRepo({ config: configYaml({ enabled: true }) });
+  singleDebt(r);
+  const today = new Date().toISOString().slice(0, 10);
+  const expires = addDuration(today, "10d");
+  const registry = exceptionYaml({
+    rule: "no-console",
+    suppressionType: "next-line",
+    fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+    file: "app.js",
+    expires,
+    line: 2,
+  });
+  r.write(".pocket-zipper/exceptions.yml", registry);
+  return { repo: r, registry, expires, today };
+}
+
+describe("the wizard: the renew branch", () => {
+  it("edits the chosen record's expires in place — never an append", () => {
+    const { repo: r, registry, expires } = renewableRepo();
+    const d = dates();
+    const res = runWizard(r, "2\n1\n\ny\n\n");
+    assert.equal(res.status, 0);
+    assert.equal(
+      res.stdout,
+      t(
+        ...bootMenu,
+        "❯ 2",
+        "→ renewal — expiring record:",
+        `  1) no-console @ app.js:2 — expires ${expires} (in 10d)`,
+        "select which to renew (number — 1):",
+        "❯ 1",
+        "⤷ renewing no-console @ app.js:2",
+        `a default expiry of ${d.default} (30 days from today) is set — accept it? [Y/n]`,
+        `new expiry: ${d.default}`,
+        "Review — the record(s) to write:",
+        `  • no-console @ app.js:2 — next-line (renewal) — expires ${d.default}`,
+        "    reason:    needed",
+        '    reference: #1',
+        "write the exception? [y/N]",
+        "❯ y",
+        `✎ the existing record's expiry is now ${d.default}`,
+        "it takes effect only once the change is approved and merged.",
+        ...renewalSteps,
+        "run another session? [y/N]",
+      ),
+    );
+    // One record, dated in place: the pool keeps its size, so the hygiene check
+    // that accuses a renewal-by-append has nothing to accuse.
+    assert.equal(r.read(".pocket-zipper/exceptions.yml"), registry.replace(expires, d.default));
+    const lint = r.runCli(["validate"], { json: false });
+    assert.equal(lint.status, 0);
+    assert.doesNotMatch(lint.stdout, /RENEWAL_BY_APPEND/);
+    assert.doesNotMatch(lint.stdout, /POOL_COUNTS/);
+  });
+
+  it("refuses a beyond-max renewal, then escapes to permanent through the approver note", () => {
+    const { repo: r, registry, expires } = renewableRepo();
+    const d = dates();
+    const res = runWizard(r, `2\n1\nn\nn\n${d.beyond}\ny\ny\n\n`);
+    assert.equal(res.status, 0);
+    assert.equal(
+      res.stdout,
+      t(
+        ...bootMenu,
+        "❯ 2",
+        "→ renewal — expiring record:",
+        `  1) no-console @ app.js:2 — expires ${expires} (in 10d)`,
+        "select which to renew (number — 1):",
+        "❯ 1",
+        "⤷ renewing no-console @ app.js:2",
+        `a default expiry of ${d.default} (30 days from today) is set — accept it? [Y/n]`,
+        "❯ n",
+        "make this a permanent exception? [y/N]",
+        "❯ n",
+        `new expiry — YYYY-MM-DD, no later than ${d.max}:`,
+        `❯ ${d.beyond}`,
+        `✘ ${d.beyond} is later than the max (${d.max}). Choose a date no later than ${d.max}, or make it permanent.`,
+        "make this a permanent exception? [y/N]",
+        "❯ y",
+        "permanent exceptions require an approver.",
+        "expiry: permanent — no expires",
+        "Review — the record(s) to write:",
+        "  • no-console @ app.js:2 — next-line (renewal) — permanent",
+        "    reason:    needed",
+        '    reference: #1',
+        "write the exception? [y/N]",
+        "❯ y",
+        "✎ the existing record's expiry is now permanent",
+        "it takes effect only once the change is approved and merged.",
+        ...renewalSteps,
+        "run another session? [y/N]",
+      ),
+    );
+    // Permanent is a field edit too: the type rewritten, the date gone with its
+    // line, and still exactly one record in the file.
+    assert.equal(
+      r.read(".pocket-zipper/exceptions.yml"),
+      registry.replace("  type: temporary\n", "  type: permanent\n").replace(`  expires: ${expires}\n`, ""),
+    );
+    assert.equal(r.runCli(["validate"], { json: false }).status, 0);
+  });
+
+  it("lists every temporary record, and nothing that carries no date", () => {
+    const r = wizardRepo({ config: configYaml({ enabled: true }) });
+    const today = new Date().toISOString().slice(0, 10);
+    const soon = addDuration(today, "3d");
+    const later = addDuration(today, "2mo");
+    const gone = daysAgo(5);
+    const record = (expires: string) =>
+      exceptionYaml({
+        rule: "no-console",
+        suppressionType: "next-line",
+        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+        file: "app.js",
+        expires,
+      });
+    r.write(
+      ".pocket-zipper/exceptions.yml",
+      record(soon) +
+        record(later) +
+        record(gone) +
+        exceptionYaml({
+          rule: "no-debugger",
+          suppressionType: "block",
+          fingerprint: NEXT_LINE_NO_DEBUGGER_FP,
+          file: "tools/build.js",
+          type: "permanent",
+        }),
+    );
+    const d = dates();
+    const res = runWizard(r, "2\n2\n\ny\n\n");
+    assert.equal(res.status, 0);
+    assert.equal(
+      res.stdout,
+      t(
+        ...bootMenu,
+        "❯ 2",
+        "→ renewal — expiring record:",
+        `  1) no-console @ app.js — expires ${soon} (in 3d)`,
+        `  2) no-console @ app.js — expires ${later} (in ${daysBetween(today, later)}d)`,
+        `  3) no-console @ app.js — expires ${gone} (expired 5d ago)`,
+        "select which to renew (number — 1 to 3):",
+        "❯ 2",
+        "⤷ renewing no-console @ app.js",
+        `a default expiry of ${d.default} (30 days from today) is set — accept it? [Y/n]`,
+        `new expiry: ${d.default}`,
+        "Review — the record(s) to write:",
+        `  • no-console @ app.js — next-line (renewal) — expires ${d.default}`,
+        "    reason:    needed",
+        '    reference: #1',
+        "write the exception? [y/N]",
+        "❯ y",
+        `✎ the existing record's expiry is now ${d.default}`,
+        "it takes effect only once the change is approved and merged.",
+        ...renewalSteps,
+        "run another session? [y/N]",
+      ),
+    );
+    // The permanent record is untouched, the records beside the renewed one keep
+    // the dates they had, and the file still holds exactly four records.
+    const written = r.read(".pocket-zipper/exceptions.yml");
+    assert.equal(written.split("- rule:").length - 1, 4);
+    assert.ok(written.includes(`expires: ${soon}`));
+    assert.ok(written.includes(`expires: ${gone}`));
+    assert.ok(written.includes("type: permanent"));
+    assert.equal(written.split(`expires: ${d.default}`).length - 1, 1);
+    assert.ok(!written.includes(later));
+  });
+
+  it("keeps a renewal on the protected track where combined landing is on", () => {
+    // A renewal moves a horizon every later evaluation judges by, so the
+    // approval that covers the record it edits does not cover the renewal: the
+    // two-step guidance prints in both landing modes.
+    const r = wizardRepo({
+      config: configYaml({ enabled: true, allowSameChangeExceptions: true, host: "github" }),
+    });
+    singleDebt(r);
+    const today = new Date().toISOString().slice(0, 10);
+    const expires = addDuration(today, "10d");
+    r.write(
+      ".pocket-zipper/exceptions.yml",
+      exceptionYaml({
+        rule: "no-console",
+        suppressionType: "next-line",
+        fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+        file: "app.js",
+        expires,
+        line: 2,
+      }),
+    );
+    const d = dates();
+    const res = runWizard(r, "2\n1\n\ny\n\n");
+    assert.equal(res.status, 0);
+    assert.equal(
+      res.stdout,
+      t(
+        ...bootMenu,
+        "❯ 2",
+        "→ renewal — expiring record:",
+        `  1) no-console @ app.js:2 — expires ${expires} (in 10d)`,
+        "select which to renew (number — 1):",
+        "❯ 1",
+        "⤷ renewing no-console @ app.js:2",
+        `a default expiry of ${d.default} (30 days from today) is set — accept it? [Y/n]`,
+        `new expiry: ${d.default}`,
+        "Review — the record(s) to write:",
+        `  • no-console @ app.js:2 — next-line (renewal) — expires ${d.default}`,
+        "    reason:    needed",
+        '    reference: #1',
+        "write the exception? [y/N]",
+        "❯ y",
+        `✎ the existing record's expiry is now ${d.default}`,
+        "it takes effect only once the change is approved and merged.",
+        ...renewalSteps,
+        "run another session? [y/N]",
+      ),
+    );
+  });
+
+  it("refuses a pick outside the list with a terse restatement of the options", () => {
+    const { repo: r, expires } = renewableRepo();
+    const d = dates();
+    const res = runWizard(r, "2\n7\n1\n\ny\n\n");
+    assert.equal(res.status, 0);
+    assert.equal(
+      res.stdout,
+      t(
+        ...bootMenu,
+        "❯ 2",
+        "→ renewal — expiring record:",
+        `  1) no-console @ app.js:2 — expires ${expires} (in 10d)`,
+        "select which to renew (number — 1):",
+        "❯ 7",
+        "pick 1 — it is the only expiring record",
+        "select which to renew (number — 1):",
+        "❯ 1",
+        "⤷ renewing no-console @ app.js:2",
+        `a default expiry of ${d.default} (30 days from today) is set — accept it? [Y/n]`,
+        `new expiry: ${d.default}`,
+        "Review — the record(s) to write:",
+        `  • no-console @ app.js:2 — next-line (renewal) — expires ${d.default}`,
+        "    reason:    needed",
+        '    reference: #1',
+        "write the exception? [y/N]",
+        "❯ y",
+        `✎ the existing record's expiry is now ${d.default}`,
+        "it takes effect only once the change is approved and merged.",
+        ...renewalSteps,
+        "run another session? [y/N]",
+      ),
+    );
+  });
+
+  it("leaves the record alone when the renewal is declined at the write prompt", () => {
+    const { repo: r, registry } = renewableRepo();
+    const res = runWizard(r, "2\n1\n\n\n\n");
+    assert.equal(res.status, 0);
+    assert.match(
+      res.stdout,
+      /nothing written — the proposed record stays unwritten\.\nrun another session\? \[y\/N\]\n$/,
+    );
+    assert.equal(r.read(".pocket-zipper/exceptions.yml"), registry);
+  });
+
+  it("says so when the registry holds nothing a renewal could edit", () => {
+    const r = wizardRepo({ config: configYaml({ enabled: true }) });
+    singleDebt(r);
+    const res = runWizard(r, "2\n");
+    assert.equal(res.status, 0);
+    assert.equal(
+      res.stdout,
+      t(
+        ...bootMenu,
+        "❯ 2",
+        "no temporary record in this registry to renew — a renewal edits an existing record's expires in place.",
+      ),
+    );
+  });
+});
+
+// The net the ladder consults, exercised directly: the date prompt refuses an
+// out-of-policy date before a decision can reach it, so this is the only
+// reproducible way to see the shared refusal the authoring surface writes under.
+describe("the expiry-policy net every write is held to", () => {
+  const NOW = new Date("2026-09-28T12:00:00Z");
+  const POLICY: Policy = {
+    enabled: true,
+    governedRules: null,
+    exceptions: { defaultExpiry: "30d", maxExpiry: "3mo" },
+    allowSameChangeExceptions: false,
+    host: null,
+  };
+  const record = (init: { type: "temporary"; expires: string } | { type: "permanent" }): ExceptionRecord => ({
+    rule: "no-console",
+    suppression_type: "next-line",
+    fingerprint: NEXT_LINE_NO_CONSOLE_FP,
+    file: "app.js",
+    reason: "needed",
+    ...init,
+  });
+
+  it("refuses a newly written date past the baseline max, in the gate's words", () => {
+    const baseline = [record({ type: "temporary", expires: "2026-10-01" })];
+    assert.equal(
+      expiryRefusal({
+        baseline,
+        head: [record({ type: "temporary", expires: "2027-01-15" })],
+        policy: POLICY,
+        now: NOW,
+      }),
+      "✘ EXPIRY_POLICY — newly written expires 2027-01-15 for no-console in app.js runs past the baseline 3mo maximum (on or before 2026-12-28)",
+    );
+  });
+
+  it("lets a renewal through when the date it writes is inside the max", () => {
+    const baseline = [record({ type: "temporary", expires: "2026-10-01" })];
+    assert.equal(
+      expiryRefusal({
+        baseline,
+        head: [record({ type: "temporary", expires: "2026-11-01" })],
+        policy: POLICY,
+        now: NOW,
+      }),
+      null,
+    );
+  });
+
+  it("leaves a permanent orthogonal to the maximum, as the gate does", () => {
+    const baseline = [record({ type: "temporary", expires: "2026-10-01" })];
+    assert.equal(
+      expiryRefusal({
+        baseline,
+        head: [record({ type: "permanent" })],
+        policy: POLICY,
+        now: NOW,
+      }),
+      null,
+    );
   });
 });
 

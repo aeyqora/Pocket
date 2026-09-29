@@ -73,9 +73,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
   lines.push(renderDispositionSummary(record.summary.dispositions));
   lines.push(...renderPoolCounts(record.summary.cleanup.poolCounts));
 
-  const flagged = record.inventory.filter(
-    (e) => isNewOrChanged(e) && e.exception === null && e.guardKind === "directive",
-  );
+  const flagged = flaggedDebt(record);
   const flaggedConfig = record.inventory.filter(
     (e) => isNewOrChanged(e) && e.exception === null && e.guardKind === "config-level",
   );
@@ -103,6 +101,18 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
 
 function isNewOrChanged(entry: InventoryEntry): boolean {
   return entry.disposition === "new" || entry.disposition === "materially-changed";
+}
+
+/**
+ * The debt a FAIL report flags: governed, directive-form, new or materially
+ * changed, and uncovered by any record. One predicate for the two surfaces that
+ * answer the same question — the block the report prints, and the ride-along the
+ * report's author is offered (a FAIL with nothing here has nothing to author).
+ */
+export function flaggedDebt(record: EvaluationRecord): InventoryEntry[] {
+  return record.inventory.filter(
+    (e) => isNewOrChanged(e) && e.exception === null && e.guardKind === "directive",
+  );
 }
 
 function entryLine(entry: InventoryEntry): string {

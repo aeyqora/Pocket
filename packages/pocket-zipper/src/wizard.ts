@@ -8,14 +8,21 @@ import { EslintSession } from "./eslint.js";
 import { configPluginRuleNames } from "./recognize.js";
 import { analyzeTrees, reconcileGoverned } from "./pipeline.js";
 import {
+  daysBetween,
   describeDuration,
   expiryHorizon,
   isoDay,
   parsePolicy,
   suggestedExpiry,
 } from "./policy.js";
-import { coverExceptions } from "./registry.js";
+import {
+  coverExceptions,
+  expiryPolicyMessage,
+  expiryPolicyRefusals,
+} from "./registry.js";
+import { editFields, type FieldEdit } from "./registry-edit.js";
 import { readIfPresent } from "./validate-command.js";
+import { flaggedDebt } from "./report.js";
 import {
   PROTECTED_CONFIG,
   PROTECTED_REGISTRY,
@@ -26,9 +33,17 @@ import {
   renderFinding,
   validateRegistry,
   type Finding,
+  type RegistryEntry,
 } from "./validate.js";
 import { PocketZipperError } from "./errors.js";
-import type { ExceptionRecord, Policy, ReconciledSuppression } from "./types.js";
+import type {
+  EvaluationRecord,
+  ExceptionRecord,
+  InventoryEntry,
+  Policy,
+  ReconciledSuppression,
+  SuppressionType,
+} from "./types.js";
 
 export interface ExceptionAddOptions {
   cwd: string;
@@ -44,6 +59,13 @@ export interface ExceptionAddOptions {
   reason?: string;
   /** `--reference <link>` — the interview's optional answer. */
   reference?: string;
+  /**
+   * The ride-along's selection: the suppressions a FAIL report flagged, already
+   * chosen. Present, the session is the post-failure one — no session-choice
+   * step, no pick step, and the prefill comes from the failed report's own
+   * copy-paste-ready record rather than from a fresh inventory.
+   */
+  preselect?: readonly MatchFields[];
   /** The stream prompts are read from; defaults to the process's stdin. */
   input?: NodeJS.ReadableStream;
   /** The stream the transcript is written to; defaults to the process's stdout. */
@@ -54,6 +76,32 @@ export interface ExceptionAddOptions {
 
 export interface ExceptionAddResult {
   exitCode: number;
+}
+
+export interface RideAlongOptions {
+  /** The evaluation that failed — the report the author is reading. */
+  record: EvaluationRecord;
+  cwd: string;
+  now: Date;
+  input: NodeJS.ReadableStream;
+  output: NodeJS.WritableStream;
+  stderr: NodeJS.WritableStream;
+}
+
+/**
+ * The machine-authored half of one record: the match fields an inventory knows
+ * and an author never types. Both front doors supply the same shape — the
+ * dedicated command from the working tree's inventory, the ride-along from the
+ * FAIL report's flagged entries — so the write itself cannot tell which door it
+ * came through, and neither can the transcript below it.
+ */
+export interface MatchFields {
+  rule: string;
+  suppressionType: SuppressionType;
+  fingerprint: string;
+  file: string;
+  /** Absent only when the inventory could not place the directive. */
+  line?: number;
 }
 
 /** The answer set the interview collects: a reason, and a reference or none. */
@@ -80,87 +128,108 @@ type ExpiryDecision = { kind: "temporary"; date: string } | { kind: "permanent" 
 export async function runExceptionAdd(
   options: ExceptionAddOptions,
 ): Promise<ExceptionAddResult> {
-  const now = options.now ?? new Date();
-  const out = options.output ?? process.stdout;
-  const error = options.stderr ?? process.stderr;
-
+  const runtime = runtimeOf(options);
   try {
-    const git = await Git.discover(options.cwd);
-    // The wizard writes the working tree's registry; a bare checkout has none.
-    if (git.isBare()) {
-      error.write("exception add requires a work tree\n");
-      return { exitCode: 2 };
+    if (options.from !== undefined) {
+      return await withSession(runtime, (session) => scriptedSession(session, options));
     }
-
-    // Baseline-authoritative, like every evaluation: the policy is HEAD's
-    // (the empty tree for an unborn repo), never the working tree's, so an
-    // uncommitted `maxExpiry` bump cannot hand back a record the gate would
-    // refuse. No config at the baseline is the blocked posture — governance is
-    // an authorizer's decision, and this flow never makes it for them.
-    const baselineCommit = git.hasCommit("HEAD") ? git.revParse("HEAD") : EMPTY_TREE;
-    const configRaw = git.fileAt(baselineCommit, PROTECTED_CONFIG);
-    if (configRaw === null) {
-      out.write("Pocket Zipper isn't configured in this repo (no .pocket-zipper/config.yml)\n");
-      out.write(
-        "nothing can be written here — config is set up by the repo's authorizers at install time, not by this flow\n",
-      );
-      return { exitCode: 1 };
-    }
-    const initialPolicy = parsePolicy(configRaw, new Set<string>());
-    if (!initialPolicy.enabled) {
-      out.write("the gate is disabled in this repo's policy — no debt requires an exception.\n");
-      return { exitCode: 0 };
-    }
-
-    const baselineDir = git.materialize(baselineCommit);
-    try {
-      const baselineSession = await EslintSession.create(baselineDir);
-      const headSession = await EslintSession.create(git.root);
-      const knownRules = headSession.coreRuleNames();
-      for (const name of await configPluginRuleNames(baselineDir)) knownRules.add(name);
-      for (const name of await configPluginRuleNames(git.root)) knownRules.add(name);
-      const policy = parsePolicy(configRaw, knownRules);
-
-      return options.from !== undefined
-        ? await scriptedSession({
-            git,
-            policy,
-            baselineCommit,
-            baselineDir,
-            baselineSession,
-            headSession,
-            now,
-            out,
-            error,
-            from: options.from,
-            reason: options.reason,
-            reference: options.reference,
-          })
-        : await interactiveSessions({
-            git,
-            policy,
-            baselineCommit,
-            baselineDir,
-            baselineSession,
-            headSession,
-            now,
-            out,
-            input: options.input ?? process.stdin,
-          });
-    } finally {
-      git.cleanup(baselineDir);
-    }
+    return await interactiveSession(runtime, options.preselect);
   } catch (err) {
-    if (err instanceof PocketZipperError) {
-      error.write(`${err.message}\n`);
-      return { exitCode: 2 };
-    }
-    error.write(`pocket-zipper: internal error: ${err instanceof Error ? err.message : String(err)}\n`);
-    return { exitCode: 2 };
+    return { exitCode: operationalFailure(runtime.error, err) };
   }
 }
 
-// --- the session's shared reads ---------------------------------------------
+/**
+ * The post-failure ride-along: the second front door, offered at the end of a
+ * local `check` FAIL. A FAIL with no flagged debt has nothing to author, so the
+ * offer is never made; a declined one costs the author nothing but a keystroke.
+ * Accepted, the session runs the interview against the report's own flagged
+ * entries — the failing suppressions are pre-selected, so nothing is
+ * re-identified — and the gate's verdict stands whatever the write did: the
+ * check already failed, and authoring a record does not un-fail it.
+ */
+export async function offerExceptionAdd(options: RideAlongOptions): Promise<ExceptionAddResult> {
+  const runtime = runtimeOf(options);
+  const targets = flaggedDebt(options.record).map(matchFieldsOf);
+  if (targets.length === 0) return { exitCode: 0 };
+  const prompts = new Prompter(runtime.input, runtime.out);
+  try {
+    // The selection is stated before the question, not after the answer: a FAIL
+    // can flag several suppressions, and one `y` authorizes records for all of
+    // them, so the author must see the list they are saying yes to.
+    announce(prompts, targets);
+    const offered = await askYesNo(
+      prompts,
+      "create an exception for this debt? [y/N]",
+      "type y to author an exception for this debt, or press Enter to leave it",
+    );
+    if (!offered) return { exitCode: 0 };
+    return await sessionWithPrompter(runtime, prompts, targets);
+  } catch (err) {
+    return { exitCode: operationalFailure(runtime.error, err) };
+  } finally {
+    prompts.close();
+  }
+}
+
+/**
+ * One flagged inventory entry as the prefill the ride-along authors from: the
+ * match fields the FAIL report already printed, machine-authored either way.
+ * An entry whose head line the report could not place carries no line, and the
+ * record is written without one — the format's `line` is optional reference
+ * data, and a guessed line is worse than none.
+ */
+function matchFieldsOf(entry: InventoryEntry): MatchFields {
+  return {
+    rule: entry.rule,
+    suppressionType: entry.suppressionType,
+    fingerprint: entry.fingerprint,
+    file: entry.file,
+    ...(entry.lines.head === null ? {} : { line: entry.lines.head }),
+  };
+}
+
+// --- the run's streams and clock ---------------------------------------------
+
+/** What a run reads and writes before the repository is opened. */
+interface Runtime {
+  cwd: string;
+  now: Date;
+  input: NodeJS.ReadableStream;
+  out: NodeJS.WritableStream;
+  error: NodeJS.WritableStream;
+}
+
+/** The streams and the clock a run needs, however it was asked for. */
+function runtimeOf(options: {
+  cwd: string;
+  now?: Date;
+  input?: NodeJS.ReadableStream;
+  output?: NodeJS.WritableStream;
+  stderr?: NodeJS.WritableStream;
+}): Runtime {
+  return {
+    cwd: options.cwd,
+    now: options.now ?? new Date(),
+    input: options.input ?? process.stdin,
+    out: options.output ?? process.stdout,
+    error: options.stderr ?? process.stderr,
+  };
+}
+
+/** The exit code every operational failure carries, and the line it writes. */
+function operationalFailure(error: NodeJS.WritableStream, err: unknown): number {
+  if (err instanceof PocketZipperError) {
+    error.write(`${err.message}\n`);
+    return 2;
+  }
+  error.write(
+    `pocket-zipper: internal error: ${err instanceof Error ? err.message : String(err)}\n`,
+  );
+  return 2;
+}
+
+// --- the boot ----------------------------------------------------------------
 
 /** What one session iteration reads: both halves of its inventory input. */
 interface SessionInput {
@@ -173,6 +242,127 @@ interface SessionInput {
   headSession: EslintSession;
   now: Date;
   out: NodeJS.WritableStream;
+  /** Where a refusal this session cannot ask about is written. */
+  error: NodeJS.WritableStream;
+}
+
+/** A booted session and the temporary tree it must hand back when it is done. */
+interface Booted {
+  session: SessionInput;
+  done: () => void;
+}
+
+/**
+ * Everything both front doors need before a single question is asked: the repo,
+ * the baseline-authoritative policy, and the two ESLint sessions the inventory
+ * is read through. Each refusal path here is a line the author reads, not an
+ * error, because every one of them is a state this repo is honestly in.
+ */
+async function bootSession(runtime: Runtime): Promise<Booted | { exitCode: number }> {
+  const { out, error } = runtime;
+  const git = await Git.discover(runtime.cwd);
+  // The wizard writes the working tree's registry; a bare checkout has none.
+  if (git.isBare()) {
+    error.write("exception add requires a work tree\n");
+    return { exitCode: 2 };
+  }
+
+  // Baseline-authoritative, like every evaluation: the policy is HEAD's
+  // (the empty tree for an unborn repo), never the working tree's, so an
+  // uncommitted `maxExpiry` bump cannot hand back a record the gate would
+  // refuse. No config at the baseline is the blocked posture — governance is
+  // an authorizer's decision, and this flow never makes it for them.
+  const baselineCommit = git.hasCommit("HEAD") ? git.revParse("HEAD") : EMPTY_TREE;
+  const configRaw = git.fileAt(baselineCommit, PROTECTED_CONFIG);
+  if (configRaw === null) {
+    out.write("Pocket Zipper isn't configured in this repo (no .pocket-zipper/config.yml)\n");
+    out.write(
+      "nothing can be written here — config is set up by the repo's authorizers at install time, not by this flow\n",
+    );
+    return { exitCode: 1 };
+  }
+  const initialPolicy = parsePolicy(configRaw, new Set<string>());
+  if (!initialPolicy.enabled) {
+    out.write("the gate is disabled in this repo's policy — no debt requires an exception.\n");
+    return { exitCode: 0 };
+  }
+
+  const baselineDir = git.materialize(baselineCommit);
+  try {
+    const baselineSession = await EslintSession.create(baselineDir);
+    const headSession = await EslintSession.create(git.root);
+    const knownRules = headSession.coreRuleNames();
+    for (const name of await configPluginRuleNames(baselineDir)) knownRules.add(name);
+    for (const name of await configPluginRuleNames(git.root)) knownRules.add(name);
+    const policy = parsePolicy(configRaw, knownRules);
+    return {
+      session: {
+        git,
+        policy,
+        baselineCommit,
+        baselineDir,
+        baselineSession,
+        headSession,
+        now: runtime.now,
+        out,
+        error,
+      },
+      done: () => git.cleanup(baselineDir),
+    };
+  } catch (err) {
+    git.cleanup(baselineDir);
+    throw err;
+  }
+}
+
+/**
+ * One run of a session, however it was reached: boot the repository, hand the
+ * booted session to `body`, and hand the temporary tree back whatever `body`
+ * does. The only place that pairing is written down, so no caller can boot
+ * without cleaning up and no boot's refusal can be answered twice.
+ */
+async function withSession(
+  runtime: Runtime,
+  body: (session: SessionInput) => Promise<ExceptionAddResult>,
+): Promise<ExceptionAddResult> {
+  const booted = await bootSession(runtime);
+  if ("exitCode" in booted) return { exitCode: booted.exitCode };
+  try {
+    return await body(booted.session);
+  } finally {
+    booted.done();
+  }
+}
+
+/** The interactive run: its own prompter, then as many sessions as the author asks for. */
+async function interactiveSession(
+  runtime: Runtime,
+  preselect?: readonly MatchFields[],
+): Promise<ExceptionAddResult> {
+  const prompts = new Prompter(runtime.input, runtime.out);
+  try {
+    return await sessionWithPrompter(runtime, prompts, preselect);
+  } finally {
+    prompts.close();
+  }
+}
+
+/** A session loop over a prompter the caller already owns — the ride-along's, which asked its question first. */
+async function sessionWithPrompter(
+  runtime: Runtime,
+  prompts: Prompter,
+  preselect?: readonly MatchFields[],
+): Promise<ExceptionAddResult> {
+  return withSession(runtime, (session) => sessionLoop(session, prompts, preselect));
+}
+
+// --- the session's shared reads ---------------------------------------------
+
+/** The working-tree registry, as the write needs it: its bytes, its entries. */
+interface WorkingRegistry {
+  raw: string | null;
+  entries: RegistryEntry[];
+  records: ExceptionRecord[];
 }
 
 /**
@@ -180,10 +370,7 @@ interface SessionInput {
  * prints its diagnostics and refuses the session (exit 2); a file that is
  * genuinely not there is an empty registry the write will create.
  */
-function readRegistry(
-  root: string,
-  out: NodeJS.WritableStream,
-): { raw: string | null; records: ExceptionRecord[] } | { exitCode: number } {
+function readRegistry(root: string, out: NodeJS.WritableStream): WorkingRegistry | { exitCode: number } {
   let raw: string | null;
   try {
     raw = readIfPresent(root, PROTECTED_REGISTRY);
@@ -200,7 +387,11 @@ function readRegistry(
     for (const finding of defects) out.write(`${renderFinding(finding)}\n`);
     return { exitCode: 2 };
   }
-  return { raw, records: validation.entries.map((entry) => entry.record) };
+  return {
+    raw,
+    entries: validation.entries,
+    records: validation.entries.map((entry) => entry.record),
+  };
 }
 
 /** A protected document that could not be read, as one defect finding. */
@@ -215,7 +406,9 @@ function documentReadDefect(err: unknown): Finding {
  * introduces, that no record in the working-tree registry covers. The
  * working-tree registry is the honest coverage for a working-tree surface, so
  * a record a previous wizard session wrote takes its suppression off this list
- * on the next pass.
+ * on the next pass. The ride-along skips this read entirely: its selection came
+ * with the report, and the tree it would be recomputed against is not the tree
+ * that failed.
  */
 async function readDebt(
   input: SessionInput & { records: ExceptionRecord[] },
@@ -254,97 +447,63 @@ function readWorktreeFile(root: string, path: string): string | null {
 // --- the interactive session loop -------------------------------------------
 
 /**
+ * How one session ended: `end` for the invocation itself (the author abandoned
+ * it, or there was nothing to do), `done` for a session that reached its write
+ * prompt and was written or declined.
+ */
+type SessionStep = { kind: "end"; exitCode?: number } | { kind: "done"; wrote: boolean };
+
+/**
  * One command invocation, zero or more sessions: `run another session?` loops
  * back to the top, recomputing the registry and the debt list against the
- * tree as the previous session left it.
+ * tree as the previous session left it. A ride-along is the first session and
+ * only the first: a second session is the dedicated command in its own right,
+ * so it gets the session choice like any other.
  */
-async function interactiveSessions(
-  input: SessionInput & { input: NodeJS.ReadableStream },
+async function sessionLoop(
+  input: SessionInput,
+  prompts: Prompter,
+  preselect?: readonly MatchFields[],
 ): Promise<ExceptionAddResult> {
-  const prompts = new Prompter(input.input, input.out);
-  try {
-    let wrote = false;
-    let completed = false;
-    sessionLoop: for (;;) {
-      const { out } = input;
-      out.write("reading the working tree's new debt…\n");
-      const registry = readRegistry(input.git.root, out);
-      if ("exitCode" in registry) return { exitCode: registry.exitCode };
+  let wrote = false;
+  let completed = false;
+  let ride = preselect;
+  for (;;) {
+    const { out } = input;
+    const registry = readRegistry(input.git.root, out);
+    if ("exitCode" in registry) return { exitCode: registry.exitCode };
 
+    let step: SessionStep;
+    if (ride !== undefined) {
+      // The ride-along's inventory is the report it arrived with, so there is no
+      // debt list here to read and none to pick from: the selection is the one
+      // the failure already made.
+      const targets = ride;
+      ride = undefined;
+      step = await newDebtSession(prompts, input, registry, [], targets);
+    } else {
+      out.write("reading the working tree's new debt…\n");
       const debt = await readDebt({ ...input, records: registry.records });
       out.write("this session is for:\n");
       out.write("  1) new debt from this change\n");
       out.write("  2) renew an expiring record\n");
-
-      // The session choice. The renew branch arrives with its own ticket; the
-      // offer is honest about it and takes the choice again.
-      for (;;) {
-        const choice = await prompts.ask("choose — 1 (new debt) or 2 (renew):");
-        if (choice === null) return exitOf(wrote, completed);
-        if (choice === "1") break;
-        if (choice === "2") {
-          out.write("renew is not available yet\n");
-          continue;
-        }
-        out.write("type 1 (new debt) or 2 (renew)\n");
-      }
-      out.write("→ new debt\n");
-      if (debt.length === 0) {
-        out.write("no new debt from this change requires an exception.\n");
-        return { exitCode: 0 };
-      }
-      for (const [i, s] of debt.entries()) {
-        out.write(`  ${i + 1}) ${s.file}:${s.line}  ${s.rule}  (${s.suppressionType}, ${s.disposition})\n`);
-      }
-
-      const selected = await pickSuppressions(prompts, debt);
-      if (selected === null) return exitOf(wrote, completed);
-      const details = await interview(prompts, selected);
-      if (details === null) return exitOf(wrote, completed);
-      const expiry = await decideExpiry(prompts, input.policy, input.now);
-      if (expiry === null) return exitOf(wrote, completed);
-
-      const records = selected.map((suppression) =>
-        recordFor(suppression, details.get(suppression)!, expiry),
-      );
-      const proposal = propose(registry.raw, records);
-      if (proposal.defects.length > 0) {
-        out.write("✘ nothing written — defects found\n");
-        for (const finding of proposal.defects) out.write(`${renderFinding(finding)}\n`);
-        return { exitCode: 1 };
-      }
-      printReview(out, records);
-
-      // The write prompt: Enter declines — a proposal is declined, never lost.
-      let declined = false;
-      for (;;) {
-        const answer = await prompts.ask("write the exception? [y/N]");
-        if (answer === null) return exitOf(wrote, completed);
-        if (answer === "y" || answer === "yes") break;
-        if (answer === "" || answer === "n" || answer === "no") {
-          out.write("nothing written — the proposed record stays unwritten.\n");
-          declined = true;
-          break;
-        }
-        out.write("type y to write the exception, or press Enter to leave it unwritten\n");
-      }
-      if (!declined) {
-        writeRegistry(input.git.root, proposal.text);
-        printWritten(out, records, input.policy);
-        wrote = true;
-      }
-      completed = true;
-
-      for (;;) {
-        const answer = await prompts.ask("run another session? [y/N]");
-        if (answer === null) return exitOf(wrote, completed);
-        if (answer === "" || answer === "n" || answer === "no") return exitOf(wrote, completed);
-        if (answer === "y" || answer === "yes") continue sessionLoop;
-        out.write("type y to run another session, or press Enter to finish\n");
-      }
+      const choice = await chooseSession(prompts);
+      if (choice === null) return exitOf(wrote, completed);
+      if (choice === "new") out.write("→ new debt\n");
+      step =
+        choice === "renew"
+          ? await renewSession(prompts, input, registry)
+          : await newDebtSession(prompts, input, registry, debt);
     }
-  } finally {
-    prompts.close();
+    if (step.kind === "end") {
+      return step.exitCode === undefined ? exitOf(wrote, completed) : { exitCode: step.exitCode };
+    }
+    if (step.wrote) wrote = true;
+    completed = true;
+
+    const again = await askRunAnother(prompts);
+    if (again === null) return exitOf(wrote, completed);
+    if (!again) return exitOf(wrote, completed);
   }
 }
 
@@ -353,9 +512,133 @@ function exitOf(wrote: boolean, completed: boolean): ExceptionAddResult {
   return { exitCode: wrote || completed ? 0 : 1 };
 }
 
+/** The session choice. `2` is the renew branch: an in-place edit, never an append. */
+async function chooseSession(prompts: Prompter): Promise<"new" | "renew" | null> {
+  for (;;) {
+    const answer = await prompts.ask("choose — 1 (new debt) or 2 (renew):");
+    if (answer === null) return null;
+    if (answer === "1") return "new";
+    if (answer === "2") return "renew";
+    prompts.say("type 1 (new debt) or 2 (renew)");
+  }
+}
+
+/** `run another session?` — Enter finishes, and a lost line finishes too. */
+async function askRunAnother(prompts: Prompter): Promise<boolean | null> {
+  return askYesNo(
+    prompts,
+    "run another session? [y/N]",
+    "type y to run another session, or press Enter to finish",
+  );
+}
+
+/** `write the exception?` — Enter declines, and a declined proposal is never lost. */
+async function confirmWrite(prompts: Prompter): Promise<boolean | null> {
+  return askYesNo(
+    prompts,
+    "write the exception? [y/N]",
+    "type y to write the exception, or press Enter to leave it unwritten",
+  );
+}
+
 /**
- * The pick step: numbers, one answer, selection order preserved. Echoes one
- * `◉ selected` line per suppression, so the transcript reads back the selection.
+ * The one `[y/N]` question: Enter is the default `N`, `y`/`yes` accepts, and
+ * anything else is refused with this question's own restatement of the two
+ * answers. Resolves `null` when the stream ends mid-question — the end of the
+ * session, and never a `y` nobody typed. Three of the wizard's questions are
+ * this one with different wording, and the grammar that keeps a wrong Enter
+ * from becoming a forced `y` has to be the same in all of them.
+ */
+async function askYesNo(prompts: Prompter, question: string, restatement: string): Promise<boolean | null> {
+  for (;;) {
+    const answer = await prompts.ask(question);
+    if (answer === null) return null;
+    if (answer === "y" || answer === "yes") return true;
+    if (answer === "" || answer === "n" || answer === "no") return false;
+    prompts.say(restatement);
+  }
+}
+
+// --- the new-debt session ----------------------------------------------------
+
+/**
+ * The authoring session both front doors share: the selected suppressions are
+ * already known (picked from the debt list, or handed over by a FAIL report),
+ * so the interview and the one expiry decision are all that is left. A pick is
+ * announced before the interview; a selection that arrived already made was
+ * announced by the door that took it, so the transcript states which
+ * suppressions the records below it are for exactly once.
+ */
+async function newDebtSession(
+  prompts: Prompter,
+  input: SessionInput,
+  registry: WorkingRegistry,
+  debt: readonly ReconciledSuppression[],
+  preselect?: readonly MatchFields[],
+): Promise<SessionStep> {
+  const { out, now, policy } = input;
+  let selected: readonly MatchFields[];
+  if (preselect !== undefined) {
+    selected = preselect;
+  } else {
+    if (debt.length === 0) {
+      out.write("no new debt from this change requires an exception.\n");
+      return { kind: "end", exitCode: 0 };
+    }
+    for (const [i, s] of debt.entries()) {
+      out.write(`  ${i + 1}) ${whereOf(s)}  ${s.rule}  (${s.suppressionType}, ${s.disposition})\n`);
+    }
+    const picked = await pickSuppressions(prompts, debt);
+    if (picked === null) return { kind: "end" };
+    announce(prompts, picked);
+    selected = picked;
+  }
+
+  const details = await interview(prompts, selected);
+  if (details === null) return { kind: "end" };
+
+  // The last gate the expiry decision passes: the same refusal the gate states
+  // about a newly written over-max date, asked here of the whole proposed
+  // registry so no rung of the ladder can write a date the gate would fail.
+  const guard: ExpiryGuard = (decision) =>
+    expiryRefusal({
+      baseline: registry.records,
+      head: [...registry.records, ...recordsFor(selected, details, decision)],
+      policy,
+      now,
+    });
+  const expiry = await decideExpiry(prompts, policy, now, { guard });
+  if (expiry === null) return { kind: "end" };
+
+  const records = recordsFor(selected, details, expiry);
+  const proposal = propose(registry.raw, records);
+  if (proposal.defects.length > 0) {
+    printDefects(out, proposal.defects);
+    return { kind: "end", exitCode: 1 };
+  }
+  printReview(out, records, "new");
+
+  const confirmed = await confirmWrite(prompts);
+  if (confirmed === null) return { kind: "end" };
+  if (!confirmed) {
+    prompts.say("nothing written — the proposed record stays unwritten.");
+    return { kind: "done", wrote: false };
+  }
+  writeRegistry(input.git.root, proposal.text);
+  printWritten(out, records, policy);
+  return { kind: "done", wrote: true };
+}
+
+/** Nothing written, and every defect that refused it, in the report's own spelling. */
+function printDefects(out: NodeJS.WritableStream, defects: readonly Finding[]): void {
+  out.write("✘ nothing written — defects found\n");
+  for (const finding of defects) out.write(`${renderFinding(finding)}\n`);
+}
+
+/**
+ * The pick step: numbers, one answer, selection order preserved. One
+ * `◉ selected` line per suppression follows the answer, so the transcript reads
+ * back the selection.
  */
 async function pickSuppressions(
   prompts: Prompter,
@@ -386,45 +669,49 @@ async function pickSuppressions(
       const n = Number(token);
       if (seen.has(n)) continue;
       seen.add(n);
-      const suppression = debt[n - 1]!;
-      selected.push(suppression);
-      prompts.say(
-        `◉ selected  ${suppression.file}:${suppression.line}  ${suppression.rule}  (${suppression.suppressionType})`,
-      );
+      selected.push(debt[n - 1]!);
     }
     return selected;
   }
+}
+
+/** One `◉ selected` line per chosen suppression — the same line in both doors. */
+function announce(prompts: Prompter, selected: readonly MatchFields[]): void {
+  for (const s of selected) {
+    prompts.say(`◉ selected  ${whereOf(s)}  ${s.rule}  (${s.suppressionType})`);
+  }
+}
+
+/** A suppression's location as both the debt list and the selection echo print it. */
+function whereOf(fields: { file: string; line?: number }): string {
+  return fields.line === undefined ? fields.file : `${fields.file}:${fields.line}`;
 }
 
 /**
  * The interview: one detail set for a single selection or a shared one, or a
  * per-record interview in selection order when the selection does not share.
  * A selection of one skips the shared question — there is nothing to share.
+ * Answers come back in selection order, one per suppression.
  */
 async function interview(
   prompts: Prompter,
-  selected: readonly ReconciledSuppression[],
-): Promise<Map<ReconciledSuppression, Detail> | null> {
+  selected: readonly MatchFields[],
+): Promise<Detail[] | null> {
   if (selected.length === 1) {
     const detail = await interviewOnce(prompts);
-    if (detail === null) return null;
-    return new Map(selected.map((s) => [s, detail]));
+    return detail === null ? null : [detail];
   }
   const share = await askShared(prompts, selected.length);
   if (share === null) return null;
   if (share) {
     const detail = await interviewOnce(prompts);
-    if (detail === null) return null;
-    return new Map(selected.map((s) => [s, detail]));
+    return detail === null ? null : selected.map(() => detail);
   }
   return interviewEach(prompts, selected);
 }
 
 /** `Do these N exceptions all share one reason?` — Enter shares. */
-async function askShared(
-  prompts: Prompter,
-  count: number,
-): Promise<boolean | null> {
+async function askShared(prompts: Prompter, count: number): Promise<boolean | null> {
   for (;;) {
     const answer = await prompts.ask(`Do these ${count} exceptions all share one reason? [Y/n]`);
     if (answer === null) return null;
@@ -450,11 +737,11 @@ async function interviewOnce(prompts: Prompter): Promise<Detail | null> {
 /** The per-record interview, in selection order, each answer carrying file:line. */
 async function interviewEach(
   prompts: Prompter,
-  selected: readonly ReconciledSuppression[],
-): Promise<Map<ReconciledSuppression, Detail> | null> {
-  const details = new Map<ReconciledSuppression, Detail>();
+  selected: readonly MatchFields[],
+): Promise<Detail[] | null> {
+  const details: Detail[] = [];
   for (const [i, suppression] of selected.entries()) {
-    const where = `${suppression.file}:${suppression.line}`;
+    const where = whereOf(suppression);
     const ofN = `for record ${i + 1} of ${selected.length} — ${where}`;
     const reason = await askReason(prompts, `reason ${ofN}:`);
     if (reason === null) return null;
@@ -464,7 +751,7 @@ async function interviewEach(
       `reference (issue / PR / ticket link) ${ofN} — optional: Skipped`,
     );
     if (reference === null) return null;
-    details.set(suppression, { reason, reference });
+    details.push({ reason, reference });
   }
   return details;
 }
@@ -491,6 +778,23 @@ async function askReference(
   return answer;
 }
 
+// --- the expiry ladder -------------------------------------------------------
+
+/**
+ * The last gate a candidate expiry passes before the ladder accepts it: the
+ * expiry policy's own refusal about the registry the decision would write, as
+ * one line, or null when the write is inside policy. The machinery is the gate's
+ * own (`expiryPolicyRefusals`), so a surface that can write a registry can never
+ * write one the gate would fail over an expiry.
+ */
+type ExpiryGuard = (decision: ExpiryDecision) => string | null;
+
+interface ExpiryOptions {
+  /** A renewal echoes its accepted date as a new one; a new record as its own. */
+  renewal?: boolean;
+  guard?: ExpiryGuard;
+}
+
 /**
  * The three-rung expiry ladder, one decision for the whole write:
  *
@@ -500,11 +804,15 @@ async function askReference(
  *    refused with distinct messages, and after any refusal the permanent
  *    question is re-offered as the escape hatch — declining it returns to the
  *    date prompt.
+ *
+ * The guard is consulted on rung 1 only, because rungs 2 and 3 are inside the
+ * max by construction and a permanent carries no date to refuse.
  */
 async function decideExpiry(
   prompts: Prompter,
   policy: Policy,
   now: Date,
+  options: ExpiryOptions = {},
 ): Promise<ExpiryDecision | null> {
   const defaultDate = suggestedExpiry(now, policy.exceptions.defaultExpiry);
   const maxDate = expiryHorizon(now, policy.exceptions.maxExpiry);
@@ -513,12 +821,31 @@ async function decideExpiry(
     const answer = await prompts.ask(acceptLabel);
     if (answer === null) return null;
     if (answer === "" || answer === "y" || answer === "yes") {
-      prompts.say(`expiry: ${defaultDate}`);
-      return { kind: "temporary", date: defaultDate };
+      const decision: ExpiryDecision = { kind: "temporary", date: defaultDate };
+      const refusal = options.guard?.(decision) ?? null;
+      if (refusal === null) {
+        prompts.say(`${options.renewal === true ? "new expiry" : "expiry"}: ${defaultDate}`);
+        return decision;
+      }
+      // A `defaultExpiry` at the ceiling can round past it, so the prefilled
+      // date is refused like any other out-of-policy one, permanent re-offered.
+      prompts.say(refusal);
+      return await escapeHatch(prompts, defaultDate, maxDate, now, options);
     }
     if (answer === "n" || answer === "no") break;
     prompts.say("type y to accept the default, or n to set your own date / make it permanent");
   }
+  return await escapeHatch(prompts, defaultDate, maxDate, now, options);
+}
+
+/** Rungs 2 and 3: the permanent question, and the date prompt it can decline. */
+async function escapeHatch(
+  prompts: Prompter,
+  defaultDate: string,
+  maxDate: string,
+  now: Date,
+  options: ExpiryOptions,
+): Promise<ExpiryDecision | null> {
   for (;;) {
     const answer = await prompts.ask("make this a permanent exception? [y/N]");
     if (answer === null) return null;
@@ -575,6 +902,172 @@ async function askDate(
   }
 }
 
+/**
+ * The expiry policy's refusal of one proposed registry, as one transcript line —
+ * the gate's own message, under the code the gate raises it as, so the author
+ * reads the same sentence CI will read. Exported as the unit seam for the net
+ * itself: the ladder's date prompt refuses an out-of-policy date before a
+ * decision ever reaches here, so the only reproducible way to exercise this
+ * predicate is to ask it directly, the way a rendered report's TTY branch is
+ * asked for.
+ */
+export function expiryRefusal(input: {
+  baseline: readonly ExceptionRecord[];
+  head: readonly ExceptionRecord[];
+  policy: Policy;
+  now: Date;
+}): string | null {
+  const maxExpiry = input.policy.exceptions.maxExpiry;
+  const refused = expiryPolicyRefusals({
+    baseline: input.baseline,
+    head: input.head,
+    now: input.now,
+    maxExpiry,
+  })[0];
+  if (refused === undefined) return null;
+  return `✘ EXPIRY_POLICY — ${expiryPolicyMessage(refused, maxExpiry, input.now)}`;
+}
+
+// --- the renew session -------------------------------------------------------
+
+/** One record a renewal can edit, with the registry position it is edited at. */
+interface Renewable {
+  /** 1-based entry in the registry, the position the edit is applied at. */
+  readonly index: number;
+  readonly record: ExceptionRecord;
+}
+
+/**
+ * The records a renewal can edit: every temporary record, each with the expiry
+ * it currently carries — including one that has already lapsed, which is the
+ * record most in need of renewing. Temporaries only — a permanent carries no
+ * date to renew, and turning one back into a temporary is a different edit than
+ * the one this branch offers.
+ */
+function renewable(entries: readonly RegistryEntry[]): Renewable[] {
+  return entries
+    .filter((entry) => entry.record.expires !== undefined)
+    .map((entry) => ({ index: entry.index, record: entry.record }));
+}
+
+/**
+ * The renew session: pick an existing record, edit its `expires` where it is
+ * written, and write nothing else. A renewal is a policy change — it moves a
+ * horizon the gate will judge — so it takes fresh authorization on the protected
+ * track in both landing modes, and prior approval never carries forward.
+ */
+async function renewSession(
+  prompts: Prompter,
+  input: SessionInput,
+  registry: WorkingRegistry,
+): Promise<SessionStep> {
+  const { out, now, policy } = input;
+  const candidates = renewable(registry.entries);
+  if (candidates.length === 0) {
+    prompts.say(
+      "no temporary record in this registry to renew — a renewal edits an existing record's expires in place.",
+    );
+    return { kind: "end", exitCode: 0 };
+  }
+  out.write("→ renewal — expiring record:\n");
+  for (const [i, candidate] of candidates.entries()) {
+    out.write(`  ${i + 1}) ${renewalLine(candidate, now)}\n`);
+  }
+  const chosen = await pickRenewal(prompts, candidates);
+  if (chosen === null) return { kind: "end" };
+  // The record the renewal is about, named back: the pick said a number, this
+  // says which file and line that number stood for, so the interview that
+  // follows is about something the author can see.
+  prompts.say(`⤷ renewing ${chosen.record.rule} @ ${whereOf(chosen.record)}`);
+
+  // The renewal is held to the same expiry policy as any other write, judged
+  // against the registry it is about to become: a renewed date past the baseline
+  // max is a refusal (`EXPIRY_POLICY`), and the permanent question is re-offered
+  // as the escape hatch, exactly as a beyond-max date is at the date prompt.
+  const guard: ExpiryGuard = (decision) =>
+    expiryRefusal({
+      baseline: registry.records,
+      head: registry.records.map((record) =>
+        record === chosen.record ? applyExpiry(record, decision) : record,
+      ),
+      policy,
+      now,
+    });
+  const expiry = await decideExpiry(prompts, policy, now, { renewal: true, guard });
+  if (expiry === null) return { kind: "end" };
+
+  const text = editFields(registry.raw ?? "", chosen.index, expiryEdits(expiry));
+  if (text === null) {
+    out.write("✘ nothing written — the registry's own shape refused the edit\n");
+    return { kind: "end", exitCode: 1 };
+  }
+  const defects = defectsOf(validateRegistry(text).findings);
+  if (defects.length > 0) {
+    printDefects(out, defects);
+    return { kind: "end", exitCode: 1 };
+  }
+  const record = applyExpiry(chosen.record, expiry);
+  printReview(out, [record], "renewal");
+
+  const confirmed = await confirmWrite(prompts);
+  if (confirmed === null) return { kind: "end" };
+  if (!confirmed) {
+    prompts.say("nothing written — the proposed record stays unwritten.");
+    return { kind: "done", wrote: false };
+  }
+  writeRegistry(input.git.root, text);
+  printRenewed(out, record);
+  return { kind: "done", wrote: true };
+}
+
+/** The pick step for a renewal: one existing record, chosen by number. */
+async function pickRenewal(
+  prompts: Prompter,
+  candidates: readonly Renewable[],
+): Promise<Renewable | null> {
+  const label =
+    candidates.length === 1
+      ? "select which to renew (number — 1):"
+      : `select which to renew (number — 1 to ${candidates.length}):`;
+  for (;;) {
+    const answer = await prompts.ask(label);
+    if (answer === null) return null;
+    if (/^\d+$/.test(answer)) {
+      const n = Number(answer);
+      if (n >= 1 && n <= candidates.length) return candidates[n - 1]!;
+    }
+    prompts.say(
+      candidates.length === 1
+        ? "pick 1 — it is the only expiring record"
+        : `pick a number between 1 and ${candidates.length}`,
+    );
+  }
+}
+
+/** One line per renewable: the record's location and the horizon it carries today. */
+function renewalLine(candidate: Renewable, now: Date): string {
+  const { record } = candidate;
+  return `${record.rule} @ ${whereOf(record)} — expires ${record.expires} (${remaining(record.expires!, now)})`;
+}
+
+/** How long a date still has, in the plainest words the list can carry. */
+function remaining(expires: string, now: Date): string {
+  const days = daysBetween(isoDay(now), expires);
+  if (days === 0) return "today";
+  if (days > 0) return `in ${days}d`;
+  return `expired ${-days}d ago`;
+}
+
+/** The write's own shape, as field edits: a new date, or a date gone with its type. */
+function expiryEdits(expiry: ExpiryDecision): FieldEdit[] {
+  return expiry.kind === "temporary"
+    ? [{ field: "expires", value: expiry.date }]
+    : [
+        { field: "type", value: "permanent" },
+        { field: "expires", value: null },
+      ];
+}
+
 // --- the non-interactive session ---------------------------------------------
 
 /**
@@ -583,20 +1076,16 @@ async function askDate(
  * validation, review, and write run with no prompts at all.
  */
 async function scriptedSession(
-  input: SessionInput & {
-    error: NodeJS.WritableStream;
-    from: string;
-    reason?: string;
-    reference?: string;
-  },
+  input: SessionInput,
+  options: ExceptionAddOptions,
 ): Promise<ExceptionAddResult> {
   const { out, error } = input;
-  const selector = parseFrom(input.from);
+  const selector = parseFrom(options.from!);
   if (selector === null) {
-    error.write(`--from expects <file>:<line> — got '${input.from}'\n`);
+    error.write(`--from expects <file>:<line> — got '${options.from}'\n`);
     return { exitCode: 1 };
   }
-  if (!input.reason) {
+  if (!options.reason) {
     error.write("the reason is required — pass it with --reason <text>\n");
     return { exitCode: 1 };
   }
@@ -606,19 +1095,19 @@ async function scriptedSession(
   const debt = await readDebt({ ...input, records: registry.records });
   const matches = debt.filter((s) => s.file === selector.file && s.line === selector.line);
   if (matches.length === 0) {
-    error.write(`no new debt at ${input.from}\n`);
+    error.write(`no new debt at ${options.from}\n`);
     return { exitCode: 1 };
   }
   if (matches.length > 1) {
     error.write(
-      `${matches.length} suppressions sit at ${input.from} — --from cannot choose between them; record them in an interactive session\n`,
+      `${matches.length} suppressions sit at ${options.from} — --from cannot choose between them; record them in an interactive session\n`,
     );
     return { exitCode: 1 };
   }
 
   const detail: Detail = {
-    reason: input.reason,
-    reference: input.reference ?? "",
+    reason: options.reason,
+    reference: options.reference ?? "",
   };
   const expiry: ExpiryDecision = {
     kind: "temporary",
@@ -627,11 +1116,10 @@ async function scriptedSession(
   const records = [recordFor(matches[0]!, detail, expiry)];
   const proposal = propose(registry.raw, records);
   if (proposal.defects.length > 0) {
-    out.write("✘ nothing written — defects found\n");
-    for (const finding of proposal.defects) out.write(`${renderFinding(finding)}\n`);
+    printDefects(out, proposal.defects);
     return { exitCode: 1 };
   }
-  printReview(out, records);
+  printReview(out, records, "new");
   writeRegistry(input.git.root, proposal.text);
   printWritten(out, records, input.policy);
   return { exitCode: 0 };
@@ -648,23 +1136,72 @@ function parseFrom(from: string): { file: string; line: number } | null {
 
 // --- the proposal, the write, and the transcript ------------------------------
 
-/** One machine-authored record: match fields from the inventory, the rest from the interview. */
+/** The machine-authored records for one write, in selection order. */
+function recordsFor(
+  selected: readonly MatchFields[],
+  details: readonly Detail[],
+  expiry: ExpiryDecision,
+): ExceptionRecord[] {
+  return selected.map((fields, i) => recordFor(fields, details[i]!, expiry));
+}
+
+/**
+ * One machine-authored record: match fields from the inventory, the rest from the
+ * interview, in the registry's canonical field order — which is why this builds
+ * the object rather than spreading a lifecycle decision into it (that is
+ * `applyExpiry`'s job, for a record that already exists). The order is the
+ * format's, so the bytes the append path writes are the bytes a hand-written
+ * record of the same fields would be.
+ */
 function recordFor(
-  suppression: ReconciledSuppression,
+  fields: MatchFields,
   detail: Detail,
   expiry: ExpiryDecision,
 ): ExceptionRecord {
   return {
-    rule: suppression.rule,
-    suppression_type: suppression.suppressionType,
-    fingerprint: suppression.fingerprint,
-    file: suppression.file,
+    rule: fields.rule,
+    suppression_type: fields.suppressionType,
+    fingerprint: fields.fingerprint,
+    file: fields.file,
     type: expiry.kind,
     reason: detail.reason,
     ...(detail.reference === "" ? {} : { reference: detail.reference }),
     ...(expiry.kind === "temporary" ? { expires: expiry.date } : {}),
-    line: suppression.line,
+    ...(fields.line === undefined ? {} : { line: fields.line }),
   };
+}
+
+/**
+ * A record with its lifecycle half not yet decided. The shape a record is built
+ * in before one expiry decision turns it into a record: the format forbids
+ * `expires` on a permanent and requires it on a temporary, so the two fields
+ * move together and neither can be set without the other.
+ */
+type RecordLifecycleOmitted = Omit<ExceptionRecord, "type" | "expires">;
+
+/** A record with its lifecycle half not yet decided, or one that already carries it. */
+type ExpiryTarget = RecordLifecycleOmitted & Pick<ExceptionRecord, "expires">;
+
+/**
+ * The record that carries one expiry decision: the type the decision implies, and
+ * the date it carries or the absence of one. The lifecycle's whole shape, in one
+ * place — a renewal is a decision applied to a record that exists, so this is the
+ * only place the two fields move together, and a record can never be left
+ * carrying a permanent's type with a temporary's date (a shape the format calls a
+ * defect).
+ */
+function applyExpiry(record: ExpiryTarget, expiry: ExpiryDecision): ExceptionRecord {
+  if (expiry.kind === "temporary") {
+    return { ...record, type: "temporary", expires: expiry.date };
+  }
+  // Permanent: the date goes with the type, so a record is never left carrying both.
+  const { expires: _dropped, ...rest } = record;
+  return { ...rest, type: "permanent" };
+}
+
+/** A record's horizon as the transcript states it — one spelling, three call sites. */
+function horizonOf(record: ExceptionRecord): string {
+  return record.type === "temporary" ? `expires ${record.expires}` : "permanent";
 }
 
 /** A validated proposal: the combined registry text, and the defects refusing it. */
@@ -679,7 +1216,8 @@ function propose(
 /**
  * The write's shape: the new records appended to the existing raw text, never
  * a reserialization of it — the records an author did not touch keep their
- * bytes, their order, and their comments.
+ * bytes, their order, and their comments. (A renewal never comes through here:
+ * it edits the record it names, so the pool it belongs to keeps its size.)
  */
 function combineRegistry(existing: string | null, records: readonly ExceptionRecord[]): string {
   const appended = records
@@ -699,17 +1237,25 @@ function writeRegistry(root: string, text: string): void {
 /**
  * The review block: one bullet per record, match fields in one line, the
  * human answers under the first bullet that carries them — a shared answer is
- * printed once, a per-record one under each record that gave it.
+ * printed once, a per-record one under each record that gave it. A renewal's
+ * bullet says so, and carries the reason and reference the record keeps: the
+ * review is the record as it will read after the edit.
  */
-function printReview(out: NodeJS.WritableStream, records: readonly ExceptionRecord[]): void {
+function printReview(
+  out: NodeJS.WritableStream,
+  records: readonly ExceptionRecord[],
+  marker: "new" | "renewal",
+): void {
   out.write("Review — the record(s) to write:\n");
   const first = records[0]!;
   const shared = records.every(
     (r) => r.reason === first.reason && (r.reference ?? "") === (first.reference ?? ""),
   );
   for (const [i, record] of records.entries()) {
-    const horizon = record.type === "temporary" ? `expires ${record.expires}` : "permanent";
-    out.write(`  • ${record.rule} @ ${record.file}:${record.line} — ${record.suppression_type} (new) — ${horizon}\n`);
+    const horizon = horizonOf(record);
+    out.write(
+      `  • ${record.rule} @ ${whereOf(record)} — ${record.suppression_type} (${marker}) — ${horizon}\n`,
+    );
     if (shared && i > 0) continue;
     out.write(`    reason:    ${record.reason}\n`);
     if (record.reference) out.write(`    reference: ${record.reference}\n`);
@@ -736,6 +1282,24 @@ function printWritten(
     out.write("  1. land the record in its own PR — an approver reviews and merges it\n");
     out.write("  2. once merged, land the code change that adds the suppression\n");
   }
+}
+
+/**
+ * The renewal's confirmation, and the guidance that follows it. A renewal never
+ * rides the change it authorizes in either landing mode: it moves a horizon
+ * every later evaluation judges by, so the approval that covers the original
+ * record does not cover this one. Protected track, fresh authorization, both
+ * modes — which is why these two steps print where a new record's do not.
+ */
+function printRenewed(out: NodeJS.WritableStream, record: ExceptionRecord): void {
+  // The date itself, not `expires <date>`: this line states what the record's
+  // expiry *is now*, and the review bullet above it is where the field is named.
+  const horizon = record.type === "temporary" ? record.expires! : "permanent";
+  out.write(`✎ the existing record's expiry is now ${horizon}\n`);
+  out.write("it takes effect only once the change is approved and merged.\n");
+  out.write("\nNext steps\n");
+  out.write("  1. the renewal updates the existing record's expiry in place\n");
+  out.write("  2. submit it in a PR — an approver reviews and merges it\n");
 }
 
 // --- the prompter -------------------------------------------------------------
@@ -771,8 +1335,8 @@ class Prompter {
   }
 
   /**
-   * One question. Resolves the trimmed answer, `""` for Enter, or null when
-   * the prompt stream ended — input exhausted is the end of the session, never
+   * One question. Resolves the trimmed answer, `""` for Enter, or null when the
+   * prompt stream ended — input exhausted is the end of the session, never
    * a default anyone chose.
    */
   async ask(label: string): Promise<string | null> {

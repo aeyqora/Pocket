@@ -428,6 +428,23 @@ export function overlongRecords(input: OverlongRecordsInput): ExceptionRecord[] 
   );
 }
 
+/**
+ * One refusing record's error line, the wording every surface that refuses a
+ * newly written over-max date shares: the CI record's `EXPIRY_POLICY` error and
+ * the authoring surface's own refusal. The facts are `validate`'s, deliberately:
+ * the date that was written, which record wrote it, the maximum it runs past,
+ * and the last date that maximum allows. It does not tell the reader to bump
+ * `maxExpiry` — the two-step is a workflow the guides own, not a sentence to
+ * repeat on every CI line.
+ */
+export function expiryPolicyMessage(
+  record: ExceptionRecord,
+  maxExpiry: DurationLiteral,
+  now: Date,
+): string {
+  return `newly written expires ${record.expires} for ${record.rule} in ${record.file} runs past the baseline ${maxExpiry} maximum (on or before ${expiryHorizon(now, maxExpiry)})`;
+}
+
 /** A record's identity together with the date it carries, the refusal multiset's unit. */
 function datedKey(record: ExceptionRecord): string {
   return `${recordMatchKey(record)}\u0000${record.expires ?? ""}`;

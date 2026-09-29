@@ -369,6 +369,19 @@ export function isoDay(date: Date): string {
 }
 
 /**
+ * Whole days from one ISO date to another — negative when `to` is the earlier
+ * date. The one spelling of "how far apart are these two dates", so a surface
+ * that reports a horizon as a day count (the wizard's renewal list) and the
+ * arithmetic that produced the date itself cannot disagree about it. Midnight
+ * UTC on both sides, so a DST transition in the viewer's own zone cannot move
+ * the count; the arithmetic is whole days by construction, hence the rounding.
+ */
+export function daysBetween(from: string, to: string): number {
+  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
+  return Math.round(ms / 86_400_000);
+}
+
+/**
  * The date a duration literal lands on from `now`'s UTC date — the one spelling
  * of the "today plus a literal" arithmetic, so the authoring surface's prefill
  * and the expiry-horizon check can never disagree about a date.

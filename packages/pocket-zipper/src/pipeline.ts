@@ -10,7 +10,12 @@ import {
   type ConfigSeverityLevel,
 } from "./recognize.js";
 import { computeGovernedSet, expiryHorizon, parsePolicy, suggestedExpiry } from "./policy.js";
-import { coverExceptions, expiryPolicyRefusals, overlongRecords } from "./registry.js";
+import {
+  coverExceptions,
+  expiryPolicyMessage,
+  expiryPolicyRefusals,
+  overlongRecords,
+} from "./registry.js";
 import {
   PROTECTED_CONFIG,
   PROTECTED_REGISTRY,
@@ -335,21 +340,6 @@ function policyChangeMessage(policyChange: PolicyChangeResult): string {
         ? EDIT_CLAUSE
         : "";
   return `${sentence}${clause}`;
-}
-
-/**
- * One refusing record's error line. The facts are `validate`'s, deliberately:
- * the date that was written, which record wrote it, the maximum it runs past,
- * and the last date that maximum allows. It does not tell the reader to bump
- * `maxExpiry` — the two-step is a workflow the guides own, not a sentence to
- * repeat on every CI line.
- */
-function expiryPolicyMessage(
-  record: ExceptionRecord,
-  maxExpiry: DurationLiteral,
-  now: Date,
-): string {
-  return `newly written expires ${record.expires} for ${record.rule} in ${record.file} runs past the baseline ${maxExpiry} maximum (on or before ${expiryHorizon(now, maxExpiry)})`;
 }
 
 /** The governed, reconciled half of one analysis: what every evaluation and every authoring session reads off it. */
