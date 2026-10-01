@@ -209,6 +209,54 @@ describe("policy: exceptions stanza parsing", () => {
     );
   });
 
+  it("rejects a floor for a rule excluded by the allowlist", () => {
+    assertConfigError(
+      () =>
+        parsePolicy(
+          "governedRules: [no-debugger]\nminSeverities:\n  no-console: warn\n",
+          new Set(["no-console", "no-debugger"]),
+        ),
+      /minSeverities\.no-console.*no-console.*governedRules/,
+    );
+  });
+
+  it("rejects an unknown core rule used as a floor", () => {
+    assertConfigError(
+      () => parsePolicy("minSeverities:\n  no-such-rule-xyz: warn\n", KNOWN),
+      /minSeverities\.no-such-rule-xyz.*unrecognized ESLint rule 'no-such-rule-xyz'/,
+    );
+  });
+
+  it("rejects a typo in an installed plugin rule used as a floor", () => {
+    assertConfigError(
+      () =>
+        parsePolicy(
+          "minSeverities:\n  jsx-a11y/no-autofocuss: warn\n",
+          new Set(["no-console", "jsx-a11y/no-autofocus"]),
+        ),
+      /minSeverities\.jsx-a11y\/no-autofocuss.*unrecognized ESLint rule 'jsx-a11y\/no-autofocuss'/,
+    );
+  });
+
+  it("accepts a plugin rule before its plugin is installed", () => {
+    const policy = parsePolicy(
+      "minSeverities:\n  jsx-a11y/no-autofocus: warn\n",
+      new Set(["no-console"]),
+    );
+    assert.deepEqual(policy.minSeverities, { "jsx-a11y/no-autofocus": "warn" });
+  });
+
+  it("checks excluded floors even when the gate is disabled", () => {
+    assertConfigError(
+      () =>
+        parsePolicy(
+          "enabled: false\ngovernedRules: [no-debugger]\nminSeverities:\n  no-console: warn\n",
+          new Set(["no-console", "no-debugger"]),
+        ),
+      /minSeverities\.no-console.*no-console.*governedRules/,
+    );
+  });
+
   it("parses allowSameChangeExceptions as a typed boolean", () => {
     // The opt-in is paired with a can-guarantee host in the accepting cases,
     // because the pair is what the key means: `true` on its own is now a
@@ -354,6 +402,34 @@ describe("policy config through the CLI fixture seam", () => {
       baselineWithConfig(configYaml({ defaultExpiry: "3mo", maxExpiry: "30d" })),
       /exceeds 'maxExpiry'/,
     );
+  });
+
+  it("fails closed when a floor is excluded by the baseline allowlist", () => {
+    expectCliConfigError(
+      baselineWithConfig(
+        configYaml({
+          governedRules: ["no-debugger"],
+          minSeverities: { "no-console": "warn" },
+        }),
+      ),
+      /minSeverities\.no-console.*no-console.*governedRules/,
+    );
+  });
+
+  it("fails closed when a floor names no known ESLint rule", () => {
+    expectCliConfigError(
+      baselineWithConfig(configYaml({ minSeverities: { "no-such-rule-xyz": "warn" } })),
+      /minSeverities\.no-such-rule-xyz.*unrecognized ESLint rule 'no-such-rule-xyz'/,
+    );
+  });
+
+  it("accepts a floor for a plugin rule that is not installed yet", () => {
+    const r = baselineWithConfig(
+      configYaml({ minSeverities: { "future-plugin/no-rule-yet": "warn" } }),
+    );
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.deepEqual(res.record?.errors, []);
   });
 
   it("fails closed on a broken config even when enabled is false", () => {

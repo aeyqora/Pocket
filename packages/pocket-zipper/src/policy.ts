@@ -316,6 +316,15 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
       ".pocket-zipper/config.yml: 'minSeverities' must be a mapping of rule ids to 'off', 'warn', or 'error'; every rule key must name a valid severity band",
     );
   }
+  if (view.minSeverities !== null && view.governedRules !== null) {
+    for (const rule of Object.keys(view.minSeverities)) {
+      if (!view.governedRules.includes(rule)) {
+        throw configError(
+          `.pocket-zipper/config.yml: 'minSeverities.${rule}' names rule '${rule}', which 'governedRules' excludes`,
+        );
+      }
+    }
+  }
   if (!view.allowSameChangeValid) {
     throw configError(".pocket-zipper/config.yml: 'allowSameChangeExceptions' must be a boolean");
   }
@@ -355,6 +364,18 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
       }
     }
   }
+  // Core rules and plugins already loaded by the repository are closed-world:
+  // a floor typo must fail rather than becoming inert. A namespaced rule whose
+  // namespace is absent from the known set is the one forward-declaration case
+  // we can distinguish without loading a plugin that is not installed yet.
+  if (view.enabled && view.minSeverities !== null && knownRules.size > 0) {
+    for (const rule of Object.keys(view.minSeverities)) {
+      if (knownRules.has(rule) || isForwardDeclaredPluginRule(rule, knownRules)) continue;
+      throw configError(
+        `.pocket-zipper/config.yml: 'minSeverities.${rule}' names an unrecognized ESLint rule '${rule}'`,
+      );
+    }
+  }
 
   return {
     enabled: view.enabled,
@@ -368,6 +389,13 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
 
 function isSeverityBand(value: unknown): value is SeverityBand {
   return value === "off" || value === "warn" || value === "error";
+}
+
+function isForwardDeclaredPluginRule(rule: string, knownRules: Set<string>): boolean {
+  const slash = rule.indexOf("/");
+  if (slash <= 0) return false;
+  const namespace = rule.slice(0, slash);
+  return ![...knownRules].some((known) => known.startsWith(`${namespace}/`));
 }
 
 /**
