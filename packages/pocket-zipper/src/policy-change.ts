@@ -6,7 +6,7 @@ import {
   slotMatchKeyOf,
 } from "./exception-match.js";
 import type { ConfigSeverityLevel } from "./recognize.js";
-import type { ExceptionRecord, Policy } from "./types.js";
+import type { ExceptionRecord, Policy, SeverityBand } from "./types.js";
 
 export interface PolicyChangeInput {
   baselineConfig: string | null;
@@ -70,6 +70,69 @@ export interface PolicyChangeResult {
    * `weakening`, which `combined` cannot stand in for.
    */
   combined: boolean;
+}
+
+export interface SeverityFloorViolation {
+  rule: string;
+  floor: SeverityBand;
+  head: SeverityBand;
+  baseline: SeverityBand | "undeclared";
+}
+
+export interface SeverityFloorInput {
+  minSeverities: Readonly<Record<string, SeverityBand>> | undefined;
+  baselineLevels: ConfigSeverityLevel[];
+  headLevels: ConfigSeverityLevel[];
+}
+
+const BAND_VALUE: Record<SeverityBand, number> = { off: 0, warn: 1, error: 2 };
+
+/**
+ * Finds deliberate drops below baseline-authoritative per-rule floors.
+ *
+ * A floor is not a requirement that the head already meets. It only blocks a
+ * change when the head is below the floor and is weaker than its baseline
+ * counterpart. An undeclared baseline counterpart is treated as a change from
+ * no declaration, which keeps floors effective for rules supplied by presets.
+ */
+export function severityFloorViolations(input: SeverityFloorInput): SeverityFloorViolation[] {
+  const floors = input.minSeverities ?? {};
+  const violations: SeverityFloorViolation[] = [];
+
+  for (const [rule, floor] of Object.entries(floors)) {
+    const head = input.headLevels.filter((level) => level.rule === rule);
+    const baseline = input.baselineLevels.filter((level) => level.rule === rule);
+    const baselineGlobal = baseline.find((level) => level.files === null)?.band;
+    const candidates: SeverityFloorViolation[] = [];
+
+    for (const headLevel of head) {
+      if (headLevel.band >= BAND_VALUE[floor]) continue;
+      const baselineLevel = baseline.find(
+        (level) => spanKey(level) === spanKey(headLevel),
+      );
+      const baselineBand = baselineLevel?.band ?? baselineGlobal;
+      if (baselineBand !== undefined && headLevel.band >= baselineBand) continue;
+      candidates.push({
+        rule,
+        floor,
+        head: bandName(headLevel.band),
+        baseline: baselineBand === undefined ? "undeclared" : bandName(baselineBand),
+      });
+    }
+
+    // Floors are rule-granular. A scoped config may yield several candidates,
+    // but one rule produces one actionable failure with its weakest head band.
+    candidates.sort((a, b) => BAND_VALUE[a.head] - BAND_VALUE[b.head]);
+    const first = candidates[0];
+    if (first) violations.push(first);
+  }
+  return violations;
+}
+
+function bandName(value: number): SeverityBand {
+  if (value === 0) return "off";
+  if (value === 1) return "warn";
+  return "error";
 }
 
 /**

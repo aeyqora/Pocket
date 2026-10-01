@@ -1,6 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { configError } from "./errors.js";
-import type { DurationLiteral, Host, Policy } from "./types.js";
+import type { DurationLiteral, Host, Policy, SeverityBand } from "./types.js";
 
 export const DEFAULT_EXPIRY = "30d" as const;
 export const DEFAULT_MAX_EXPIRY = "3mo" as const;
@@ -44,6 +44,7 @@ export function canGuaranteePathApproval(host: Host | null): boolean {
 const KNOWN_KEYS = new Set([
   "enabled",
   "governedRules",
+  "minSeverities",
   "exceptions",
   "allowSameChangeExceptions",
   "host",
@@ -96,6 +97,8 @@ export interface PolicyView {
   enabledValid: boolean;
   governedRules: string[] | null;
   governedRulesValid: boolean;
+  minSeverities: Record<string, SeverityBand> | null;
+  minSeveritiesValid: boolean;
   exceptions: ExceptionsView;
   /** Top-level keys the policy document may not carry. */
   topLevelUnknown: string[];
@@ -123,6 +126,8 @@ function emptyView(): PolicyView {
     enabledValid: true,
     governedRules: null,
     governedRulesValid: true,
+    minSeverities: null,
+    minSeveritiesValid: true,
     exceptions: { ...EMPTY_EXCEPTIONS },
     topLevelUnknown: [],
     allowSameChangeExceptions: false,
@@ -165,6 +170,30 @@ export function viewPolicy(raw: string | null): PolicyView {
     }
   }
 
+  const floorsRaw = obj["minSeverities"];
+  let minSeverities: Record<string, SeverityBand> | null = null;
+  let minSeveritiesValid = true;
+  if (floorsRaw !== undefined && floorsRaw !== null) {
+    if (typeof floorsRaw !== "object" || Array.isArray(floorsRaw)) {
+      minSeveritiesValid = false;
+    } else {
+      const parsed: Record<string, SeverityBand> = {};
+      for (const [rule, floor] of Object.entries(floorsRaw as Record<string, unknown>)) {
+        if (
+          rule.trim().length === 0 ||
+          floor !== "off" &&
+            floor !== "warn" &&
+            floor !== "error"
+        ) {
+          minSeveritiesValid = false;
+        } else {
+          parsed[rule] = floor;
+        }
+      }
+      minSeverities = parsed;
+    }
+  }
+
   const topLevelUnknown = Object.keys(obj).filter((k) => !KNOWN_KEYS.has(k));
 
   const sameRaw = obj["allowSameChangeExceptions"];
@@ -181,6 +210,8 @@ export function viewPolicy(raw: string | null): PolicyView {
     enabledValid,
     governedRules,
     governedRulesValid,
+    minSeverities,
+    minSeveritiesValid,
     exceptions: parseExceptions(obj["exceptions"]),
     topLevelUnknown,
     allowSameChangeExceptions,
@@ -273,6 +304,11 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
       ".pocket-zipper/config.yml: 'governedRules' must be a list of non-empty strings",
     );
   }
+  if (!view.minSeveritiesValid) {
+    throw configError(
+      ".pocket-zipper/config.yml: 'minSeverities' must be a mapping of rule ids to 'off', 'warn', or 'error'",
+    );
+  }
   if (!view.allowSameChangeValid) {
     throw configError(".pocket-zipper/config.yml: 'allowSameChangeExceptions' must be a boolean");
   }
@@ -316,6 +352,7 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
   return {
     enabled: view.enabled,
     governedRules: view.governedRules,
+    ...(view.minSeverities === null ? {} : { minSeverities: view.minSeverities }),
     exceptions,
     allowSameChangeExceptions: view.allowSameChangeExceptions,
     host: view.host,

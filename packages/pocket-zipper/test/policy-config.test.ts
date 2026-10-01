@@ -38,6 +38,29 @@ function assertConfigError(
 }
 
 describe("policy: exceptions stanza parsing", () => {
+  it("parses per-rule minimum severity floors", () => {
+    const policy = parsePolicy(
+      "minSeverities:\n  no-console: warn\n  no-debugger: off\n",
+      new Set(["no-console", "no-debugger"]),
+    );
+    assert.deepEqual(policy.minSeverities, { "no-console": "warn", "no-debugger": "off" });
+  });
+
+  it("rejects malformed severity floors and still validates them when disabled", () => {
+    assertConfigError(
+      () => parsePolicy("minSeverities: warn\n", KNOWN),
+      /'minSeverities'/,
+    );
+    assertConfigError(
+      () => parsePolicy("minSeverities:\n  no-console: notice\n", KNOWN),
+      /'minSeverities'/,
+    );
+    assertConfigError(
+      () => parsePolicy("enabled: false\nminSeverities:\n  no-console: notice\n", KNOWN),
+      /'minSeverities'/,
+    );
+  });
+
   it("applies the canonical fallbacks for an absent file", () => {
     assert.deepEqual(parsePolicy(null, KNOWN), DEFAULT_POLICY);
   });

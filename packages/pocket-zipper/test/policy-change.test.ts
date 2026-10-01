@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { detectPolicyChange } from "../src/policy-change.js";
+import { detectPolicyChange, severityFloorViolations } from "../src/policy-change.js";
 import type { PolicyChangeInput, PolicyChangeResult } from "../src/policy-change.js";
 import { DEFAULT_POLICY } from "../src/policy.js";
 import { loadRegistry } from "../src/validate.js";
@@ -486,6 +486,78 @@ describe("policy-change: ESLint config severity weakening", () => {
         headLevels: [lv("no-console", 1)],
       }),
       { weakening: true, failure: false, source: "both", registry: "none", shape: "edit", sanctioned: [], combined: false },
+    );
+  });
+});
+
+describe("policy-change: severity floors", () => {
+  const levels = (band: number, files: string[] | null = null) => [lv("no-console", band, files)];
+
+  it("fails a floored error rule stepped down to warn or off", () => {
+    assert.deepEqual(
+      severityFloorViolations({
+        minSeverities: { "no-console": "error" },
+        baselineLevels: levels(2),
+        headLevels: levels(1),
+      }),
+      [{ rule: "no-console", floor: "error", head: "warn", baseline: "error" }],
+    );
+    assert.equal(
+      severityFloorViolations({
+        minSeverities: { "no-console": "error" },
+        baselineLevels: levels(2),
+        headLevels: levels(0),
+      })[0]?.head,
+      "off",
+    );
+  });
+
+  it("permits a warn floor's migration step but fails its next drop", () => {
+    assert.deepEqual(
+      severityFloorViolations({
+        minSeverities: { "no-console": "warn" },
+        baselineLevels: levels(2),
+        headLevels: levels(1),
+      }),
+      [],
+    );
+    assert.deepEqual(
+      severityFloorViolations({
+        minSeverities: { "no-console": "warn" },
+        baselineLevels: levels(1),
+        headLevels: levels(0),
+      }),
+      [{ rule: "no-console", floor: "warn", head: "off", baseline: "warn" }],
+    );
+  });
+
+  it("grandfathers a band already below its floor, but not a further drop", () => {
+    assert.deepEqual(
+      severityFloorViolations({
+        minSeverities: { "no-console": "error" },
+        baselineLevels: levels(1),
+        headLevels: levels(1),
+      }),
+      [],
+    );
+    assert.deepEqual(
+      severityFloorViolations({
+        minSeverities: { "no-console": "error" },
+        baselineLevels: levels(1),
+        headLevels: levels(0),
+      }),
+      [{ rule: "no-console", floor: "error", head: "off", baseline: "warn" }],
+    );
+  });
+
+  it("fails when the baseline has no declaration for a floored head rule", () => {
+    assert.deepEqual(
+      severityFloorViolations({
+        minSeverities: { "no-console": "warn" },
+        baselineLevels: [],
+        headLevels: levels(0),
+      }),
+      [{ rule: "no-console", floor: "warn", head: "off", baseline: "undeclared" }],
     );
   });
 });

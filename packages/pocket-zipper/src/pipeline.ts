@@ -9,7 +9,13 @@ import {
   recognizeFile,
   type ConfigSeverityLevel,
 } from "./recognize.js";
-import { computeGovernedSet, expiryHorizon, parsePolicy, suggestedExpiry } from "./policy.js";
+import {
+  computeGovernedSet,
+  expiryHorizon,
+  parsePolicy,
+  suggestedExpiry,
+  viewPolicy,
+} from "./policy.js";
 import {
   coverExceptions,
   expiryPolicyMessage,
@@ -20,7 +26,12 @@ import { unusedExceptions } from "./cleanup.js";
 import { errorRecords, loadRegistry, loadRegistryEntries } from "./validate.js";
 import { PROTECTED_CONFIG, PROTECTED_REGISTRY } from "./protected-paths.js";
 
-import { detectPolicyChange, type PolicyChangeResult } from "./policy-change.js";
+import {
+  detectPolicyChange,
+  severityFloorViolations,
+  type PolicyChangeResult,
+  type SeverityFloorViolation,
+} from "./policy-change.js";
 import {
   buildRecord,
   consumedDebtCount,
@@ -201,6 +212,16 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         baselineLevels: analysis.baselineLevels,
         headLevels: analysis.headLevels,
       });
+      // Floors are baseline policy, but unlike the protected-file half of the
+      // policy delta they always inspect both ESLint config trees. This keeps a
+      // floor active when the change touches only eslint.config.* or source.
+      const floorViolations = severityFloorViolations({
+        minSeverities: policy.minSeverities,
+        baselineLevels: analysis.baselineLevels,
+        headLevels: analysis.headLevels,
+      });
+      const stagedFloors =
+        options.mode === "pre-commit" ? viewPolicy(headConfigRaw).minSeverities : null;
 
       // One suppression, read in one place, by both of the terms that depend on
       // it. When the host's path-scoped approval stands in for the second PR, the
@@ -282,7 +303,10 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
             });
 
       const gateFailure =
-        summary.newDebt.unauthorized > 0 || policyChange.failure || refusals.length > 0;
+        summary.newDebt.unauthorized > 0 ||
+        policyChange.failure ||
+        refusals.length > 0 ||
+        floorViolations.length > 0;
 
       if (policyChange.weakening && !excepted) {
         errors.push({
@@ -299,6 +323,13 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         errors.push({
           code: "EXPIRY_POLICY",
           message: expiryPolicyMessage(record, policy.exceptions.maxExpiry, now),
+        });
+      }
+      for (const violation of floorViolations) {
+        errors.push({
+          code: "SEVERITY_FLOOR",
+          message: severityFloorMessage(violation, options.mode, stagedFloors),
+          detail: violation,
         });
       }
 
@@ -369,6 +400,17 @@ function policyChangeMessage(policyChange: PolicyChangeResult): string {
         ? EDIT_CLAUSE
         : "";
   return `${sentence}${clause}`;
+}
+
+function severityFloorMessage(
+  violation: SeverityFloorViolation,
+  mode: Mode,
+  stagedFloors: Record<string, "off" | "warn" | "error"> | null,
+): string {
+  const base = `rule '${violation.rule}' is below severity floor '${violation.floor}': head is '${violation.head}', baseline is '${violation.baseline}'`;
+  if (mode !== "pre-commit") return base;
+  const staged = stagedFloors?.[violation.rule] ?? "none";
+  return `${base}; staged policy floor is '${staged}' and takes effect from the next commit`;
 }
 
 /** The governed, reconciled half of one analysis: what every evaluation and every authoring session reads off it. */

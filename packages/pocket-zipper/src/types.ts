@@ -19,6 +19,7 @@ export type ErrorCode =
   | "ESLINT_ERROR"
   | "CONFIG_ERROR"
   | "POLICY_CHANGE"
+  | "SEVERITY_FLOOR"
   | "EXPIRY_POLICY"
   | "INTERNAL_ERROR";
 
@@ -35,6 +36,9 @@ export type ExceptionStatus = "used" | "dangling" | "spent" | "expired";
  * template-literal type is a convenience, not the validator.
  */
 export type DurationLiteral = `${number}d` | `${number}mo`;
+
+/** The three ESLint severity bands, ordered off < warn < error. */
+export type SeverityBand = "off" | "warn" | "error";
 
 /** The declared host value space. The can-guarantee subset is a ticket-07 concern. */
 export type Host =
@@ -82,6 +86,8 @@ export interface ExceptionRef {
 export interface Policy {
   enabled: boolean;
   governedRules: string[] | null;
+  /** Optional minimum severity per governed rule; absent means no floor gate. */
+  minSeverities?: Record<string, SeverityBand>;
   /** The expiry policy: fallbacks apply when absent (`30d` / `3mo`). */
   exceptions: {
     defaultExpiry: DurationLiteral;
@@ -259,5 +265,3 @@ export interface ChangeMap {
   /** paths that are binary (skipped) */
   binary: Set<string>;
 }
-
-

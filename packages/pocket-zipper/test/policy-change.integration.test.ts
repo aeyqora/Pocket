@@ -598,6 +598,29 @@ describe("config-level severity weakenings as policy changes", () => {
     assert.match(res.stdout, /POLICY_CHANGE/);
   });
 
+  it("fails a config step-down covered by a severity floor", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(PROTECTED_CONFIG, configYaml({ minSeverities: { "no-console": "error" } }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "warn" }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.ok(hasErrorCode(res.record, "SEVERITY_FLOOR"));
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
+    const error = res.record?.errors.find((entry) => entry.code === "SEVERITY_FLOOR");
+    assert.deepEqual(error?.detail, {
+      rule: "no-console",
+      floor: "error",
+      head: "warn",
+      baseline: "error",
+    });
+    assert.match(res.stdout, /no-console.*error.*warn/);
+  });
+
   it("does not fire for a warn-to-error strengthening", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "warn" }));
@@ -609,6 +632,22 @@ describe("config-level severity weakenings as policy changes", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
     assert.equal(hasErrorCode(res.record, "POLICY_CHANGE"), false);
+  });
+
+  it("fails the same floor in pre-commit and explains baseline authority", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(PROTECTED_CONFIG, configYaml({ minSeverities: { "no-console": "error" } }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "warn" }));
+    r.stage("eslint.config.mjs");
+    const res = r.runCli(["pre-commit"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record?.mode, "pre-commit");
+    assert.ok(hasErrorCode(res.record, "SEVERITY_FLOOR"));
+    assert.match(res.stdout, /staged policy floor is 'error'/);
+    assert.match(res.stdout, /takes effect from the next commit/);
   });
 
   it("fails when a severity drop is paired with new directive debt for the same rule", () => {

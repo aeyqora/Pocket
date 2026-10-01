@@ -197,6 +197,7 @@ export function eslintConfig(rules: Record<string, string>): string {
 export function configYaml(opts: {
   enabled?: boolean;
   governedRules?: string[];
+  minSeverities?: Record<string, "off" | "warn" | "error">;
   defaultExpiry?: string;
   maxExpiry?: string;
   allowSameChangeExceptions?: boolean;
@@ -207,6 +208,12 @@ export function configYaml(opts: {
   if (opts.governedRules !== undefined) {
     lines.push("governedRules:");
     for (const r of opts.governedRules) lines.push(`  - ${r}`);
+  }
+  if (opts.minSeverities !== undefined) {
+    lines.push("minSeverities:");
+    for (const [rule, severity] of Object.entries(opts.minSeverities)) {
+      lines.push(`  ${rule}: ${severity}`);
+    }
   }
   if (opts.defaultExpiry !== undefined || opts.maxExpiry !== undefined) {
     lines.push("exceptions:");
