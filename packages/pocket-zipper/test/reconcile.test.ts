@@ -33,6 +33,7 @@ function run(
     lineDiffs?: Map<string, LineDiff>;
     baselineIndex?: Set<string>;
     headIndex?: Set<string>;
+    renames?: Map<string, string>;
   } = {},
 ) {
   return reconcile({
@@ -41,6 +42,7 @@ function run(
     lineDiffs: opts.lineDiffs ?? new Map(),
     baselineIndex: opts.baselineIndex ?? new Set(),
     headIndex: opts.headIndex ?? new Set(),
+    renames: opts.renames ?? new Map(),
   });
 }
 
@@ -108,6 +110,53 @@ describe("reconcile: continuity dispositions", () => {
     );
     assert.equal(out.head.find((e) => e.rule === "no-console")!.disposition, "moved-existing");
     assert.equal(out.head.find((e) => e.rule === "no-debugger")!.disposition, "new");
+  });
+
+  it("does not pair identical directives across unrelated files", () => {
+    const out = run(
+      [
+        supp({ file: "src/a.js", line: 1, guardStart: 2, guardedContent: "reportTotals()" }),
+        supp({ file: "src/b.js", line: 1, guardStart: 2, guardedContent: "console.log(\"keepme\")" }),
+      ],
+      [
+        supp({ file: "src/a.js", line: 1, guardStart: 2, guardedContent: "console.log(\"keepme\")" }),
+      ],
+    );
+
+    const byFile = new Map(out.head.map((entry) => [entry.file, entry]));
+    assert.equal(byFile.get("src/a.js")!.disposition, "existing");
+    assert.equal(byFile.get("src/a.js")!.baselineLine, 1);
+    assert.equal(byFile.get("src/b.js")!.disposition, "new");
+    assert.equal(byFile.get("src/b.js")!.baselineLine, null);
+  });
+
+  it("allows a git rename to pair across paths", () => {
+    const out = run(
+      [supp({ file: "src/new.js", line: 1, guardStart: 2 })],
+      [supp({ file: "src/old.js", line: 1, guardStart: 2 })],
+      { renames: new Map([["src/new.js", "src/old.js"]]) },
+    );
+
+    assert.equal(out.head[0]!.disposition, "moved-existing");
+    assert.equal(out.head[0]!.baselineLine, 1);
+  });
+
+  it("keeps dispositions stable when baseline files are visited in reverse order", () => {
+    const head = [
+      supp({ file: "src/a.js", line: 2, guardStart: 3, guardedContent: "a()" }),
+      supp({ file: "src/b.js", line: 2, guardStart: 3, guardedContent: "b()" }),
+    ];
+    const baseline = [
+      supp({ file: "src/a.js", line: 1, guardStart: 2, guardedContent: "a()" }),
+      supp({ file: "src/b.js", line: 1, guardStart: 2, guardedContent: "b()" }),
+    ];
+
+    const disposition = (out: ReturnType<typeof run>) =>
+      out.head.map((entry) => [entry.file, entry.disposition, entry.baselineLine]);
+    assert.deepEqual(
+      disposition(run(head, baseline)),
+      disposition(run(head, [...baseline].reverse())),
+    );
   });
 });
 

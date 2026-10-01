@@ -12,6 +12,8 @@ export interface ReconcileInput {
   lineDiffs: Map<string, LineDiff>;
   baselineIndex: Set<string>;
   headIndex: Set<string>;
+  /** post-image path -> pre-image path for git-recognized renames */
+  renames?: ReadonlyMap<string, string>;
 }
 
 export interface ReconcileOutput {
@@ -25,8 +27,14 @@ export interface ReconcileOutput {
  * directives expand independently.
  */
 export function reconcile(input: ReconcileInput): ReconcileOutput {
-  const { headSuppressions, baselineSuppressions, lineDiffs, baselineIndex, headIndex } =
-    input;
+  const {
+    headSuppressions,
+    baselineSuppressions,
+    lineDiffs,
+    baselineIndex,
+    headIndex,
+    renames = new Map(),
+  } = input;
 
   // Grouped by match key, so a directive that moved or was rewritten still
   // meets its counterpart. This is not a **Pool** (a pool is where records
@@ -51,13 +59,21 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
   const matchedBaseline = new Set<LogicalSuppression>();
 
   for (const [, group] of byMatchKey) {
-    const pairs = pairBySimilarity(group.head, group.baseline);
+    const pairs = pairBySimilarity(
+      group.head,
+      group.baseline,
+      (head, baseline) =>
+        head.file === baseline.file || renames.get(head.file) === baseline.file,
+    );
     const pairedHead = new Set<LogicalSuppression>();
     for (const p of pairs) {
       pairedHead.add(p.head);
       matchedBaseline.add(p.baseline);
       let disposition: Disposition = driftDisposition(p.head, p.baseline);
-      if (isTomb(p.head, p.baseline, lineDiffs, baselineIndex, headIndex)) {
+      // Line diffs are keyed by post-image path. For a rename, that diff's
+      // baseline side is the renamed-from path, so it is the pair's only valid
+      // coordinate space for both lines.
+      if (isTomb(p.head, p.baseline, lineDiffs.get(p.head.file), baselineIndex, headIndex)) {
         disposition = "materially-changed";
       }
       headOut.push({
@@ -105,7 +121,7 @@ export function isUnpaired(suppression: { readonly disposition: Disposition }): 
 function isTomb(
   head: LogicalSuppression,
   baseline: LogicalSuppression,
-  lineDiffs: Map<string, LineDiff>,
+  lineDiff: LineDiff | undefined,
   baselineIndex: Set<string>,
   headIndex: Set<string>,
 ): boolean {
@@ -116,11 +132,11 @@ function isTomb(
   // position. A guarded statement rewritten at the same position is an in-place
   // rewrite (existing debt), never a tomb.
   const guardMoved = head.guardStart !== baseline.guardStart;
-  if (!commentIsNewborn(head, lineDiffs) && !guardMoved) return false;
+  if (!commentIsNewborn(head, lineDiff) && !guardMoved) return false;
 
   // Tomb condition: the twin's *guarded* line is diff-removed (for a
   // `line` directive that coincides with the comment line).
-  if (!twinStatementIsRemoved(head, baseline, lineDiffs)) return false;
+  if (!twinStatementIsRemoved(baseline, lineDiff)) return false;
 
   const newStatement =
     head.guardedContent.length > 0 && !baselineIndex.has(head.guardedContent);
@@ -132,20 +148,17 @@ function isTomb(
 /** `diffLineIndices` is 0-based; the domain carries 1-based lines. */
 function commentIsNewborn(
   head: LogicalSuppression,
-  lineDiffs: Map<string, LineDiff>,
+  lineDiff: LineDiff | undefined,
 ): boolean {
-  const diff = lineDiffs.get(head.file);
-  return diff ? diff.addedHead.has(head.line - 1) : false;
+  return lineDiff ? lineDiff.addedHead.has(head.line - 1) : false;
 }
 
-/** The diff is keyed by the head path; `baseline.guardStart` indexes into it. */
+/** `lineDiff` belongs to the pair's head path; the baseline line indexes its base side. */
 function twinStatementIsRemoved(
-  head: LogicalSuppression,
   baseline: LogicalSuppression,
-  lineDiffs: Map<string, LineDiff>,
+  lineDiff: LineDiff | undefined,
 ): boolean {
-  const diff = lineDiffs.get(head.file);
-  return diff ? diff.removedBase.has(baseline.guardStart - 1) : false;
+  return lineDiff ? lineDiff.removedBase.has(baseline.guardStart - 1) : false;
 }
 
 function compareSuppressions(a: LogicalSuppression, b: LogicalSuppression): number {

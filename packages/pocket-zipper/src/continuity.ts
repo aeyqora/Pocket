@@ -115,21 +115,30 @@ export interface SuppressionPair {
 /**
  * Pair the head and baseline suppressions sharing one match key, highest
  * guard-context similarity first. Never by line number; ties fall back to
- * stable pool order for determinism only.
+ * file, head index, and baseline index for a total order.
  */
 export function pairBySimilarity(
   headGroup: LogicalSuppression[],
   baselineGroup: LogicalSuppression[],
+  isCompatible: (head: LogicalSuppression, baseline: LogicalSuppression) => boolean = () =>
+    true,
 ): SuppressionPair[] {
   const candidates: Array<{ h: number; b: number; sim: number }> = [];
   for (let hi = 0; hi < headGroup.length; hi++) {
     const ht = tokenize(headGroup[hi]!.guardedContent);
     for (let bi = 0; bi < baselineGroup.length; bi++) {
+      if (!isCompatible(headGroup[hi]!, baselineGroup[bi]!)) continue;
       const sim = jaccard(ht, tokenize(baselineGroup[bi]!.guardedContent));
       candidates.push({ h: hi, b: bi, sim });
     }
   }
-  candidates.sort((x, y) => y.sim - x.sim || x.h - y.h || x.b - y.b);
+  candidates.sort(
+    (x, y) =>
+      y.sim - x.sim ||
+      headGroup[x.h]!.file.localeCompare(headGroup[y.h]!.file) ||
+      x.h - y.h ||
+      x.b - y.b,
+  );
   const usedH = new Set<number>();
   const usedB = new Set<number>();
   const pairs: SuppressionPair[] = [];

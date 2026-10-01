@@ -86,6 +86,44 @@ describe("continuity matcher: recognition through to disposition", () => {
     assert.equal(d.movedExisting, 1);
   });
 
+  it("does not let a new file steal an unrelated file's baseline twin", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("src/a.js", `${nc}console.log("keepme");\n`);
+    r.commit("base");
+    r.branch("base");
+    r.write("src/a.js", `${nc}reportTotals(changed);\n`);
+    r.write("src/b.js", `${nc}console.log("keepme");\n`);
+    r.commit("head");
+
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.equal(res.record!.summary.newDebt.unauthorized, 1);
+
+    const byFile = new Map(res.record!.inventory.map((entry) => [entry.file, entry]));
+    assert.equal(byFile.get("src/a.js")!.disposition, "existing");
+    assert.equal(byFile.get("src/a.js")!.lines.baseline, 1);
+    assert.equal(byFile.get("src/b.js")!.disposition, "new");
+    assert.equal(byFile.get("src/b.js")!.lines.baseline, null);
+  });
+
+  it("keeps same-file continuity when guarded text is disjoint", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write("src/a.js", `${nc}console.log("old");\n`);
+    r.commit("base");
+    r.branch("base");
+    r.write("src/a.js", `${nc}reportTotals(changed);\n`);
+    r.write("src/b.js", `${nc}console.log("other");\n`);
+    r.commit("head");
+
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    const byFile = new Map(res.record!.inventory.map((entry) => [entry.file, entry]));
+    assert.equal(byFile.get("src/a.js")!.disposition, "existing");
+    assert.equal(byFile.get("src/b.js")!.disposition, "new");
+  });
+
   it("8. interleaved new suppression is not hidden by existing debt", () => {
     const r = repo();
     r.write(

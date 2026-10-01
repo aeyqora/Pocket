@@ -128,6 +128,28 @@ describe("continuity: the code beneath a directive is not its identity", () => {
     assert.equal(pairs.length, 1);
     assert.equal(pairs[0]!.similarity, 1);
   });
+
+  it("uses file before indexes when compatible candidates span files", () => {
+    const pairs = pairBySimilarity(
+      [
+        suppression({ file: "z.js", guardedContent: "same()" }),
+        suppression({ file: "a.js", guardedContent: "same()" }),
+      ],
+      [
+        suppression({ file: "z.js", guardedContent: "same()" }),
+        suppression({ file: "a.js", guardedContent: "same()" }),
+      ],
+      (head, baseline) => head.file === baseline.file,
+    );
+
+    assert.deepEqual(
+      pairs.map((pair) => pair.head.file),
+      ["a.js", "z.js"],
+    );
+    const byHeadFile = new Map(pairs.map((pair) => [pair.head.file, pair.baseline.file]));
+    assert.equal(byHeadFile.get("a.js"), "a.js");
+    assert.equal(byHeadFile.get("z.js"), "z.js");
+  });
 });
 
 describe("continuity: diffLineIndices", () => {

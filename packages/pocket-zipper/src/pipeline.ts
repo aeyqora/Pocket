@@ -456,6 +456,7 @@ export function reconcileGoverned(input: {
     lineDiffs: analysis.lineDiffs,
     baselineIndex: analysis.baselineIndex,
     headIndex: analysis.headIndex,
+    renames: analysis.renames,
   });
   return { governedHead, governedBaseline, head, removed };
 }
@@ -577,6 +578,8 @@ export interface Analysis {
   baselineLevels: ConfigSeverityLevel[];
   headLevels: ConfigSeverityLevel[];
   lineDiffs: Map<string, LineDiff>;
+  /** post-image path -> pre-image path for git-recognized renames */
+  renames: Map<string, string>;
   baselineIndex: Set<string>;
   headIndex: Set<string>;
 }
@@ -667,6 +670,7 @@ export async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
     baselineLevels,
     headLevels,
     lineDiffs,
+    renames: changeMap.renames,
     baselineIndex: buildLineIndex(baselineDir),
     headIndex: buildLineIndex(headDir),
   };
