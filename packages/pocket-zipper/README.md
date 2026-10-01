@@ -62,8 +62,9 @@ npx pocket-zipper check --base main
 
 - `PASS` (exit 0) — no unauthorized new debt.
 - `FAIL` (exit 1) — new or materially-changed debt; the report prints a copy-paste
-  exception record for each suppression. Also `POLICY_CHANGE` (self-authorization) and
-  `EXPIRY_POLICY` (an out-of-policy expiry).
+  exception record for each suppression. Also `POLICY_CHANGE` (self-authorization),
+  `EXPIRY_POLICY` (an out-of-policy expiry), and `SEVERITY_FLOOR` (a floored rule stepped
+  below the band `minSeverities` declares for it).
 - **Exit 2** — an operational error (`GIT_ERROR`, `ESLINT_ERROR`, `CONFIG_ERROR`,
   `INTERNAL_ERROR`).
 

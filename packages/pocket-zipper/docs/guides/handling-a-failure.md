@@ -45,6 +45,11 @@ New suppression debt requiring an exception:
   are annotated `cleared by this change — record now unused; remove it in a protected PR`,
   and unused records are printed `entry N of M · .pocket-zipper/exceptions.yml:lines` with
   their full text — see [Cleaning up unused exceptions](cleaning-up-unused-exceptions.md).
+- **The `error[…]` lines** — every gate term the run raised, whether or not any
+  suppression was flagged. A FAIL with no "new debt" section and no new-debt counts is not a
+  contradiction: `POLICY_CHANGE` (a weakening consumed by debt) and `SEVERITY_FLOOR` (a
+  floored rule stepped down) fail the run on their own, and a pure policy edit can still
+  *record* one on a run that passes.
 
 If the failure is instead an operational error (exit 2), no suppression is being flagged;
 go to [Troubleshooting](troubleshooting.md).
@@ -139,6 +144,28 @@ way — see
 [Severity drops](suppression-types.md#severity-drops--a-policy-change-with-no-suppression).
 The full set of shapes the gate counts — directives and config-offs — is in
 [What the gate counts](suppression-types.md).
+
+## A severity floor is not exceptable — it is lowered
+
+A `minSeverities` entry for the rule is the one thing that turns either of those into a
+failure on their own (`SEVERITY_FLOOR`, exit 1), so a report that fails on a config edit
+is asking for a floor change, not an exception. The floor is the authorization: lower it
+in its own protected policy PR, one merge earlier, and the step-down becomes legal from
+the next evaluation. Nothing inside the failing change authorizes it — lowering the floor
+in the same commit as the step-down does not work, because the evaluation reads the
+baseline's policy. There is no registry record to write and nothing to approve per-PR:
+the approval already happened, one merge ago, on the policy path. In `pre-commit` the
+message says exactly that (`staged policy floor is 'error' and takes effect from the next
+commit`).
+
+If the change does not need a floor at all — you dropped a band by accident, or the rule is
+governed by a preset rather than your config — restore the band and move on. The floor is
+for deliberate, reviewable weakenings that should each cost a merge; it is not a
+general-purpose veto on editing `eslint.config.*`.
+
+The full treatment, including the known limit that deleting a declaration outright
+sidesteps the floor, is in
+[the config reference](config-reference.md#minseverities--the-floor-is-the-authorization).
 
 ## Cleanup: unused exceptions
 

@@ -20,6 +20,7 @@ ships `enabled: true`, and step 3 restores it):
 ```yaml
 enabled: false                      # the canonical default ships enabled: true; this first landing disables the gate
 # governedRules:                    # optional; absent = every applicable rule is governed
+# minSeverities:                    # optional; absent = no rule has a severity floor
 exceptions:
   defaultExpiry: 30d                # duration literal (Nd / Nmo); fallback 30d
   maxExpiry: 3mo                    # duration literal (Nd / Nmo); fallback 3mo
@@ -77,7 +78,7 @@ governedRules:
   - jsx-a11y/no-autofocus
 ```
 
-Four facts keep this safe:
+Five facts keep this safe:
 
 - **Narrowing a policy is recorded but not gate-failed on its own.** Adding a
   `governedRules` allowlist that excludes rules is a policy-change signal. If the *same
@@ -90,6 +91,12 @@ Four facts keep this safe:
   the off → warn → error ladder) is a recorded policy change, even though the rule still
   runs. Same rule: pure edit passes and is recorded; paired with new debt it fails. See
   [Severity drops](suppression-types.md#severity-drops--a-policy-change-with-no-suppression).
+- **A `minSeverities` floor turns a step-down into a failure of its own.** Unless the rule
+  is floored, the three facts above hold; when a floor covers it, the step-down fails on its
+  own (`SEVERITY_FLOOR`, exit 1) whatever else the change does, and the fix is a floor change
+  in an earlier commit rather than an exception. Declaring no floors while you onboard is
+  legitimate — that is the un-opted-in default. See
+  [Severity floors](suppression-types.md#severity-floors--when-a-drop-is-a-failure).
 - **Baseline-authoritative means one merge of lag.** A head-side config edit never shapes
   its own evaluation. Widen the allowlist in this change; its effect is felt from the
   next one. This is deliberate — it stops a change from rewriting the policy and
@@ -97,7 +104,10 @@ Four facts keep this safe:
 
 `governedRules` entries must be rules ESLint recognizes. An unrecognized id fails closed
 (`CONFIG_ERROR`, exit 2). A recognized rule that doesn't currently apply anywhere is a
-forward declaration and is fine.
+forward declaration and is fine. The same applies to `minSeverities`: a floor for a rule
+the allowlist excludes, or for a rule id ESLint doesn't recognize, fails closed — while a
+floor for a real rule from a plugin you have not installed yet is accepted and simply
+ungated. See the [config reference](config-reference.md#minseverities--the-floor-is-the-authorization).
 
 ## Protecting the policy
 

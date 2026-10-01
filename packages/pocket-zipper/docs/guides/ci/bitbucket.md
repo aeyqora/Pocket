@@ -59,9 +59,9 @@ The step above is the only thing the merge depends on. Three surfaces sit beside
 of which change the verdict:
 
 - **Exit codes.** `0` pass (and hygiene-only `validate`), `1` gate FAIL — unauthorized new
-  debt, a `POLICY_CHANGE`, or an `EXPIRY_POLICY` — `2` fail-closed (`GIT_ERROR`,
-  `ESLINT_ERROR`, `CONFIG_ERROR`, `INTERNAL_ERROR`, or a registry/config defect). Keep the
-  step's default behavior: the CLI already exits with the right code.
+  debt, a `POLICY_CHANGE`, an `EXPIRY_POLICY`, or a `SEVERITY_FLOOR` — `2` fail-closed
+  (`GIT_ERROR`, `ESLINT_ERROR`, `CONFIG_ERROR`, `INTERNAL_ERROR`, or a registry/config
+  defect). Keep the step's default behavior: the CLI already exits with the right code.
 - **Lint the protected files before you push**, with
   `npx pocket-zipper validate`. It reads the working tree's `config.yml` and
   `exceptions.yml`, prints every finding, and is the maintainer's sweep: unused records

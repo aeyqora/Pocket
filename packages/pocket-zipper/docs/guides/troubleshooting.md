@@ -5,22 +5,24 @@
 | Exit | Verdict | Meaning |
 | --- | --- | --- |
 | `0` | pass | Nothing unauthorized. Also used when the policy is `enabled: false` (the record verdict is `excluded`), and for hygiene-only `validate` findings. |
-| `1` | fail | Unauthorized new or materially-changed governed directive debt; a policy-weakening edit consumed by new debt (`POLICY_CHANGE`); or a newly written expiry beyond the baseline max (`EXPIRY_POLICY`). |
+| `1` | fail | Unauthorized new or materially-changed debt of a governed rule; a policy-weakening edit consumed by new debt (`POLICY_CHANGE`); a floored rule stepped below its `minSeverities` band (`SEVERITY_FLOOR`); or a newly written expiry beyond the baseline max (`EXPIRY_POLICY`). |
 | `2` | fail closed | An operational error: `GIT_ERROR`, `ESLINT_ERROR`, `CONFIG_ERROR`, or `INTERNAL_ERROR`; or a registry/config defect surfaced by `validate`. Nothing was approved. |
 
 Granular reasons live in the evaluation record's `errors[]`, not in the exit code.
 
 A rule turned `"off"` in `eslint.config.*` — or lowered to `"warn"` — is a policy change,
 not debt: it records as `POLICY_CHANGE` and exits `0` on its own, and exits `1` only when
-the same change also adds new directive debt. See [What the gate counts](suppression-types.md).
+the same change also adds new directive debt, or when a `minSeverities` floor covers the
+rule (`SEVERITY_FLOOR`). See [What the gate counts](suppression-types.md).
 
 ## Error codes
 
 | Code | Typical cause | Fix |
 | --- | --- | --- |
 | `GIT_ERROR` | Not a git repository; a shallow clone that cannot unshallow; a partial (promisor) clone; an unresolvable `--base`; no merge-base; pre-commit in a bare repo. | See [Git problems](#git-problems). |
-| `CONFIG_ERROR` | Malformed or invalid `.pocket-zipper/config.yml` or `.pocket-zipper/exceptions.yml` — including any config key outside the known set (unknown-key rejection) — or an unrecognized rule in `governedRules`. | See [Config problems](#config-problems) and the [config reference](config-reference.md). |
+| `CONFIG_ERROR` | Malformed or invalid `.pocket-zipper/config.yml` or `.pocket-zipper/exceptions.yml` — including any config key outside the known set (unknown-key rejection) — or an unrecognized rule in `governedRules`, or a `minSeverities` floor that could never gate anything. | See [Config problems](#config-problems) and the [config reference](config-reference.md). |
 | `EXPIRY_POLICY` | A record's newly written `expires` exceeds the baseline `maxExpiry` — a new record or a renewal. Exit 1; the one pure-policy shape the core refuses. | Bump `maxExpiry` in its own protected PR first, then write the record; or shorten the expiry; permanents are unaffected. |
+| `SEVERITY_FLOOR` | A proposed change left a governed rule below the band `minSeverities` declares for it — `error` → `warn`, `error` → `off`, or `warn` → `off` on a rule floored at `error`. Exit 1, and no exception record can cover it. | Lower the floor in its own protected policy PR; it takes effect from the next evaluation, so the step-down lands as a second commit. See [the floor is the authorization](config-reference.md#minseverities--the-floor-is-the-authorization). |
 | `ESLINT_ERROR` | ESLint acknowledged a suppression Pocket Zipper did not inventory. Fail-closed safety net. | Report it as a bug with the printed file and rule. |
 | `INTERNAL_ERROR` | An unexpected failure. | Re-run with `--json` and inspect `errors[]`. |
 
@@ -69,6 +71,21 @@ The rule id is misspelled, or the plugin that provides it isn't installed and co
 This is a hard error (fail closed) so a typo can't silently ungovern a rule. A real rule
 that doesn't currently apply anywhere is *not* an error — it's a forward declaration.
 
+### "'minSeverities.X' names rule 'X', which 'governedRules' excludes"
+
+A floor for a rule outside the allowlist could never gate anything, so it is refused rather
+than left inert: the governed set is the allowlist ∩ applicable set, and a rule the
+allowlist drops is never governed. This and the refusal below are `CONFIG_ERROR`, exit 2,
+naming the key and the rule — not gate failures. Fix: add the rule to `governedRules`, or
+drop the floor. Land the corrected config through a protected policy PR.
+
+### "'minSeverities.X' names an unrecognized ESLint rule 'X'"
+
+Same fail-closed reasoning as the allowlist's own check — a typo must not leave a floor
+sitting there that gates nothing. A **real** rule whose plugin the repository has not
+installed is not an error: declaring a floor ahead of the plugin is legitimate onboarding,
+and it is silently ungated until the rule exists.
+
 ### Exception record errors
 
 `.pocket-zipper/exceptions.yml` must be a top-level list of records. The known fields are
@@ -93,6 +110,40 @@ dangling cleanup. A record naming an *unknown rule id* is hygiene, not a defect.
 `pocket-zipper validate` to see every finding in one pass — defects exit 2, hygiene alone
 exits 0. See [the registry format](exceptions.md) and
 [What the gate counts](suppression-types.md) for the shapes behind these types.
+
+## Severity floors
+
+### "rule 'X' is below severity floor 'Y': head is 'Z', baseline is 'W'"
+
+`SEVERITY_FLOOR`, exit 1 — the change stepped a floored rule down the `off → warn → error`
+ladder. No exception record can cover it; the floor is the authorization, so lower the
+floor in its own protected policy PR and land the step-down as a second commit. The
+message carries the four facts a run needs — the rule, the floor, the head's band, the
+baseline's — in the report and in the record's `errors[].detail`. `pre-commit` adds the
+staged floor and when it takes effect.
+
+The commonest cause is **lowering the floor in the same change**: the evaluation reads the
+baseline's policy, so the run is judged against the floor that was in force before it, and
+the floor you just wrote buys nothing. A baseline of `undeclared` means the rule arrived
+through a preset spread (`...js.configs.recommended`) that carries no explicit band to
+compare against — exactly the case a diff-only check would miss.
+
+### The floor I set, and the step-down still passed
+
+The floor is read against the head, but the *change* is what has to make it worse. Two
+shapes explain a green run:
+
+- **The band was already below the floor.** A band below the line when the policy declared
+  it is grandfathered: it may stay, and lowering it further fails. Raise the floor to close
+  the gap.
+- **The declaration was deleted rather than lowered.** Removing `no-console: "warn"` from
+  `eslint.config.*` leaves the head undeclared for that rule, so there is no band left to
+  compare and neither the floor nor the existing policy-change detection fires. A floor
+  stops a band from moving; it cannot see one disappear. See the
+  [known limit](config-reference.md#known-limit-a-deleted-declaration-beats-the-floor).
+
+A rule the map doesn't name is ungated entirely, so a floor that never fires may just be a
+rule the map never reached.
 
 ## Why is nothing being evaluated?
 
@@ -125,13 +176,18 @@ have a baseline counterpart. Grandfather them instead of writing exceptions: fol
 
 ## The evaluation record
 
-`check --json <path>` writes a versioned record (`schemaVersion: 2`) carrying both
+`check --json <path>` writes a versioned record (`schemaVersion: 3`) carrying both
 compared tree ids, the applied policy, per-suppression dispositions, exception matches,
 the delete-ready pointers for every unused record, and granular errors. CI should persist
 it on failure as well as success — that's the durable statistics artifact. See
 [CI wiring principles §4](../ci/principles.md#4-the-evaluation-record-is-the-statistics-artifact).
 
-`schemaVersion: 2` added the `unused` array. See the changelog for the migration note.
+`schemaVersion: 2` added the `unused` array; `3` adds `summary.policy.minSeverities`, the
+effective floor map (`null` when no map is declared). It is what lets a machine tell
+"recorded, not gated" from "gated and satisfied": the same config weakening is a passing
+`POLICY_CHANGE` with `minSeverities: null`, and a failing `SEVERITY_FLOOR` once the rule
+is floored. A `SEVERITY_FLOOR` error also carries a `detail` of
+`{ rule, floor, head, baseline }`. See the changelog for the migration note.
 
 ## Protecting the policy
 

@@ -652,6 +652,70 @@ describe("config-level severity weakenings as policy changes", () => {
     assert.match(res.stdout, /takes effect from the next commit/);
   });
 
+  it("lands a deliberate step-down as two commits: the floor first, then the band", () => {
+    // The shape the config reference tells readers to use, and the only
+    // authorization a step-down has. Commit 1 raises no gate term of its own —
+    // it is reviewed because it lands on the protected path — and commit 2 is
+    // judged under it. One change carrying both fails, because the evaluation
+    // reads the baseline's floor.
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(PROTECTED_CONFIG, configYaml({ minSeverities: { "no-console": "error" } }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+
+    r.write(PROTECTED_CONFIG, configYaml({ minSeverities: { "no-console": "warn" } }));
+    r.commit("lower the floor");
+    const lowered = r.runCli(["check", "--base", "base"]);
+    assert.equal(lowered.status, 0);
+    assert.deepEqual(codes(lowered.record), []);
+
+    r.branch("floor-merged");
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "warn" }));
+    r.commit("step the band down");
+    const landed = r.runCli(["check", "--base", "floor-merged"]);
+    assert.equal(landed.status, 0);
+    // The floor removes the failure, not the record: the weakening is still
+    // reported, which is what keeps the two facts distinguishable.
+    assert.deepEqual(codes(landed.record), ["POLICY_CHANGE"]);
+  });
+
+  it("fails a step-down whose floor change lands in the same change", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(PROTECTED_CONFIG, configYaml({ minSeverities: { "no-console": "error" } }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(PROTECTED_CONFIG, configYaml({ minSeverities: { "no-console": "warn" } }));
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "warn" }));
+    r.commit("both");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    // Judged against the baseline's `error` floor, so the staged `warn` buys
+    // nothing — and both facts are on the record.
+    assert.deepEqual(codes(res.record), ["POLICY_CHANGE", "SEVERITY_FLOOR"]);
+    assert.equal(res.record?.summary.policy.minSeverities?.["no-console"], "error");
+  });
+
+  it("does not fire for a severity declaration deleted outright (the documented hole)", () => {
+    // Stated as a known limit in the config reference, so pin the shape it
+    // describes: the head is undeclared, so there is no band to compare and
+    // neither the floor nor the existing policy-change detection fires.
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "warn" }));
+    r.write(PROTECTED_CONFIG, configYaml({ minSeverities: { "no-console": "error" } }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", eslintConfig({}));
+    r.commit("delete the declaration");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.deepEqual(codes(res.record), []);
+  });
+
   it("fails when a severity drop is paired with new directive debt for the same rule", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));

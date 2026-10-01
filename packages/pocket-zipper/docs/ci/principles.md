@@ -135,10 +135,25 @@ but not gate-failed.
 Turning a governed rule `"off"` in `eslint.config.*` — or lowering its severity to
 `"warn"` — is the same policy-weakening signal, detected even though the config file is
 not under `.pocket-zipper/**`: a pure config edit is recorded (`POLICY_CHANGE`) and
-passes, and one consumed by new debt in the same change fails the gate. Because
-`.pocket-zipper/**` protection does not cover `eslint.config.*`, a team that wants review
-on config-off or severity-drop edits should extend its path-gated code review (or
-CODEOWNERS) to the ESLint config file too.
+passes, and one consumed by new debt in the same change fails the gate. That is the
+default because the tool's own protection stops at `.pocket-zipper/**`, and
+`eslint.config.*` has no equivalent on any host by default. It is the reason the
+severity-floor opt-in exists: `.pocket-zipper/**` protection cannot be extended to a
+governance surface by the tool's own wiring, so a team that wants its severity bands
+enforced in-tool declares them —
+
+```yaml
+# .pocket-zipper/config.yml
+minSeverities:
+  no-console: error     # a change that drops no-console below `error` fails: SEVERITY_FLOOR
+```
+
+— and pays a protected policy PR per deliberate step-down for the privilege. Extending
+path-gated review (or CODEOWNERS) to `eslint.config.*` is still worth doing; it is a
+second lock on the same door, and it is the one that also covers a *deleted* severity
+declaration, which the floor cannot see. The floor, its two-commit landing, and that
+limit are in the
+[config reference](../guides/config-reference.md#minseverities--the-floor-is-the-authorization).
 
 ## 6. The tool never calls host APIs
 

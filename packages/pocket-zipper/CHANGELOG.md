@@ -12,7 +12,80 @@ This changelog starts at 0.2.0. Releases before that predate it.
 
 ## [Unreleased]
 
-Nothing yet.
+### Breaking: record schema 2 → 3
+
+`check --json` now writes `schemaVersion: 3`, which adds one field and one error code:
+
+```jsonc
+{
+  "schemaVersion": 3,
+  "summary": {
+    "policy": {
+      "enabled": true,
+      "allowlist": null,
+      "minSeverities": { "no-console": "error" }   // new: the effective floor map
+    }
+  },
+  "errors": [
+    {
+      "code": "SEVERITY_FLOOR",                    // new code
+      "message": "rule 'no-console' is below severity floor 'error': head is 'warn', baseline is 'error'",
+      "detail": { "rule": "no-console", "floor": "error", "head": "warn", "baseline": "error" }
+    }
+  ]
+}
+```
+
+**Why.** A config weakening has always been *recorded* rather than gate-failed, because
+the tool's protection stops at `.pocket-zipper/**` and `eslint.config.*` has no equivalent
+on any host by default. The new opt-in closes that gap from the policy side, and a machine
+reading the record has to be able to tell the two situations apart: a weakening that was
+recorded and passed, and a weakening that was gated and satisfied. `minSeverities` is the
+only place that difference is legible. Each `SEVERITY_FLOOR` error carries four facts in
+`detail` — `rule`, `floor` (the declared minimum), `head` (the band the change left), and
+`baseline` (the band it replaced, or `"undeclared"` when the rule arrived through a preset
+spread).
+
+**Migrating.** Reading `schemaVersion: 2` output, nothing breaks. Reading v3:
+
+- `summary.policy.minSeverities` is **additive**: `null` when no map is declared, the
+  effective map otherwise. Existing fields keep their names, meanings, and types, so a v3
+  consumer is a superset of a v2 one.
+- `SEVERITY_FLOOR` is a **new code** in `errors[]`. A consumer branching on codes should
+  treat it as a gate failure; with no map declared it never appears, and `verdict: "pass"`
+  carrying a `POLICY_CHANGE` stays representable — with the default off, that is the common
+  case, not a corner case.
+- If you branch on `schemaVersion`, accept `3` alongside `2` and `1`. Older readers reject
+  a newer record rather than misreading it, since the version is explicit.
+
+### Added
+
+- **Severity floors** (`minSeverities`) — an opt-in, per-rule map in
+  `.pocket-zipper/config.yml` naming the lowest band a proposed change may leave a
+  governed rule at. A step down on a floored rule fails the gate (`SEVERITY_FLOOR`, exit 1)
+  in `check` and `pre-commit` alike. **The floor is the authorization:** nothing inside the
+  gated change authorizes it, so a floor is lowered one merge earlier, in a protected policy
+  PR that already carries owner review, and takes effect from the next evaluation — the
+  same one-merge lag as `enabled` and `governedRules`.
+- A floor is read against the head rather than diffed against the baseline, so a governed
+  rule enabled only by a `...js.configs.recommended` spread is still covered; a band
+  already below its floor when the policy declared it is grandfathered and may not be
+  lowered further.
+- **Inert floors fail closed** — `CONFIG_ERROR` (exit 2, not a gate failure) for a floor
+  naming a rule the `governedRules` allowlist excludes, and for a rule id no ESLint rule
+  matches. A floor for a *real* rule from a plugin the repository has not installed is
+  accepted and silently ungated, so declaring a floor ahead of its plugin is legitimate
+  onboarding.
+
+### Known limits
+
+- **Deleting a severity declaration beats the floor.** Remove a rule's declaration from
+  `eslint.config.*` rather than lowering it and the head is undeclared for that rule: no
+  band exists to compare, so neither the floor nor the existing policy-change detection
+  fires. This hole predates the floor; closing it needs ESLint's resolved-per-file
+  configuration.
+- **Per-scope floors.** Floors are rule-granular. A scoped floor multiplies the config
+  surface by pattern, and nobody maintains it.
 
 ## [0.3.0] — 2026-09-29
 

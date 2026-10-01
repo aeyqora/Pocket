@@ -12,7 +12,7 @@ import {
 } from "./harness.js";
 import type { FixtureRepo } from "./harness.js";
 import { EMPTY_TREE } from "../src/git.js";
-import { TOOL_VERSION } from "../src/record.js";
+import { SCHEMA_VERSION, TOOL_VERSION } from "../src/record.js";
 import type { EvaluationRecord } from "../src/types.js";
 
 after(cleanupRepos);
@@ -44,8 +44,11 @@ describe("package contract", () => {
     };
     assert.ok(pkg.files.includes("CHANGELOG.md"));
     const changelog = readFileSync(join(ROOT, "CHANGELOG.md"), "utf8");
-    // The schema bump is only useful if the note that explains it ships too.
-    assert.match(changelog, /schemaVersion: 2/);
+    // The schema bump is only useful if the note that explains it ships too — and
+    // the note has to be the *current* one. An older heading stays in the file
+    // forever, so a bare `schemaVersion: <n>` match would keep passing after the
+    // next bump, which is exactly when this consumer needs to hear about it.
+    assert.match(changelog, new RegExp(`schemaVersion: ${SCHEMA_VERSION}\\b`));
     assert.match(changelog, new RegExp(`## \\[${TOOL_VERSION}\\]`));
   });
 

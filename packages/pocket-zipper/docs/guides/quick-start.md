@@ -32,6 +32,7 @@ explicitly:
 ```yaml
 enabled: true
 # governedRules:              # optional; absent = every applicable rule is governed
+# minSeverities:              # optional; absent = no rule has a severity floor
 exceptions:
   defaultExpiry: 30d          # duration literal (Nd / Nmo); fallback 30d
   maxExpiry: 3mo              # duration literal (Nd / Nmo); fallback 3mo
@@ -62,6 +63,19 @@ matched. Naming a rule ESLint doesn't recognize at all fails closed (`CONFIG_ERR
 exit 2); naming a real rule that doesn't currently apply anywhere is a forward
 declaration, not an error.
 
+To enforce a rule's severity band, declare a floor:
+
+```yaml
+enabled: true
+minSeverities:
+  no-console: error    # a change that puts no-console below `error` fails the gate
+```
+
+Floors are opt-in: without this map a config weakening records `POLICY_CHANGE` and passes.
+With it, a step down is a failure no exception record can cover — you lower the floor in
+its own protected policy PR, one merge earlier. See
+[the floor is the authorization](config-reference.md#minseverities--the-floor-is-the-authorization).
+
 An absent config file means the same as `enabled: true` with no allowlist. Every key is
 documented in the [config reference](config-reference.md), which also carries the migration
 note for upgrading to unknown-key rejection.
@@ -88,7 +102,8 @@ npx pocket-zipper check --base main --json pocket-zipper.json
 - **FAIL** (exit 1) — the change introduces new or materially-changed debt of a governed
   rule that no exception covers. The report prints a copy-paste exception record for
   each offending suppression; landing one means getting it reviewed by your authorized
-  approvers. See [Handling a failure](handling-a-failure.md).
+  approvers. A config weakening or a floored severity drop can also fail on its own
+  (`POLICY_CHANGE`, `SEVERITY_FLOOR`) — see [Handling a failure](handling-a-failure.md).
 - **Exit 2** — an operational failure (`GIT_ERROR`, `ESLINT_ERROR`, `CONFIG_ERROR`,
   `INTERNAL_ERROR`; or registry/config defects from `validate`). Nothing was approved. See
   [Troubleshooting](troubleshooting.md).
