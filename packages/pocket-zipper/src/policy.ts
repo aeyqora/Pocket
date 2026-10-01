@@ -99,6 +99,7 @@ export interface PolicyView {
   governedRulesValid: boolean;
   minSeverities: Record<string, SeverityBand> | null;
   minSeveritiesValid: boolean;
+  minSeveritiesInvalidKeys: string[];
   exceptions: ExceptionsView;
   /** Top-level keys the policy document may not carry. */
   topLevelUnknown: string[];
@@ -128,6 +129,7 @@ function emptyView(): PolicyView {
     governedRulesValid: true,
     minSeverities: null,
     minSeveritiesValid: true,
+    minSeveritiesInvalidKeys: [],
     exceptions: { ...EMPTY_EXCEPTIONS },
     topLevelUnknown: [],
     allowSameChangeExceptions: false,
@@ -173,19 +175,16 @@ export function viewPolicy(raw: string | null): PolicyView {
   const floorsRaw = obj["minSeverities"];
   let minSeverities: Record<string, SeverityBand> | null = null;
   let minSeveritiesValid = true;
+  const minSeveritiesInvalidKeys: string[] = [];
   if (floorsRaw !== undefined && floorsRaw !== null) {
     if (typeof floorsRaw !== "object" || Array.isArray(floorsRaw)) {
       minSeveritiesValid = false;
     } else {
       const parsed: Record<string, SeverityBand> = {};
       for (const [rule, floor] of Object.entries(floorsRaw as Record<string, unknown>)) {
-        if (
-          rule.trim().length === 0 ||
-          floor !== "off" &&
-            floor !== "warn" &&
-            floor !== "error"
-        ) {
+        if (rule.trim().length === 0 || !isSeverityBand(floor)) {
           minSeveritiesValid = false;
+          minSeveritiesInvalidKeys.push(rule);
         } else {
           parsed[rule] = floor;
         }
@@ -212,6 +211,7 @@ export function viewPolicy(raw: string | null): PolicyView {
     governedRulesValid,
     minSeverities,
     minSeveritiesValid,
+    minSeveritiesInvalidKeys,
     exceptions: parseExceptions(obj["exceptions"]),
     topLevelUnknown,
     allowSameChangeExceptions,
@@ -305,8 +305,15 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
     );
   }
   if (!view.minSeveritiesValid) {
+    const invalidKeys = view.minSeveritiesInvalidKeys.filter((key) => key.length > 0);
+    if (invalidKeys.length > 0) {
+      const names = invalidKeys.map((key) => `'minSeverities.${key}'`).join(", ");
+      throw configError(
+        `.pocket-zipper/config.yml: ${names} must be one of 'off', 'warn', or 'error'`,
+      );
+    }
     throw configError(
-      ".pocket-zipper/config.yml: 'minSeverities' must be a mapping of rule ids to 'off', 'warn', or 'error'",
+      ".pocket-zipper/config.yml: 'minSeverities' must be a mapping of rule ids to 'off', 'warn', or 'error'; every rule key must name a valid severity band",
     );
   }
   if (!view.allowSameChangeValid) {
@@ -357,6 +364,10 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
     allowSameChangeExceptions: view.allowSameChangeExceptions,
     host: view.host,
   };
+}
+
+function isSeverityBand(value: unknown): value is SeverityBand {
+  return value === "off" || value === "warn" || value === "error";
 }
 
 /**

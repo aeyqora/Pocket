@@ -20,7 +20,7 @@ import { DEFAULT_POLICY } from "./policy.js";
 
 export const TOOL_NAME = "pocket-zipper";
 export const TOOL_VERSION = "0.3.0";
-export const SCHEMA_VERSION = 2 as const;
+export const SCHEMA_VERSION = 3 as const;
 
 export interface Summary {
   dispositions: EvaluationSummary["dispositions"];
@@ -124,7 +124,11 @@ interface RecordParts {
 
 export function buildRecord(input: BuildRecordInput): EvaluationRecord {
   const summary: EvaluationSummary = {
-    policy: { enabled: input.policy.enabled, allowlist: input.policy.governedRules },
+    policy: {
+      enabled: input.policy.enabled,
+      allowlist: input.policy.governedRules,
+      minSeverities: input.policy.minSeverities ?? null,
+    },
     governedRules: input.governedRules,
     ...summarize(input.head, input.removed.length),
     cleanup: {
@@ -205,7 +209,11 @@ function recordOf(parts: RecordParts): EvaluationRecord {
 
 function emptySummary(policy: Policy = DEFAULT_POLICY): EvaluationSummary {
   return {
-    policy: { enabled: policy.enabled, allowlist: policy.governedRules },
+    policy: {
+      enabled: policy.enabled,
+      allowlist: policy.governedRules,
+      minSeverities: policy.minSeverities ?? null,
+    },
     governedRules: [],
     dispositions: { existing: 0, movedExisting: 0, removed: 0, new: 0, materiallyChanged: 0 },
     newDebt: { authorized: 0, unauthorized: 0 },

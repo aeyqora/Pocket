@@ -26,7 +26,11 @@ describe("governed scope and lock enablement", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.deepEqual(res.record?.summary.policy, { enabled: true, allowlist: null });
+    assert.deepEqual(res.record?.summary.policy, {
+      enabled: true,
+      allowlist: null,
+      minSeverities: null,
+    });
     assert.deepEqual(res.record?.summary.governedRules, ["no-console"]);
   });
 
@@ -43,7 +47,11 @@ describe("governed scope and lock enablement", () => {
     assert.equal(res.status, 0);
     assert.equal(res.record?.verdict, "excluded");
     assert.deepEqual(res.record?.inventory, []);
-    assert.deepEqual(res.record?.summary.policy, { enabled: false, allowlist: null });
+    assert.deepEqual(res.record?.summary.policy, {
+      enabled: false,
+      allowlist: null,
+      minSeverities: null,
+    });
     assert.deepEqual(res.record?.summary.governedRules, []);
   });
 
@@ -65,6 +73,7 @@ describe("governed scope and lock enablement", () => {
     assert.deepEqual(res.record?.summary.policy, {
       enabled: true,
       allowlist: ["no-debugger"],
+      minSeverities: null,
     });
     assert.deepEqual(res.record?.summary.governedRules, ["no-debugger"]);
   });
@@ -399,7 +408,11 @@ describe("the effective policy is baseline-authoritative", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
-    assert.deepEqual(res.record?.summary.policy, { enabled: true, allowlist: null });
+    assert.deepEqual(res.record?.summary.policy, {
+      enabled: true,
+      allowlist: null,
+      minSeverities: null,
+    });
     const newRules = res.record?.inventory
       .filter((e) => e.disposition === "new")
       .map((e) => e.rule);
@@ -421,7 +434,11 @@ describe("the effective policy is baseline-authoritative", () => {
     const flip = r.runCli(["check", "--base", "baseA"]);
     assert.equal(flip.status, 0);
     assert.equal(flip.record?.verdict, "excluded");
-    assert.deepEqual(flip.record?.summary.policy, { enabled: false, allowlist: null });
+    assert.deepEqual(flip.record?.summary.policy, {
+      enabled: false,
+      allowlist: null,
+      minSeverities: null,
+    });
 
     r.write("app.js", `${disabled}console.log(1);\nconst b = 2;\n`);
     r.commit("C");

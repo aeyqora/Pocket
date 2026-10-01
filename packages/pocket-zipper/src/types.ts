@@ -142,7 +142,7 @@ export interface PoolCount {
  * and the human report renders the same list rather than deriving its own.
  */
 export interface EvaluationRecord {
-  schemaVersion: 2;
+  schemaVersion: 3;
   tool: { name: string; version: string };
   mode: Mode;
   verdict: Verdict;
@@ -207,7 +207,12 @@ export interface UnusedException {
 }
 
 export interface EvaluationSummary {
-  policy: { enabled: boolean; allowlist: string[] | null };
+  policy: {
+    enabled: boolean;
+    allowlist: string[] | null;
+    /** Effective baseline-authoritative severity floors; null means no map. */
+    minSeverities: Record<string, SeverityBand> | null;
+  };
   governedRules: string[];
   dispositions: {
     existing: number;

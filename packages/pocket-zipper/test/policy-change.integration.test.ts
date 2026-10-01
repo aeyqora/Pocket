@@ -609,6 +609,8 @@ describe("config-level severity weakenings as policy changes", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 1);
+    assert.equal(res.record?.schemaVersion, 3);
+    assert.deepEqual(res.record?.summary.policy.minSeverities, { "no-console": "error" });
     assert.ok(hasErrorCode(res.record, "SEVERITY_FLOOR"));
     assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
     const error = res.record?.errors.find((entry) => entry.code === "SEVERITY_FLOOR");

@@ -168,13 +168,17 @@ describe("record: buildRecord", () => {
 
   it("stamps the schema, tool, refs, and summary", () => {
     const out = build();
-    assert.equal(out.schemaVersion, 2);
+    assert.equal(out.schemaVersion, 3);
     assert.equal(out.tool.version, TOOL_VERSION);
     assert.equal(out.mode, "check");
     assert.equal(out.verdict, "fail");
     assert.deepEqual(out.baseline, { ref: "main", tree: "b".repeat(40) });
     assert.deepEqual(out.proposedChange, { ref: "HEAD", tree: "a".repeat(40) });
-    assert.deepEqual(out.summary.policy, { enabled: true, allowlist: ["no-console"] });
+    assert.deepEqual(out.summary.policy, {
+      enabled: true,
+      allowlist: ["no-console"],
+      minSeverities: null,
+    });
     assert.deepEqual(out.summary.governedRules, ["no-console"]);
     assert.equal(out.summary.dispositions.removed, 1);
     assert.equal(out.summary.newDebt.authorized, 1);
@@ -251,7 +255,11 @@ describe("record: empty records", () => {
     assert.equal(out.verdict, "excluded");
     assert.equal(out.inventory.length, 0);
     assert.equal(out.exceptions.length, 0);
-    assert.deepEqual(out.summary.policy, { enabled: false, allowlist: null });
+    assert.deepEqual(out.summary.policy, {
+      enabled: false,
+      allowlist: null,
+      minSeverities: null,
+    });
     assert.equal(out.proposedChange.ref, "HEAD");
   });
 

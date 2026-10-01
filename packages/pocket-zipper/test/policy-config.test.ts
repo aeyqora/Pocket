@@ -53,11 +53,11 @@ describe("policy: exceptions stanza parsing", () => {
     );
     assertConfigError(
       () => parsePolicy("minSeverities:\n  no-console: notice\n", KNOWN),
-      /'minSeverities'/,
+      /'minSeverities\.no-console'/,
     );
     assertConfigError(
       () => parsePolicy("enabled: false\nminSeverities:\n  no-console: notice\n", KNOWN),
-      /'minSeverities'/,
+      /'minSeverities\.no-console'/,
     );
   });
 
@@ -314,7 +314,11 @@ describe("policy config through the CLI fixture seam", () => {
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
     assert.deepEqual(res.record?.errors, []);
-    assert.deepEqual(res.record?.summary.policy, { enabled: true, allowlist: null });
+    assert.deepEqual(res.record?.summary.policy, {
+      enabled: true,
+      allowlist: null,
+      minSeverities: null,
+    });
   });
 
   it("reads fallbacks cleanly with a partial stanza", () => {
@@ -388,7 +392,11 @@ describe("policy config through the CLI fixture seam", () => {
     const r = baselineWithConfig(configYaml({ enabled: true, governedRules: ["no-console"] }));
     const res = r.runCli(["check", "--base", "base"]);
     assert.equal(res.status, 0);
-    assert.deepEqual(res.record?.summary.policy, { enabled: true, allowlist: ["no-console"] });
+    assert.deepEqual(res.record?.summary.policy, {
+      enabled: true,
+      allowlist: ["no-console"],
+      minSeverities: null,
+    });
   });
 
   it("an enabled-off-but-well-formed config still evaluates nothing", () => {
