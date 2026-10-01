@@ -10,11 +10,13 @@ for anything parsing that JSON, and is called out under its own heading.
 
 This changelog starts at 0.2.0. Releases before that predate it.
 
-## [Unreleased]
+## [0.4.0] — 2026-10-01
 
 ### Breaking: record schema 2 → 3
 
-`check --json` now writes `schemaVersion: 3`, which adds one field and one error code:
+`check --json` writes `schemaVersion: 3`, which adds the effective severity-floor map and
+the `SEVERITY_FLOOR` error code. This release also adds the non-failing `BASELINE_DEFECT`
+repair signal:
 
 ```jsonc
 {
@@ -193,6 +195,6 @@ No CLI flag, exit code, or gate verdict changed. `check`, `validate`, and
   severity drop to `warn` never hides debt.
 - Strengthenings record nothing.
 
-[Unreleased]: https://github.com/aeyqora/Pocket/compare/v0.3.0...HEAD
+[0.4.0]: https://github.com/aeyqora/Pocket/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/aeyqora/Pocket/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/aeyqora/Pocket/compare/v0.1.0...v0.2.0
