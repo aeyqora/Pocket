@@ -188,10 +188,20 @@ export function cleanupRepos(): void {
 
 /** A standard flat config enabling a set of core rules at error severity. */
 export function eslintConfig(rules: Record<string, string>): string {
+  return renderEslintConfig(rules, null);
+}
+
+/** A flat config whose rules apply to JavaScript files, not the config itself. */
+export function scopedEslintConfig(rules: Record<string, string>): string {
+  return renderEslintConfig(rules, ["**/*.js"]);
+}
+
+function renderEslintConfig(rules: Record<string, string>, files: string[] | null): string {
   const body = Object.entries(rules)
     .map(([rule, sev]) => `    "${rule}": ${JSON.stringify(sev)}`)
     .join(",\n");
-  return `export default [\n  {\n    rules: {\n${body}\n    },\n  },\n];\n`;
+  const filesLine = files === null ? "" : `    files: ${JSON.stringify(files)},\n`;
+  return `export default [\n  {\n${filesLine}    rules: {\n${body}\n    },\n  },\n];\n`;
 }
 
 export function configYaml(opts: {

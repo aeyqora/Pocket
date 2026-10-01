@@ -410,6 +410,18 @@ describe("policy-change: ESLint config severity weakening", () => {
     );
   });
 
+  it("uses baseline config declarations for scoped severity governance", () => {
+    assert.equal(
+      detect({
+        baselineGoverned: [],
+        baselineSeverityGoverned: ["no-console"],
+        baselineLevels: [lv("no-console", 2)],
+        headLevels: [lv("no-console", 0)],
+      }).weakening,
+      true,
+    );
+  });
+
   it("does not flag removing a declaration entirely (strengthening)", () => {
     assert.equal(
       detect({

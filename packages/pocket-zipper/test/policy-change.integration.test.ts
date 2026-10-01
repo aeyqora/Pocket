@@ -11,6 +11,7 @@ import {
   cleanupRepos,
   PROTECTED_REGISTRY,
   PROTECTED_CONFIG,
+  scopedEslintConfig,
 } from "./harness.js";
 import type { FixtureRepo } from "./harness.js";
 import { addDuration } from "../src/policy.js";
@@ -516,6 +517,129 @@ describe("the shape the registry weakening is reported as", () => {
 });
 
 describe("config-level severity weakenings as policy changes", () => {
+  it("records a scoped config-only error-to-off weakening and passes", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "off" }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base", "--verbose"]);
+    assert.equal(res.status, 0);
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
+    assert.match(res.stdout, /error\[POLICY_CHANGE\]/);
+  });
+
+  it("records a scoped config-only error-to-warn weakening and passes", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "warn" }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
+  });
+
+  it("keeps scoped weakening plus new directive debt failing", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      scopedEslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write(
+      "eslint.config.mjs",
+      scopedEslintConfig({ "no-console": "off", "no-debugger": "error" }),
+    );
+    r.write("app.js", `${noDebugger}debugger;\n`);
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
+    assert.equal(res.record?.verdict, "fail");
+  });
+
+  it("records scoped config-only weakening in pre-commit mode", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "error" }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "off" }));
+    r.stage("eslint.config.mjs");
+    const res = r.runCli(["pre-commit"]);
+    assert.equal(res.status, 0);
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
+  });
+
+  it("keeps scoped weakening plus new directive debt failing in pre-commit mode", () => {
+    const r = repo();
+    r.write(
+      "eslint.config.mjs",
+      scopedEslintConfig({ "no-console": "error", "no-debugger": "error" }),
+    );
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.write(
+      "eslint.config.mjs",
+      scopedEslintConfig({ "no-console": "off", "no-debugger": "error" }),
+    );
+    r.write("app.js", `${noDebugger}debugger;\n`);
+    r.stage();
+    const res = r.runCli(["pre-commit"]);
+    assert.equal(res.status, 1);
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
+    assert.equal(res.record?.verdict, "fail");
+  });
+
+  it("keeps the allowlist as a narrowing boundary for scoped severity weakening", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "error" }));
+    r.write(PROTECTED_CONFIG, configYaml({ governedRules: ["no-debugger"] }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "off" }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(hasErrorCode(res.record, "POLICY_CHANGE"), false);
+  });
+
+  it("reports both the scoped policy change and severity floor", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "error" }));
+    r.write(PROTECTED_CONFIG, configYaml({ minSeverities: { "no-console": "error" } }));
+    r.write("app.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "warn" }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 1);
+    assert.deepEqual(codes(res.record), ["POLICY_CHANGE", "SEVERITY_FLOOR"]);
+  });
+
+  it("does not reconcile unrelated baseline suppressions for a config-only change", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "error" }));
+    r.write("app.js", `${disabled}console.log(1);\n`);
+    r.commit("base");
+    r.branch("base");
+    r.write("eslint.config.mjs", scopedEslintConfig({ "no-console": "warn" }));
+    r.commit("head");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.equal(res.record?.summary.dispositions.existing, 0);
+    assert.equal(res.record?.summary.dispositions.removed, 0);
+    assert.ok(hasErrorCode(res.record, "POLICY_CHANGE"));
+  });
+
   it("records a pure config-level off addition as a policy change that passes", () => {
     const r = repo();
     r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));

@@ -178,6 +178,14 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         policy,
         analysis,
       });
+      // Severity weakening has a different baseline set from reconciliation:
+      // config declarations govern a rule even when no changed file matches
+      // their scope. Keep `governedBaseline` changed-files-only so this set
+      // cannot pull unrelated suppressions into continuity reconciliation.
+      const baselineSeverityGoverned = computeGovernedSet(
+        policy,
+        analysis.baselineLevels.map((level) => level.rule),
+      );
 
       // The gate's failure term, before anything is authorized. Coverage cannot
       // move it, and that is what lets the order below run shape → opt-in →
@@ -207,6 +215,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         headRegistry,
         protectedTouched,
         baselineGoverned: governedBaseline,
+        baselineSeverityGoverned,
         consumedDebt,
         baselinePolicy: policy,
         baselineLevels: analysis.baselineLevels,

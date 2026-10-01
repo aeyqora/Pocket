@@ -19,6 +19,8 @@ export interface PolicyChangeInput {
   protectedTouched: boolean;
   /** Rules governed under the baseline policy — used to judge allowlist narrowing. */
   baselineGoverned: string[];
+  /** Rules governed by the baseline policy's own ESLint config declarations. */
+  baselineSeverityGoverned?: string[];
   /** New or materially-changed governed debt introduced by the same change. */
   consumedDebt: number;
   /**
@@ -150,6 +152,7 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
     headRegistry,
     protectedTouched,
     baselineGoverned,
+    baselineSeverityGoverned,
     consumedDebt,
     baselinePolicy,
     baselineLevels,
@@ -169,7 +172,11 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
   const configWeakenedHere =
     protectedTouched && configWeakened(baselineConfig, headConfig, baselineGoverned);
   const protectedWeakened = configWeakenedHere || registry.shape !== "none";
-  const eslintWeakened = configSeverityWeakened(baselineLevels, headLevels, baselineGoverned);
+  const eslintWeakened = configSeverityWeakened(
+    baselineLevels,
+    headLevels,
+    baselineSeverityGoverned ?? baselineGoverned,
+  );
 
   const weakening = protectedWeakened || eslintWeakened;
   if (!weakening) {
