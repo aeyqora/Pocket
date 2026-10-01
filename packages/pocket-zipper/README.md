@@ -111,6 +111,7 @@ doors, the flags, the exit codes, a worked transcript, and what it will not do.
   [config reference](docs/guides/config-reference.md),
   [pre-commit hook](docs/guides/pre-commit.md),
   [troubleshooting](docs/guides/troubleshooting.md).
+- **[Pre-commit integration examples](https://github.com/aeyqora/Pocket/tree/main/packages/pocket-zipper/examples/pre-commit)** — copyable hook files for common Git hook integrations.
 - **CI quick-starts** — copy-paste setup that links to the deep reference:
   [GitHub Actions](docs/guides/ci/github.md),
   [GitLab CI/CD](docs/guides/ci/gitlab.md),
