@@ -23,7 +23,12 @@ import {
   overlongRecords,
 } from "./registry.js";
 import { unusedExceptions } from "./cleanup.js";
-import { errorRecords, loadRegistry, loadRegistryEntries } from "./validate.js";
+import {
+  errorRecords,
+  loadRegistry,
+  loadRegistryEntries,
+  RegistryDefectError,
+} from "./validate.js";
 import { PROTECTED_CONFIG, PROTECTED_REGISTRY } from "./protected-paths.js";
 
 import {
@@ -144,25 +149,53 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
 
       const baselineRegistryRaw = git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY);
       const policy = parsePolicy(baselinePolicyRaw, knownRules);
-      // One read, two shapes: the records the gate matches on, and the entries
-      // carrying their positions and text for the cleanup pointers. Reading the
-      // file twice would be a second chance to disagree with itself.
-      const registryEntries = loadRegistryEntries(baselineRegistryRaw);
-      const registry = registryEntries.map((entry) => entry.record);
-
+      // The change map must exist before the baseline registry read: a repair is
+      // the one case where a defective baseline registry may be replaced by the
+      // head-side document. The policy above is already the fully known-rule
+      // parse, so a defective baseline config still aborts before this carve-out.
       const changeMap =
         options.mode === "pre-commit"
           ? git.stagedChangeMap()
           : git.changeMap(trees.baselineCommit, trees.headCommit!);
-
-      // The trigger: the policy-change signal and the expiry refusal fire only
-      // when the change itself touched one of the two `.pocket-zipper` files.
-      // A protected file the change does not carry is not part of the change —
-      // most importantly, the pre-commit staged index is not judged by a
-      // worktree registry the change never staged. The ESLint-severity surface
-      // keeps its own structural gate, so it is not gated here.
       const protectedTouched =
         changeMap.files.has(PROTECTED_CONFIG) || changeMap.files.has(PROTECTED_REGISTRY);
+      const headConfigRaw = readHeadContent(git, trees, options, headDir, PROTECTED_CONFIG);
+      const headRegistryRaw = readHeadContent(git, trees, options, headDir, PROTECTED_REGISTRY);
+      // Read the head registry before the baseline so a repair carrying a still-
+      // defective head fails with the head's defects. The baseline may decline
+      // to abort only when the change carries the registry and this read succeeds.
+      const headRegistry = protectedTouched ? loadRegistry(headRegistryRaw) : null;
+
+      let baselineRegistryForDelta: readonly ExceptionRecord[] | null;
+      let baselineDefectErrors: RecordError[] = [];
+      // One read, two shapes: the records the gate matches on, and the entries
+      // carrying their positions and text for the cleanup pointers. Reading the
+      // file twice would be a second chance to disagree with itself.
+      let registryEntries: ReturnType<typeof loadRegistryEntries>;
+      try {
+        registryEntries = loadRegistryEntries(baselineRegistryRaw);
+        baselineRegistryForDelta = registryEntries.map((entry) => entry.record);
+      } catch (err) {
+        if (
+          !(err instanceof RegistryDefectError) ||
+          !changeMap.files.has(PROTECTED_REGISTRY) ||
+          headRegistry === null
+        ) {
+          throw err;
+        }
+
+        // A repaired registry is evaluated with empty baseline coverage. This
+        // keeps the one-merge lag intact: repaired records cannot authorize debt
+        // in their own change. The repair is still a protected additive policy
+        // change, so the most it can smuggle is a debt-free registry repair.
+        registryEntries = [];
+        baselineRegistryForDelta = null;
+        baselineDefectErrors = errorRecords(err).map((error) => ({
+          ...error,
+          code: "BASELINE_DEFECT" as const,
+        }));
+      }
+      const registry = registryEntries.map((entry) => entry.record);
 
       const analysis = await analyzeTrees({
         baselineDir,
@@ -199,21 +232,13 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       // severities (lowering a governed rule to `"warn"` or `"off"` is a policy
       // change, not debt). The detection runs on every evaluation; it reports
       // nothing when nothing weakened.
-      const headConfigRaw = readHeadContent(git, trees, options, headDir, PROTECTED_CONFIG);
-      const headRegistryRaw = readHeadContent(git, trees, options, headDir, PROTECTED_REGISTRY);
-      // Hoisted above the detector: the split hands the detector parsed records,
-      // so the head read happens first. The throw lands before the first
-      // `errors.push`, so a malformed head registry can never also be reported
-      // as a policy change. The read is gated by the trigger too — an untracked
-      // worktree registry a pre-commit never staged must not be pulled in and
-      // validated into a false defect.
-      const headRegistry = protectedTouched ? loadRegistry(headRegistryRaw) : null;
       const policyChange = detectPolicyChange({
         baselineConfig: baselinePolicyRaw,
         headConfig: headConfigRaw,
-        baselineRegistry: registry,
+        baselineRegistry: baselineRegistryForDelta,
         headRegistry,
         protectedTouched,
+        baselineRegistryDefect: baselineDefectErrors.length > 0,
         baselineGoverned: governedBaseline,
         baselineSeverityGoverned,
         consumedDebt,
@@ -323,6 +348,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
           message: policyChangeMessage(policyChange),
         });
       }
+      errors.push(...baselineDefectErrors);
 
       // One error per refusing record, so CI can point at the offending entry
       // rather than at the file as a whole. The message carries the same four
@@ -397,6 +423,11 @@ const EDIT_CLAUSE =
  * sentence never carries a clause — that surface has no registry shape to name.
  */
 function policyChangeMessage(policyChange: PolicyChangeResult): string {
+  if (policyChange.baselineRepair) {
+    return policyChange.failure
+      ? "poisoned baseline registry repair consumed by new suppression debt in the same change"
+      : "poisoned baseline registry repaired (routed through protected-branch review)";
+  }
   const sentence = policyChange.failure
     ? "policy weakening consumed by new suppression debt in the same change"
     : policyChange.source === "eslint-config"

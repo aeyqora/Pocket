@@ -52,7 +52,8 @@ New suppression debt requiring an exception:
   *record* one on a run that passes.
 
 If the failure is instead an operational error (exit 2), no suppression is being flagged;
-go to [Troubleshooting](troubleshooting.md).
+go to [Troubleshooting](troubleshooting.md), including its guidance for [an unreadable
+baseline registry](troubleshooting.md#the-baseline-registry-is-unreadable).
 
 ## Option A — fix the code (preferred)
 

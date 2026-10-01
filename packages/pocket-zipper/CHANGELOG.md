@@ -60,6 +60,9 @@ spread).
 
 ### Added
 
+- A narrow repair path for a defective baseline exception registry. A change carrying a
+  defect-free replacement is evaluated with empty baseline coverage, reports the
+  baseline findings as `BASELINE_DEFECT`, and remains unable to authorize its own debt.
 - **Severity floors** (`minSeverities`) — an opt-in, per-rule map in
   `.pocket-zipper/config.yml` naming the lowest band a proposed change may leave a
   governed rule at. A step down on a floored rule fails the gate (`SEVERITY_FLOOR`, exit 1)

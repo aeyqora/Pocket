@@ -294,6 +294,20 @@ describe("policy-change: the protected-file trigger", () => {
     assert.equal(result.weakening, true);
     assert.equal(result.source, "eslint-config");
   });
+
+  it("keeps an empty poisoned-baseline repair on the additive protected track", () => {
+    const result = detect({
+      baselineRegistry: null,
+      headRegistry: null,
+      baselineRegistryDefect: true,
+    });
+    assert.equal(result.weakening, true);
+    assert.equal(result.registry, "additive");
+    assert.equal(result.shape, "additive");
+    assert.equal(result.source, "protected");
+    assert.equal(result.combined, false);
+    assert.equal(result.baselineRepair, true);
+  });
 });
 
 describe("policy-change: consumption coupling", () => {

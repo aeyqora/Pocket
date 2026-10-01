@@ -57,18 +57,29 @@ Three things to know:
 
 The registry loader runs on **every evaluation**, and it reads the *baseline* registry — the
 registry as the last merge left it, never a record staged or committed in the change being
-evaluated (one-merge lag). There is exactly one sanctioned exception to that, and it is
-narrow: a repo whose *baseline* config opts into [combined landing](landing-an-exception.md#combined-landing-opt-in)
+evaluated (one-merge lag). The one sanctioned exception that adds coverage is narrow: a repo
+whose *baseline* config opts into [combined landing](landing-an-exception.md#combined-landing-opt-in)
 may let a single **additive** record ride the change it authorizes, and only that record
-joins coverage. In practice the loader runs in these places:
+joins coverage. A separate poisoned-baseline repair path below reads a clean head registry
+with empty baseline coverage; it authorizes nothing in its own change. In practice the loader
+runs in these places:
 
 | Surface | Registry read | Posture |
 |---|---|---|
-| `check --base <ref>` (CI gate) | baseline registry | Malformed = fail closed (`CONFIG_ERROR`, exit 2) |
-| `pre-commit` | HEAD's registry (your baseline for the staged change) | Same fail-closed posture, early feedback only |
+| `check --base <ref>` (CI gate) | baseline registry | Malformed = fail closed (`CONFIG_ERROR`, exit 2), except for a clean registry repair carried by the change |
+| `pre-commit` | HEAD's registry (your baseline for the staged change) | Same fail-closed posture, with the same repair path for the staged index |
+| registry repair change | defect-free head-side registry carried by the change | Reports `BASELINE_DEFECT` and `POLICY_CHANGE`; exits `0` when no new debt is introduced, with empty baseline coverage |
 | `validate` (working tree) | both `.pocket-zipper/exceptions.yml` and `.pocket-zipper/config.yml` as they sit in your working tree | Defects exit 2; hygiene alone exits 0 |
 | Wizard write | the working-tree registry it is about to modify | Refuses to write a defect-producing record |
 | Policy-change detection | head-side registry, for broadening vs the baseline | Malformed head = `CONFIG_ERROR`, exit 2 (never "broadening") |
+
+There is one repair path through the otherwise fail-closed baseline rule: when the
+proposed change carries `.pocket-zipper/exceptions.yml`, its head-side registry is
+defect-free, and the baseline config parsed cleanly, the baseline defect is reported as
+`BASELINE_DEFECT` and evaluation continues with empty baseline coverage. The repair
+still records `POLICY_CHANGE`, and the repaired records cannot authorize debt in that
+same change. A change that does not carry the registry, or carries another defective
+registry, remains exit `2`. A defective baseline config has no equivalent carve-out.
 
 **Failing closed means:** whichever surface reads a registry it cannot interpret — malformed
 YAML, a non-list shape, a missing required field, an unknown field, a bad enum, a malformed

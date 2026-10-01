@@ -18,6 +18,7 @@ export type ErrorCode =
   | "GIT_ERROR"
   | "ESLINT_ERROR"
   | "CONFIG_ERROR"
+  | "BASELINE_DEFECT"
   | "POLICY_CHANGE"
   | "SEVERITY_FLOOR"
   | "EXPIRY_POLICY"

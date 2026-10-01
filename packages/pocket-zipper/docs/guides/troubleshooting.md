@@ -21,10 +21,46 @@ rule (`SEVERITY_FLOOR`). See [What the gate counts](suppression-types.md).
 | --- | --- | --- |
 | `GIT_ERROR` | Not a git repository; a shallow clone that cannot unshallow; a partial (promisor) clone; an unresolvable `--base`; no merge-base; pre-commit in a bare repo. | See [Git problems](#git-problems). |
 | `CONFIG_ERROR` | Malformed or invalid `.pocket-zipper/config.yml` or `.pocket-zipper/exceptions.yml` — including any config key outside the known set (unknown-key rejection) — or an unrecognized rule in `governedRules`, or a `minSeverities` floor that could never gate anything. | See [Config problems](#config-problems) and the [config reference](config-reference.md). |
+| `BASELINE_DEFECT` | A defective baseline registry was replaced by a clean registry in the same protected change. | Non-failing repair signal; see [The baseline registry is unreadable](#the-baseline-registry-is-unreadable). |
 | `EXPIRY_POLICY` | A record's newly written `expires` exceeds the baseline `maxExpiry` — a new record or a renewal. Exit 1; the one pure-policy shape the core refuses. | Bump `maxExpiry` in its own protected PR first, then write the record; or shorten the expiry; permanents are unaffected. |
 | `SEVERITY_FLOOR` | A proposed change left a governed rule below the band `minSeverities` declares for it — `error` → `warn`, `error` → `off`, or `warn` → `off` on a rule floored at `error`. Exit 1, and no exception record can cover it. | Lower the floor in its own protected policy PR; it takes effect from the next evaluation, so the step-down lands as a second commit. See [the floor is the authorization](config-reference.md#minseverities--the-floor-is-the-authorization). |
 | `ESLINT_ERROR` | ESLint acknowledged a suppression Pocket Zipper did not inventory. Fail-closed safety net. | Report it as a bug with the printed file and rule. |
 | `INTERNAL_ERROR` | An unexpected failure. | Re-run with `--json` and inspect `errors[]`. |
+
+### The baseline registry is unreadable
+
+If every `check --base …` exits `2` with a `CONFIG_ERROR` naming
+`.pocket-zipper/exceptions.yml`, including checks for changes that touch no protected
+file, the protected branch may contain a defective baseline registry. The baseline is
+the comparison state, so the repair PR is normally judged against the same unreadable
+file and self-locks.
+
+The diagnostic already identifies the entry index, field, expected and actual values,
+line and column, and path. Fix that exact defect in the registry. A repair PR that
+carries the registry and replaces it with a defect-free file is evaluated with empty
+baseline coverage and passes on `BASELINE_DEFECT` when it adds no new debt. The report
+also carries the original baseline findings, and the repair is recorded as
+`POLICY_CHANGE`; run with `--verbose` to see both signals. The repaired records do not
+authorize debt introduced by the repair itself.
+
+If the repair file is still defective, the check remains exit `2` and reports the
+head-side defects. A poisoned `.pocket-zipper/config.yml` has no repair carve-out:
+there is no safe policy frame, so use one of the recovery paths below.
+
+Out-of-band recovery choices are deliberate maintainer decisions:
+
+1. Ask a host administrator to override the required check. This works everywhere,
+   but requires an administrator and leaves the repository poisoned until a repair PR
+   lands.
+2. Temporarily pin the workflow's `--base` to the last commit whose registry parsed.
+   This unblocks immediately, but evaluates against a baseline other than the one
+   currently protected.
+3. Have an administrator repair the protected branch out of band. This restores the
+   branch directly, but requires administrator access and bypasses the normal PR audit
+   trail.
+
+After repairing a local checkout, run `pocket-zipper validate` against the working tree
+to confirm both protected documents parse cleanly before pushing.
 
 ## Git problems
 

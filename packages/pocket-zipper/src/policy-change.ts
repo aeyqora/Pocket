@@ -17,6 +17,8 @@ export interface PolicyChangeInput {
   headRegistry: readonly ExceptionRecord[] | null;
   /** Whether the proposed change touched one of the two `.pocket-zipper` files. */
   protectedTouched: boolean;
+  /** Whether the baseline registry was defective and is being repaired here. */
+  baselineRegistryDefect?: boolean;
   /** Rules governed under the baseline policy — used to judge allowlist narrowing. */
   baselineGoverned: string[];
   /** Rules governed by the baseline policy's own ESLint config declarations. */
@@ -70,8 +72,10 @@ export interface PolicyChangeResult {
    * reads it rather than re-deciding the question. `failure` below is derived
    * from it; the `POLICY_CHANGE` signal the caller raises pairs it with
    * `weakening`, which `combined` cannot stand in for.
-   */
+  */
   combined: boolean;
+  /** True when this result is the protected repair path for a poisoned baseline. */
+  baselineRepair?: boolean;
 }
 
 export interface SeverityFloorViolation {
@@ -151,6 +155,7 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
     baselineRegistry,
     headRegistry,
     protectedTouched,
+    baselineRegistryDefect = false,
     baselineGoverned,
     baselineSeverityGoverned,
     consumedDebt,
@@ -167,8 +172,16 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
   // here, and comparing it would judge a file outside the change. The ESLint
   // flat config's own severities are the same policy change however the change
   // is spelled, so `configSeverityWeakened` keeps its own structural gate.
-  const registry =
+  const delta =
     protectedTouched ? registryDelta(baselineRegistry, headRegistry) : NO_REGISTRY_CHANGE;
+  const baselineRepair = protectedTouched && baselineRegistryDefect;
+  // A valid empty head registry still repairs a protected baseline document. It
+  // has no slots for registryDelta to count, but it remains an additive policy
+  // change and must stay on protected review.
+  const registry =
+    baselineRepair && delta.shape === "none"
+      ? { ...delta, shape: "additive" as const }
+      : delta;
   const configWeakenedHere =
     protectedTouched && configWeakened(baselineConfig, headConfig, baselineGoverned);
   const protectedWeakened = configWeakenedHere || registry.shape !== "none";
@@ -213,6 +226,7 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
   // first.
   const combined =
     shape === "additive" &&
+    !baselineRepair &&
     baselinePolicy.allowSameChangeExceptions &&
     canGuaranteePathApproval(baselinePolicy.host);
   // The host's path-scoped approval on `.pocket-zipper/**` stands in for the
@@ -240,6 +254,7 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
     shape,
     sanctioned,
     combined,
+    ...(baselineRepair ? { baselineRepair: true } : {}),
   };
 }
 
