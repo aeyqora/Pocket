@@ -17,10 +17,11 @@ import type {
 } from "./types.js";
 import { isNewDebt } from "./exception-match.js";
 import { DEFAULT_POLICY } from "./policy.js";
+import { sortedGovernedPaths, sortedUngovernedPaths } from "./governed-path.js";
 
 export const TOOL_NAME = "pocket-zipper";
 export const TOOL_VERSION = "0.4.0";
-export const SCHEMA_VERSION = 3 as const;
+export const SCHEMA_VERSION = 4 as const;
 
 export interface Summary {
   dispositions: EvaluationSummary["dispositions"];
@@ -130,6 +131,8 @@ export function buildRecord(input: BuildRecordInput): EvaluationRecord {
       minSeverities: input.policy.minSeverities ?? null,
     },
     governedRules: input.governedRules,
+    governedPaths: sortedGovernedPaths(input.policy),
+    ungovernedPaths: sortedUngovernedPaths(input.policy),
     ...summarize(input.head, input.removed.length),
     cleanup: {
       danglingExceptions: input.cleanup.dangling,
@@ -215,6 +218,8 @@ function emptySummary(policy: Policy = DEFAULT_POLICY): EvaluationSummary {
       minSeverities: policy.minSeverities ?? null,
     },
     governedRules: [],
+    governedPaths: sortedGovernedPaths(policy),
+    ungovernedPaths: sortedUngovernedPaths(policy),
     dispositions: { existing: 0, movedExisting: 0, removed: 0, new: 0, materiallyChanged: 0 },
     newDebt: { authorized: 0, unauthorized: 0 },
     cleanup: {

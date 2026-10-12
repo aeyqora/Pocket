@@ -147,7 +147,7 @@ export interface PoolCount {
  * and the human report renders the same list rather than deriving its own.
  */
 export interface EvaluationRecord {
-  schemaVersion: 3;
+  schemaVersion: 4;
   tool: { name: string; version: string };
   mode: Mode;
   verdict: Verdict;
@@ -219,6 +219,10 @@ export interface EvaluationSummary {
     minSeverities: Record<string, SeverityBand> | null;
   };
   governedRules: string[];
+  /** Parsed, sorted path allowlist; null when the key is absent. */
+  governedPaths: string[] | null;
+  /** Parsed, sorted path subtractor; null when the key is absent. */
+  ungovernedPaths: string[] | null;
   dispositions: {
     existing: number;
     movedExisting: number;

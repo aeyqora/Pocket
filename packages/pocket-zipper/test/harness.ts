@@ -207,6 +207,8 @@ function renderEslintConfig(rules: Record<string, string>, files: string[] | nul
 export function configYaml(opts: {
   enabled?: boolean;
   governedRules?: string[];
+  governedPaths?: string[];
+  ungovernedPaths?: string[];
   minSeverities?: Record<string, "off" | "warn" | "error">;
   defaultExpiry?: string;
   maxExpiry?: string;
@@ -218,6 +220,14 @@ export function configYaml(opts: {
   if (opts.governedRules !== undefined) {
     lines.push("governedRules:");
     for (const r of opts.governedRules) lines.push(`  - ${r}`);
+  }
+  if (opts.governedPaths !== undefined) {
+    lines.push("governedPaths:");
+    for (const p of opts.governedPaths) lines.push(`  - ${p}`);
+  }
+  if (opts.ungovernedPaths !== undefined) {
+    lines.push("ungovernedPaths:");
+    for (const p of opts.ungovernedPaths) lines.push(`  - ${p}`);
   }
   if (opts.minSeverities !== undefined) {
     lines.push("minSeverities:");

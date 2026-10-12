@@ -51,6 +51,7 @@ import {
   type LineDiff,
 } from "./continuity.js";
 import { reconcile } from "./reconcile.js";
+import { isGovernedSuppression } from "./governed-path.js";
 import { PocketZipperError, gitError } from "./errors.js";
 import type {
   DurationLiteral,
@@ -493,9 +494,11 @@ export function reconcileGoverned(input: {
   const governedHead = computeGovernedSet(policy, analysis.applicableHead);
   const governedBaseline = computeGovernedSet(policy, analysis.applicableBaseline);
   const { head, removed } = reconcile({
-    headSuppressions: analysis.headSuppressions.filter((s) => governedHead.includes(s.rule)),
-    baselineSuppressions: analysis.baselineSuppressions.filter((s) =>
-      governedBaseline.includes(s.rule),
+    headSuppressions: analysis.headSuppressions.filter(
+      (s) => governedHead.includes(s.rule) && isGovernedSuppression(policy, s),
+    ),
+    baselineSuppressions: analysis.baselineSuppressions.filter(
+      (s) => governedBaseline.includes(s.rule) && isGovernedSuppression(policy, s),
     ),
     lineDiffs: analysis.lineDiffs,
     baselineIndex: analysis.baselineIndex,

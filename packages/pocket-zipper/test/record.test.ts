@@ -152,7 +152,7 @@ describe("record: buildRecord", () => {
       verdict: "fail",
       baseline: { ref: "main", tree: "b".repeat(40) },
       proposedTree: "a".repeat(40),
-      policy: { enabled: true, governedRules: ["no-console"] },
+      policy: { enabled: true, governedRules: ["no-console"], governedPaths: null, ungovernedPaths: null },
       governedRules: ["no-console"],
       head: [head({ disposition: "new", exception: ref })],
       removed: [removed()],
@@ -168,7 +168,7 @@ describe("record: buildRecord", () => {
 
   it("stamps the schema, tool, refs, and summary", () => {
     const out = build();
-    assert.equal(out.schemaVersion, 3);
+    assert.equal(out.schemaVersion, 4);
     assert.equal(out.tool.version, TOOL_VERSION);
     assert.equal(out.mode, "check");
     assert.equal(out.verdict, "fail");
@@ -180,6 +180,8 @@ describe("record: buildRecord", () => {
       minSeverities: null,
     });
     assert.deepEqual(out.summary.governedRules, ["no-console"]);
+    assert.equal(out.summary.governedPaths, null);
+    assert.equal(out.summary.ungovernedPaths, null);
     assert.equal(out.summary.dispositions.removed, 1);
     assert.equal(out.summary.newDebt.authorized, 1);
     assert.equal(out.summary.newDebt.unauthorized, 0);
@@ -250,7 +252,7 @@ describe("record: empty records", () => {
       mode: "check",
       baseline: { ref: "main", tree: "t".repeat(40) },
       proposedTree: "p".repeat(40),
-      policy: { enabled: false, governedRules: null },
+      policy: { enabled: false, governedRules: null, governedPaths: null, ungovernedPaths: null },
     });
     assert.equal(out.verdict, "excluded");
     assert.equal(out.inventory.length, 0);

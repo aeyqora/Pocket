@@ -48,7 +48,7 @@ describe("the published record, as a machine reads it", () => {
     const res = r.runCli(["check", "--base", "base"]);
     const record = res.record!;
 
-    assert.equal(record.schemaVersion, 3);
+    assert.equal(record.schemaVersion, 4);
     assert.equal(record.summary.cleanup.danglingExceptions, 1);
     assert.equal(record.unused.length, 1);
 

@@ -19,7 +19,7 @@ interface RecordOverrides {
 
 function record(overrides: RecordOverrides = {}): EvaluationRecord {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     tool: { name: "pocket-zipper", version: "0.1.0" },
     mode: overrides.mode ?? "check",
     verdict: overrides.verdict ?? "pass",
@@ -28,6 +28,8 @@ function record(overrides: RecordOverrides = {}): EvaluationRecord {
     summary: {
       policy: { enabled: true, allowlist: null },
       governedRules: ["no-console"],
+      governedPaths: null,
+      ungovernedPaths: null,
       dispositions: {
         existing: 0,
         movedExisting: 0,

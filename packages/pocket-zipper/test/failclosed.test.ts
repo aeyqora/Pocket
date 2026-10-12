@@ -266,7 +266,7 @@ describe("evaluation record contract", () => {
     r.commit("head");
     const res = r.runCli(["check", "--base", "base"]);
     const record = res.record!;
-    assert.equal(record.schemaVersion, 3);
+    assert.equal(record.schemaVersion, 4);
     assert.equal(record.tool.name, "pocket-zipper");
     assert.equal(record.mode, "check");
     assert.equal(record.verdict, "pass");
