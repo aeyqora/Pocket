@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { ESLint } from "eslint";
 import { lintFiles, type DroppedFile, type FatalFile } from "./eslint.js";
+import { formatDirective, scanDirectives, splitRuleList } from "./scan.js";
+import type { ScannedDirective } from "./scan.js";
 import type {
   Action,
   BatchOutcome,
@@ -8,6 +10,7 @@ import type {
   EditRecord,
   JsonValue,
   LintMessage,
+  NotActionableDirective,
   RunMode,
 } from "./types.js";
 
@@ -49,6 +52,8 @@ export interface RunActionResult {
   output: string;
   edits: EditRecord[];
   stats: Record<string, number>;
+  /** Directives recognised but left untouched, for the command to report. */
+  notActionable?: NotActionableDirective[];
 }
 
 type Strategy = (options: RunActionForFileOptions) => RunActionResult;
@@ -71,42 +76,11 @@ export const NEXT_LINE_DIRECTIVE_RE =
  */
 export const LINE_SUFFIX_DIRECTIVE_RE = /^(\s*.*\S)\s+\/\/\s*eslint-disable-line\b\s*(.*)$/;
 
-/**
- * A whole-line `block`-open or `file-level` directive: `// eslint-disable <rules>
- * [ -- desc]` or the `/* ... *\/` spelling. The `(?!-)` keeps it from matching
- * the `-next-line`/`-line` forms. Groups: 1 indent, 2 the comment opener, 3 the
- * tail (rule list + optional description), 4 a trailing `*\/` when present.
- */
-export const BLOCK_DIRECTIVE_RE = /^(\s*)(\/\/|\/\*)\s*eslint-disable\b(?!-)\s*(.*?)\s*(\*\/)?\s*$/;
-
-/** A whole-line `eslint-enable` directive, in either comment spelling. */
-export const ENABLE_DIRECTIVE_RE = /^\s*(?:\/\/|\/\*)\s*eslint-enable\b/;
-
-export interface RuleList {
-  rules: string[];
-  desc: string;
-  bare: boolean;
-}
-
-/**
- * Split a directive's tail into its rule list and optional `-- description`
- * (spec §6.1): the description is whatever follows the first `--`, and the rule
- * list is the comma-separated tokens before it. `bare` means no rules listed.
- */
-export function splitRuleList(rest: string): RuleList {
-  let tail = rest;
-  let desc = "";
-  const separator = tail.indexOf("--");
-  if (separator >= 0) {
-    desc = tail.slice(separator + 2).trim();
-    tail = tail.slice(0, separator);
-  }
-  const rules = tail
-    .split(",")
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
-  return { rules, desc, bare: rules.length === 0 };
-}
+// `splitRuleList` and `RuleList` live in `scan.ts` (the shared full-file scan)
+// so the engine can import them without a cycle; re-exported here to keep the
+// public surface stable.
+export { splitRuleList } from "./scan.js";
+export type { RuleList } from "./scan.js";
 
 // --- lazy scan (the −32% lever) ----------------------------------------------
 
@@ -246,56 +220,43 @@ export interface BlockGuard {
   form: "block" | "file-level";
 }
 
-/** Is there an `eslint-enable` at any line strictly below `fromIndex`? */
-function hasEnableBelow(lines: readonly string[], fromIndex: number): boolean {
-  for (let index = fromIndex + 1; index < lines.length; index++) {
-    if (ENABLE_DIRECTIVE_RE.test(stripCr(lines[index] ?? "").probe)) return true;
-  }
-  return false;
-}
-
 /**
- * The bounded upward scan for `--reuse-blocks` (spec §6.1): walk up from the
- * violation's line to the nearest `eslint-disable` that still encloses it. An
- * `eslint-enable` seen on the way up closes one open directive below it; a
- * disable with no un-matched enable below it is the enclosing guard. A disable
- * matched by an enable is skipped, so a violation after a closed block falls
- * through to the default minimal-span insert.
- *
- * The scan is deliberately bounded by the file's top — it never reads past the
- * violation, and it is only ever entered on the opt-in path.
+ * The enclosing-guard finder for `--reuse-blocks` (spec §6.1/§7): the nearest
+ * `eslint-disable` that still covers the violation — a `block`-open whose paired
+ * `eslint-enable` sits below the violation, or a `file-level` directive above
+ * it. Built on the shared full-file scan (`scanDirectives`), so it reuses the
+ * one directive grammar and the same block pairing as remove/replace/inventory.
+ * The selection walks the directives once and keeps the closest enclosing line.
  */
 export function findEnclosingBlockGuard(
   lines: readonly string[],
   violationLine: number,
 ): BlockGuard | undefined {
-  let pendingEnables = 0;
-  for (let index = violationLine - 2; index >= 0; index--) {
-    const { probe, cr } = stripCr(lines[index] ?? "");
-    if (ENABLE_DIRECTIVE_RE.test(probe)) {
-      pendingEnables += 1;
+  let best: ScannedDirective | undefined;
+  for (const directive of scanDirectives(lines)) {
+    if (directive.kind !== "disable") continue;
+    if (directive.form !== "block" && directive.form !== "file-level") continue;
+    if (directive.line >= violationLine) continue;
+    if (
+      directive.form === "block" &&
+      (directive.pairLine === undefined || directive.pairLine <= violationLine)
+    ) {
       continue;
     }
-    const match = BLOCK_DIRECTIVE_RE.exec(probe);
-    if (match === null) continue;
-    if (pendingEnables > 0) {
-      pendingEnables -= 1;
-      continue;
-    }
-    const { rules, desc, bare } = splitRuleList(match[3] ?? "");
-    return {
-      index,
-      line: index + 1,
-      indent: match[1] ?? "",
-      open: match[2] ?? "//",
-      rules,
-      desc,
-      bare,
-      cr,
-      form: hasEnableBelow(lines, index) ? "block" : "file-level",
-    };
+    if (best === undefined || directive.line > best.line) best = directive;
   }
-  return undefined;
+  if (best === undefined) return undefined;
+  return {
+    index: best.index,
+    line: best.line,
+    indent: best.indent,
+    open: best.comment,
+    rules: best.rules,
+    desc: best.description,
+    bare: best.bare,
+    cr: best.cr,
+    form: best.form === "block" ? "block" : "file-level",
+  };
 }
 
 export type SuppressEditKind = "insert" | "prepend-line" | "prepend-next" | "prepend-block";
@@ -525,12 +486,181 @@ function suppressStrategy(options: RunActionForFileOptions): RunActionResult {
 }
 
 /**
- * The action strategies, keyed by action. Ticket 05 lands `suppress`; later
- * tickets add the rest. Actions without a strategy run `lint-only`, so the pool,
- * worker and UI can still complete a run without inventing behaviour the spec
- * has not pinned yet.
+ * The `remove` verb's parameters (spec §6.3): the action config's actionable
+ * rules to strip from every directive. Passed to the workers as cloneable JSON.
  */
-const STRATEGIES: Partial<Record<Action, Strategy>> = { suppress: suppressStrategy };
+export interface RemoveParams {
+  rules: string[];
+}
+
+/** One planned remove edit: rewrite a directive's list, or delete the comment. */
+type RemoveEdit = {
+  kind: "rewrite" | "delete";
+  index: number;
+  line: number;
+  form: DirectiveForm;
+  removed: string[];
+  before: string;
+  /**
+   * A rewrite's new line. A whole-line delete has none (the line is spliced
+   * out); a suffix delete keeps the code line, so `after` is that code prefix.
+   */
+  after?: string;
+};
+
+function removeParams(raw: StrategyParams): RemoveParams {
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    const rules = (raw as { rules?: unknown }).rules;
+    if (Array.isArray(rules)) {
+      return { rules: rules.filter((rule): rule is string => typeof rule === "string") };
+    }
+  }
+  return { rules: [] };
+}
+
+/**
+ * The remove strategy (spec §6.3): full-file scan, strip the config's rules from
+ * every disable directive, delete a directive whose list empties, and delete a
+ * paired `eslint-enable` when its block-open vanishes. A bare `eslint-disable` is
+ * never produced — it guards everything — and bare directives are left untouched
+ * and reported.
+ *
+ * Block pairing comes from `scanDirectives`: an enable is deleted only when
+ * **every** disable it closes is itself deleted, so removing one rule from a
+ * multi-rule block never strands the other rules by dropping their closer.
+ */
+function removeStrategy(options: RunActionForFileOptions): RunActionResult {
+  const { rules: configRuleList } = removeParams(options.params);
+  const configRules = new Set(configRuleList);
+  const lines = options.text.split("\n");
+  const directives = scanDirectives(lines);
+
+  const notActionable: NotActionableDirective[] = [];
+  const stripped = new Map<number, { directive: ScannedDirective; kept: string[]; removed: string[] }>();
+  const deletedDisables = new Map<number, { directive: ScannedDirective; removed: string[] }>();
+
+  for (const directive of directives) {
+    if (directive.kind !== "disable") continue;
+    if (directive.bare) {
+      // A bare guard names no rules, so it cannot be scoped to the config's set.
+      notActionable.push({
+        file: options.filePath,
+        line: directive.line,
+        form: directive.form,
+        reason: "bare",
+        text: directive.text,
+      });
+      continue;
+    }
+    const removed = directive.rules.filter((rule) => configRules.has(rule));
+    if (removed.length === 0) continue;
+    const kept = directive.rules.filter((rule) => !configRules.has(rule));
+    if (kept.length === 0) deletedDisables.set(directive.index, { directive, removed });
+    else stripped.set(directive.index, { directive, kept, removed });
+  }
+
+  const removedByLine = new Map<number, string[]>();
+  for (const { directive, removed } of deletedDisables.values()) {
+    removedByLine.set(directive.line, removed);
+  }
+
+  const deletedEnables = new Map<number, { directive: ScannedDirective; removed: string[] }>();
+  for (const directive of directives) {
+    if (directive.kind !== "enable") continue;
+    const closed = directive.closes;
+    // An orphan enable closes nothing: not remove's job (cleanup owns those).
+    if (closed === undefined || closed.length === 0) continue;
+    if (!closed.every((line) => removedByLine.has(line))) continue;
+    const removed = [...new Set(closed.flatMap((line) => removedByLine.get(line) ?? []))];
+    deletedEnables.set(directive.index, { directive, removed });
+  }
+
+  // A whole-line directive is spliced out entirely; a suffix directive keeps its
+  // code and loses only the comment (spec §6.3: delete the directive, not the
+  // line it rides on).
+  const crOf = (directive: ScannedDirective): string => (directive.cr ? "\r" : "");
+  const deleteEdit = (
+    directive: ScannedDirective,
+    removed: string[],
+    form: DirectiveForm,
+  ): RemoveEdit => ({
+    kind: "delete",
+    index: directive.index,
+    line: directive.line,
+    form,
+    removed,
+    before: directive.text + crOf(directive),
+    ...(directive.suffix ? { after: `${directive.code}${crOf(directive)}` } : {}),
+  });
+
+  const edits: RemoveEdit[] = [];
+  for (const { directive, kept, removed } of stripped.values()) {
+    edits.push({
+      kind: "rewrite",
+      index: directive.index,
+      line: directive.line,
+      form: directive.form,
+      removed,
+      before: directive.text + crOf(directive),
+      after: formatDirective(directive, kept),
+    });
+  }
+  for (const { directive, removed } of deletedDisables.values()) {
+    edits.push(deleteEdit(directive, removed, directive.form));
+  }
+  for (const { directive, removed } of deletedEnables.values()) {
+    edits.push(deleteEdit(directive, removed, "block"));
+  }
+  edits.sort((a, b) => a.index - b.index);
+
+  const records: EditRecord[] = [];
+  for (const edit of edits) {
+    for (const rule of edit.removed) {
+      records.push({
+        file: options.filePath,
+        line: edit.line,
+        rule,
+        editType: "strip",
+        form: edit.form,
+        before: edit.before,
+        ...(edit.after === undefined ? {} : { after: edit.after }),
+      });
+    }
+  }
+
+  const ordered = [...edits].sort((a, b) => b.index - a.index);
+  for (const edit of ordered) {
+    if (edit.after === undefined) lines.splice(edit.index, 1);
+    else lines[edit.index] = edit.after;
+  }
+
+  let rulesRemoved = 0;
+  for (const entry of stripped.values()) rulesRemoved += entry.removed.length;
+  for (const entry of deletedDisables.values()) rulesRemoved += entry.removed.length;
+
+  return {
+    output: edits.length === 0 ? options.text : lines.join("\n"),
+    edits: records,
+    notActionable,
+    stats: {
+      stripped: stripped.size,
+      deleted: deletedDisables.size + deletedEnables.size,
+      skippedBare: notActionable.length,
+      rulesRemoved,
+    },
+  };
+}
+
+/**
+ * The action strategies, keyed by action. Ticket 05 lands `suppress`; ticket 09
+ * adds `remove`; later tickets add the rest. Actions without a strategy run
+ * `lint-only`, so the pool, worker and UI can still complete a run without
+ * inventing behaviour the spec has not pinned yet.
+ */
+const STRATEGIES: Partial<Record<Action, Strategy>> = {
+  suppress: suppressStrategy,
+  remove: removeStrategy,
+};
 
 /**
  * Plan (and, when `apply`, apply) one file's action. Returns the new text plus
@@ -733,6 +863,7 @@ export async function runBatch(
       // The planned text only travels back on a dry run; on apply it is on disk.
       ...(changed && options.mode === "dry-run" ? { output: planned.output } : {}),
       stats: planned.stats,
+      ...(planned.notActionable === undefined ? {} : { notActionable: planned.notActionable }),
     });
   }
 
