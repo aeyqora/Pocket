@@ -397,25 +397,20 @@ export interface RemoveParams {
   rules: string[];
 }
 
-/** One planned remove edit: rewrite a directive's list, or delete the line. */
-type RemoveEdit =
-  | {
-      kind: "strip";
-      index: number;
-      line: number;
-      form: DirectiveForm;
-      removed: string[];
-      before: string;
-      after: string;
-    }
-  | {
-      kind: "delete";
-      index: number;
-      line: number;
-      form: DirectiveForm;
-      removed: string[];
-      before: string;
-    };
+/** One planned remove edit: rewrite a directive's list, or delete the comment. */
+type RemoveEdit = {
+  kind: "rewrite" | "delete";
+  index: number;
+  line: number;
+  form: DirectiveForm;
+  removed: string[];
+  before: string;
+  /**
+   * A rewrite's new line. A whole-line delete has none (the line is spliced
+   * out); a suffix delete keeps the code line, so `after` is that code prefix.
+   */
+  after?: string;
+};
 
 function removeParams(raw: StrategyParams): RemoveParams {
   if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
@@ -484,37 +479,41 @@ function removeStrategy(options: RunActionForFileOptions): RunActionResult {
     deletedEnables.set(directive.index, { directive, removed });
   }
 
+  // A whole-line directive is spliced out entirely; a suffix directive keeps its
+  // code and loses only the comment (spec §6.3: delete the directive, not the
+  // line it rides on).
+  const crOf = (directive: ScannedDirective): string => (directive.cr ? "\r" : "");
+  const deleteEdit = (
+    directive: ScannedDirective,
+    removed: string[],
+    form: DirectiveForm,
+  ): RemoveEdit => ({
+    kind: "delete",
+    index: directive.index,
+    line: directive.line,
+    form,
+    removed,
+    before: directive.text + crOf(directive),
+    ...(directive.suffix ? { after: `${directive.code}${crOf(directive)}` } : {}),
+  });
+
   const edits: RemoveEdit[] = [];
   for (const { directive, kept, removed } of stripped.values()) {
     edits.push({
-      kind: "strip",
+      kind: "rewrite",
       index: directive.index,
       line: directive.line,
       form: directive.form,
       removed,
-      before: directive.text + (directive.cr ? "\r" : ""),
+      before: directive.text + crOf(directive),
       after: formatDirective(directive, kept),
     });
   }
   for (const { directive, removed } of deletedDisables.values()) {
-    edits.push({
-      kind: "delete",
-      index: directive.index,
-      line: directive.line,
-      form: directive.form,
-      removed,
-      before: directive.text + (directive.cr ? "\r" : ""),
-    });
+    edits.push(deleteEdit(directive, removed, directive.form));
   }
   for (const { directive, removed } of deletedEnables.values()) {
-    edits.push({
-      kind: "delete",
-      index: directive.index,
-      line: directive.line,
-      form: "block",
-      removed,
-      before: directive.text + (directive.cr ? "\r" : ""),
-    });
+    edits.push(deleteEdit(directive, removed, "block"));
   }
   edits.sort((a, b) => a.index - b.index);
 
@@ -528,14 +527,14 @@ function removeStrategy(options: RunActionForFileOptions): RunActionResult {
         editType: "strip",
         form: edit.form,
         before: edit.before,
-        ...(edit.kind === "strip" ? { after: edit.after } : {}),
+        ...(edit.after === undefined ? {} : { after: edit.after }),
       });
     }
   }
 
   const ordered = [...edits].sort((a, b) => b.index - a.index);
   for (const edit of ordered) {
-    if (edit.kind === "delete") lines.splice(edit.index, 1);
+    if (edit.after === undefined) lines.splice(edit.index, 1);
     else lines[edit.index] = edit.after;
   }
 

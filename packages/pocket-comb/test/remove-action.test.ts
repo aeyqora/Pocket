@@ -126,6 +126,17 @@ test("bare directives are untouched and listed as not-actionable", async () => {
   );
 });
 
+test("an emptied line-form directive loses only its comment, not the code", async () => {
+  const fix = fixture({ "suffix.js": "const a = 1; // eslint-disable-line no-console\n" });
+
+  await remove(fix.dir, ["--apply"]);
+  assert.equal(
+    readFileSync(join(fix.target, "suffix.js"), "utf8"),
+    "const a = 1;\n",
+    "the code survives; only the emptied comment is deleted",
+  );
+});
+
 test("remove never leaves a bare eslint-disable behind", async () => {
   const fix = fixture({ "single.js": "// eslint-disable-next-line no-console\ncode();\n" });
 

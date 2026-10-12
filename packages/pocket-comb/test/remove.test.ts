@@ -69,6 +69,19 @@ test("an emptied directive is deleted entirely — no bare eslint-disable is eve
   assert.doesNotMatch(result.output, /eslint-disable/);
 });
 
+test("an emptied line-form suffix directive keeps the code it rides on", () => {
+  const result = remove("const a = 1; // eslint-disable-line no-console\n", ["no-console"]);
+  assert.equal(result.output, "const a = 1;\n", "only the comment is deleted, never the code line");
+  assert.equal(result.edits.length, 1);
+  assert.equal(result.edits[0]?.after, "const a = 1;");
+  assert.equal(result.edits[0]?.form, "line");
+});
+
+test("an emptied suffix directive on a CRLF line keeps the CRLF", () => {
+  const result = remove("code(); // eslint-disable-line no-console\r\n", ["no-console"]);
+  assert.equal(result.output, "code();\r\n");
+});
+
 test("a file-level directive whose list empties is deleted (there is no enable to pair)", () => {
   const result = remove("/* eslint-disable no-console */\ncode();\n", ["no-console"]);
   assert.equal(result.output, "code();\n");
