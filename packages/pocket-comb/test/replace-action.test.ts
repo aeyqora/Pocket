@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../src/cli.js";
 import { REPLACE_CLEANUP_HINT } from "../src/actions/replace.js";
+import { WIZARD_CANCEL, type Prompter } from "../src/wizard.js";
 import { cleanupTemps, fakeIo, tempDir, write } from "./harness.js";
 
 after(cleanupTemps);
@@ -103,16 +104,24 @@ test("a missing pair in non-TTY exits 2 listing exactly --from and --to", async 
   assert.match(io.stderr(), /missing required flags: --from, --to/);
 });
 
-test("a TTY replace without a pair is an operational error, not a missing-flags one", async () => {
+test("a TTY replace without a pair defers to the wizard, never a missing-flags error", async () => {
   const dir = tempDir();
   write(dir, "comb.config.mjs", `export default [{ files: ["**/*.js"], rules: {} }];\n`);
   write(dir, "target/a.js", "// eslint-disable-next-line no-console\ncode();\n");
 
   const io = fakeIo({ cwd: dir, tty: true });
-  const code = await main(["replace", "-c", "comb.config.mjs", "-t", "target"], io.io);
-  assert.equal(code, 2, "the wizard (ticket 13) will fill this gap");
+  const prompter: Prompter = {
+    intro() {},
+    outro() {},
+    cancel() {},
+    select: async () => WIZARD_CANCEL,
+    text: async () => WIZARD_CANCEL,
+    confirm: async () => WIZARD_CANCEL,
+    path: async () => WIZARD_CANCEL,
+  };
+  const code = await main(["replace", "-c", "comb.config.mjs", "-t", "target"], io.io, { prompter });
+  assert.equal(code, 0, "the wizard owns the pair gap; a cancel exits cleanly");
   assert.doesNotMatch(io.stderr(), /missing required/);
-  assert.match(io.stderr(), /--from/);
 });
 
 test("the report carries the cleanup hint when a rename happened, and the human line says so", async () => {

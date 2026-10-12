@@ -7,8 +7,11 @@ import { loadConfig } from "./config.js";
 import { isOperationalError } from "./errors.js";
 import { ACTIONS } from "./types.js";
 import { VERSION } from "./version.js";
+import { createClackPrompter, runWizard } from "./wizard.js";
 import type { ParsedInvocation } from "./args.js";
 import type { LoadedConfig } from "./config.js";
+import type { Action } from "./types.js";
+import type { Prompter } from "./wizard.js";
 
 /**
  * Where a command reads and writes, and whether it may prompt. Injected rather
@@ -38,6 +41,12 @@ export function processIo(): CommandIo {
   };
 }
 
+/** Injectable dependencies for `main`; the wizard's prompts default to clack. */
+export interface MainDeps {
+  /** The wizard's prompt primitives. Tests inject a fake to avoid a real TTY. */
+  prompter?: Prompter;
+}
+
 /**
  * The flags a non-interactive run must carry, given what the config already
  * answers. Config itself is not listed here: a missing or unloadable config is
@@ -64,6 +73,7 @@ function missingRequiredFlags(
 export async function main(
   argv: string[] = process.argv.slice(2),
   io: CommandIo = processIo(),
+  deps: MainDeps = {},
 ): Promise<number> {
   try {
     const parsed = parseArgs(argv);
@@ -76,11 +86,32 @@ export async function main(
       io.output.write(`${VERSION}\n`);
       return 0;
     }
+
+    // The interactive session (spec §5): entered only on a TTY. It fills the gaps
+    // flags and settings leave, runs the chosen action, and offers apply/restart/
+    // abort after a dry run. A non-TTY run never reaches it.
+    const runTtyWizard = (): Promise<number> =>
+      runWizard({
+        parsed,
+        io,
+        cwd: io.cwd,
+        prompter: deps.prompter ?? createClackPrompter(io),
+        loadConfig,
+        run: async ({ parsed: resolved, config }) => {
+          if (resolved.action === null) {
+            // The wizard always resolves an action before running.
+            throw new Error("wizard finished without an action");
+          }
+          return runAction(resolved.action as Action, { parsed: resolved, config, io });
+        },
+      });
+
     if (parsed.action === null) {
       if (parsed.help) {
         io.output.write(usage(null) + "\n");
         return 0;
       }
+      if (io.tty) return await runTtyWizard();
       io.stderr.write(
         `pocket-comb: missing action (one of ${ACTIONS.join(", ")})\n${usage(null)}\n`,
       );
@@ -90,6 +121,8 @@ export async function main(
       io.output.write(usage(parsed.action) + "\n");
       return 0;
     }
+
+    if (io.tty) return await runTtyWizard();
 
     const config = await loadConfig({
       ...(parsed.config !== null ? { configFlag: parsed.config } : {}),
