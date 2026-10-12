@@ -133,6 +133,30 @@ test("remove never leaves a bare eslint-disable behind", async () => {
   assert.equal(readFileSync(join(fix.target, "single.js"), "utf8"), "code();\n");
 });
 
+test("--format json --out - streams the run report to stdout; human output moves to stderr", async () => {
+  const fix = fixture({ "a.js": "// eslint-disable-next-line no-console, no-alert\ncode();\n" });
+
+  const { code, out, err } = await remove(fix.dir, ["--format", "json", "--out", "-"]);
+  assert.equal(code, 1);
+
+  const report = JSON.parse(out) as {
+    meta: { action: string; dryRun: boolean; configHash: string };
+    edits: Array<{ rule: string; editType: string; form: string }>;
+    byRule: Array<{ rule: string; count: number }>;
+  };
+  assert.equal(report.meta.action, "remove");
+  assert.equal(report.meta.dryRun, true);
+  assert.equal(report.meta.configHash.length, 64);
+  assert.deepEqual(
+    report.edits.map((edit) => [edit.rule, edit.editType, edit.form]),
+    [["no-console", "strip", "next-line"]],
+  );
+  assert.deepEqual(report.byRule, [{ rule: "no-console", count: 1 }]);
+
+  assert.match(err, /Impact: 1 files would change/, "human output moves to stderr for a piped report");
+  assert.match(err, /Done: 1 files touched/);
+});
+
 test("a target with no matching files is an operational error (exit 2)", async () => {
   const dir = tempDir();
   write(dir, "comb.config.mjs", CONFIG);
