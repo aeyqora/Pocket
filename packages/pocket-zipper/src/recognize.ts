@@ -415,6 +415,8 @@ export async function recognizeConfigOffs(treeDir: string): Promise<ConfigOffRes
       canonicalText,
       namedRules: [decl.rule],
       scopeKey,
+      files: decl.files,
+      ignores: decl.ignores,
     });
   }
   return { suppressions, configFile };

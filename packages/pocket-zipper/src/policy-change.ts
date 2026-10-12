@@ -1,4 +1,5 @@
 import { canGuaranteePathApproval, viewPolicy } from "./policy.js";
+import { scopeReachesGoverned } from "./governed-path.js";
 import {
   poolKey,
   recordMatchKey,
@@ -36,6 +37,12 @@ export interface PolicyChangeInput {
   /** Effective severity bands in the flat config, per tree (see `configSeverityLevels`). */
   baselineLevels: ConfigSeverityLevel[];
   headLevels: ConfigSeverityLevel[];
+  /**
+   * The governed path set. A severity weakening is visible only when its config
+   * block's declared reach intersects this set — never the config file's own
+   * path.
+   */
+  governedPaths: ReadonlySet<string>;
 }
 
 export type PolicyChangeSource = "protected" | "eslint-config" | "both" | "none";
@@ -89,6 +96,8 @@ export interface SeverityFloorInput {
   minSeverities: Readonly<Record<string, SeverityBand>> | undefined;
   baselineLevels: ConfigSeverityLevel[];
   headLevels: ConfigSeverityLevel[];
+  /** The governed path set a floor violation must reach to be visible. */
+  governedPaths: ReadonlySet<string>;
 }
 
 const BAND_VALUE: Record<SeverityBand, number> = { off: 0, warn: 1, error: 2 };
@@ -112,6 +121,10 @@ export function severityFloorViolations(input: SeverityFloorInput): SeverityFloo
     const candidates: SeverityFloorViolation[] = [];
 
     for (const headLevel of head) {
+      // A floor fires only when the dropping scope's reach intersects the
+      // governed set: a violation scoped entirely to ungoverned paths is
+      // invisible. An unscoped block reaches everything and is always governed.
+      if (!scopeReachesGoverned(headLevel.files, headLevel.ignores, input.governedPaths)) continue;
       if (headLevel.band >= BAND_VALUE[floor]) continue;
       const baselineLevel = baseline.find(
         (level) => spanKey(level) === spanKey(headLevel),
@@ -162,6 +175,7 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
     baselinePolicy,
     baselineLevels,
     headLevels,
+    governedPaths,
   } = input;
 
   // The trigger: a protected file the change does not touch is not part of the
@@ -189,6 +203,7 @@ export function detectPolicyChange(input: PolicyChangeInput): PolicyChangeResult
     baselineLevels,
     headLevels,
     baselineSeverityGoverned ?? baselineGoverned,
+    governedPaths,
   );
 
   const weakening = protectedWeakened || eslintWeakened;
@@ -437,6 +452,10 @@ function slotCounts(records: readonly ExceptionRecord[] | null): Map<string, num
  * whether via a global or scoped declaration. Turning off a rule the allowlist
  * never governed changes nothing, so only baseline-governed rules count.
  *
+ * A drop is visible only when its config block's declared reach intersects the
+ * governed paths: a weakening scoped entirely to ungoverned paths is invisible.
+ * The config file's own path never decides — flat configs live at the root.
+ *
  * Effective bands are compared per scope, with a global band standing in for
  * every scope that has no declaration of its own: "this rule is error here,
  * warn there, off everywhere the config does not mention it".
@@ -445,16 +464,21 @@ function configSeverityWeakened(
   baselineLevels: ConfigSeverityLevel[],
   headLevels: ConfigSeverityLevel[],
   baselineGoverned: string[],
+  governedPaths: ReadonlySet<string>,
 ): boolean {
   const governed = new Set(baselineGoverned);
+  const governedScope = (l: ConfigSeverityLevel): boolean =>
+    scopeReachesGoverned(l.files, l.ignores, governedPaths);
   const baselineByRule = new Map<string, ConfigSeverityLevel[]>();
   for (const l of baselineLevels) {
+    if (!governedScope(l)) continue;
     const list = baselineByRule.get(l.rule);
     if (list) list.push(l);
     else baselineByRule.set(l.rule, [l]);
   }
   const headByRule = new Map<string, ConfigSeverityLevel[]>();
   for (const l of headLevels) {
+    if (!governedScope(l)) continue;
     const list = headByRule.get(l.rule);
     if (list) list.push(l);
     else headByRule.set(l.rule, [l]);

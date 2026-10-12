@@ -68,6 +68,10 @@ export interface LogicalSuppression {
   namedRules: string[];
   /** config-off only: normalized scope key. */
   scopeKey?: string;
+  /** config-off only: the block's declared `files` reach; null means unscoped. */
+  files?: string[] | null;
+  /** config-off only: the block's declared `ignores`. */
+  ignores?: string[] | null;
 }
 
 /** A logical suppression with its reconciliation outcome attached. */

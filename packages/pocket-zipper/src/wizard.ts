@@ -8,7 +8,7 @@ import { EslintSession } from "./eslint.js";
 import { configPluginRuleNames } from "./recognize.js";
 import { analyzeTrees, reconcileGoverned } from "./pipeline.js";
 import { flaggedDebt, isNewDebt } from "./exception-match.js";
-import { isGovernedPath } from "./governed-path.js";
+import { governedPathSet, isGovernedPath } from "./governed-path.js";
 import {
   daysBetween,
   describeDuration,
@@ -411,7 +411,11 @@ async function readDebt(
     headContent: (path) => readWorktreeFile(git.root, path),
     governedPath: (path) => isGovernedPath(policy, path),
   });
-  const { head } = reconcileGoverned({ policy, analysis });
+  const { head } = reconcileGoverned({
+    policy,
+    analysis,
+    governedPaths: governedPathSet(policy, git.trackedPaths(baselineCommit)),
+  });
   const coverage = coverExceptions({ head, records, now });
   return coverage.head.filter((h) => isNewDebt(h) && h.exception === null);
 }

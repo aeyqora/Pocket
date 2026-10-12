@@ -32,6 +32,10 @@ function detect(
     baselinePolicy: { ...DEFAULT_POLICY },
     baselineLevels: [],
     headLevels: [],
+    // "Everything governed": the reach judgment these abstract scopes are read
+    // against. The scoped cases below use `src/**` and `test/**`, so the set
+    // names a path in each — absent path keys would govern every tracked path.
+    governedPaths: new Set(["src/a.js", "test/a.js"]),
     // Every case below is a "the protected document changed" case unless it says
     // otherwise in its name.
     protectedTouched: true,
@@ -518,10 +522,16 @@ describe("policy-change: ESLint config severity weakening", () => {
 
 describe("policy-change: severity floors", () => {
   const levels = (band: number, files: string[] | null = null) => [lv("no-console", band, files)];
+  // Unscoped floors reach everything, so an empty governed set still governs them.
+  const floors = (input: {
+    minSeverities: Record<string, "off" | "warn" | "error">;
+    baselineLevels: ReturnType<typeof levels>;
+    headLevels: ReturnType<typeof levels>;
+  }) => severityFloorViolations({ ...input, governedPaths: new Set<string>() });
 
   it("fails a floored error rule stepped down to warn or off", () => {
     assert.deepEqual(
-      severityFloorViolations({
+      floors({
         minSeverities: { "no-console": "error" },
         baselineLevels: levels(2),
         headLevels: levels(1),
@@ -529,7 +539,7 @@ describe("policy-change: severity floors", () => {
       [{ rule: "no-console", floor: "error", head: "warn", baseline: "error" }],
     );
     assert.equal(
-      severityFloorViolations({
+      floors({
         minSeverities: { "no-console": "error" },
         baselineLevels: levels(2),
         headLevels: levels(0),
@@ -540,7 +550,7 @@ describe("policy-change: severity floors", () => {
 
   it("permits a warn floor's migration step but fails its next drop", () => {
     assert.deepEqual(
-      severityFloorViolations({
+      floors({
         minSeverities: { "no-console": "warn" },
         baselineLevels: levels(2),
         headLevels: levels(1),
@@ -548,7 +558,7 @@ describe("policy-change: severity floors", () => {
       [],
     );
     assert.deepEqual(
-      severityFloorViolations({
+      floors({
         minSeverities: { "no-console": "warn" },
         baselineLevels: levels(1),
         headLevels: levels(0),
@@ -559,7 +569,7 @@ describe("policy-change: severity floors", () => {
 
   it("grandfathers a band already below its floor, but not a further drop", () => {
     assert.deepEqual(
-      severityFloorViolations({
+      floors({
         minSeverities: { "no-console": "error" },
         baselineLevels: levels(1),
         headLevels: levels(1),
@@ -567,7 +577,7 @@ describe("policy-change: severity floors", () => {
       [],
     );
     assert.deepEqual(
-      severityFloorViolations({
+      floors({
         minSeverities: { "no-console": "error" },
         baselineLevels: levels(1),
         headLevels: levels(0),
@@ -578,7 +588,7 @@ describe("policy-change: severity floors", () => {
 
   it("fails when the baseline has no declaration for a floored head rule", () => {
     assert.deepEqual(
-      severityFloorViolations({
+      floors({
         minSeverities: { "no-console": "warn" },
         baselineLevels: [],
         headLevels: levels(0),

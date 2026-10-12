@@ -51,7 +51,7 @@ import {
   type LineDiff,
 } from "./continuity.js";
 import { reconcile } from "./reconcile.js";
-import { isGovernedPath, isGovernedSuppression } from "./governed-path.js";
+import { governedPathSet, isGovernedPath, isGovernedSuppression } from "./governed-path.js";
 import { PocketZipperError, gitError } from "./errors.js";
 import type {
   DurationLiteral,
@@ -221,9 +221,14 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         governedPath: (path) => isGovernedPath(policy, path),
       });
 
+      // The governed path set, computed once: both the reconciliation's path
+      // filter and the policy track's reach judgment intersect against it.
+      const governedPathSetValue = governedPathSet(policy, pathInventory);
+
       const { head, removed: baseline, governedHead, governedBaseline } = reconcileGoverned({
         policy,
         analysis,
+        governedPaths: governedPathSetValue,
       });
       // Severity weakening has a different baseline set from reconciliation:
       // config declarations govern a rule even when no changed file matches
@@ -259,6 +264,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         baselinePolicy: policy,
         baselineLevels: analysis.baselineLevels,
         headLevels: analysis.headLevels,
+        governedPaths: governedPathSetValue,
       });
       // Floors are baseline policy, but unlike the protected-file half of the
       // policy delta they always inspect both ESLint config trees. This keeps a
@@ -267,6 +273,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         minSeverities: policy.minSeverities,
         baselineLevels: analysis.baselineLevels,
         headLevels: analysis.headLevels,
+        governedPaths: governedPathSetValue,
       });
       const stagedFloors =
         options.mode === "pre-commit" ? viewPolicy(headConfigRaw).minSeverities : null;
@@ -490,16 +497,17 @@ export interface GovernedReconciliation {
 export function reconcileGoverned(input: {
   policy: Policy;
   analysis: Analysis;
+  governedPaths: ReadonlySet<string>;
 }): GovernedReconciliation {
-  const { policy, analysis } = input;
+  const { policy, analysis, governedPaths } = input;
   const governedHead = computeGovernedSet(policy, analysis.applicableHead);
   const governedBaseline = computeGovernedSet(policy, analysis.applicableBaseline);
   const { head, removed } = reconcile({
     headSuppressions: analysis.headSuppressions.filter(
-      (s) => governedHead.includes(s.rule) && isGovernedSuppression(policy, s),
+      (s) => governedHead.includes(s.rule) && isGovernedSuppression(policy, s, governedPaths),
     ),
     baselineSuppressions: analysis.baselineSuppressions.filter(
-      (s) => governedBaseline.includes(s.rule) && isGovernedSuppression(policy, s),
+      (s) => governedBaseline.includes(s.rule) && isGovernedSuppression(policy, s, governedPaths),
     ),
     lineDiffs: analysis.lineDiffs,
     baselineIndex: analysis.baselineIndex,
