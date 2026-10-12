@@ -51,6 +51,20 @@ export interface TailoredReport {
   loc?: ReportLocation;
   fix?: Rule.ReportFixer | null;
   suggest?: Rule.SuggestionReportDescriptor[] | null;
+  /**
+   * Description for the editor suggestion an authored `fix` becomes when the
+   * tailoring did not opt into `autofix: true`. Ignored when the report already
+   * carries `suggest` entries, or when the fix is applied as an autofix.
+   */
+  suggestionDesc?: string;
+  /**
+   * `messageId` (resolved against the composed rule's messages) for the
+   * suggestion an authored `fix` becomes. Takes precedence over
+   * `suggestionDesc`. Ignored in the same cases as `suggestionDesc`.
+   */
+  suggestionMessageId?: string;
+  /** Placeholder data for a `suggestionMessageId`. */
+  suggestionData?: Record<string, unknown>;
 }
 
 /**
@@ -72,11 +86,16 @@ export interface TailoringMeta {
 
 /**
  * A tailoring definition: which upstream rule is tailored, its authored `meta`,
- * and its `report()` hook. `autofix` is reserved for injected fixes (ticket 03).
+ * and its `report()` hook.
  */
 export interface TailoringDefinition {
   /** The upstream rule, referenced by name inside a plugin or by direct module. */
   tailors: string | Rule.RuleModule;
+  /**
+   * Opt an authored `fix` into `--fix` by synthesizing `meta.fixable`. When
+   * omitted (or `false`), an authored fix becomes an editor suggestion and
+   * `--fix` leaves the file alone (ADR-0003).
+   */
   autofix?: boolean;
   meta?: TailoringMeta;
   report?: ReportHook;

@@ -95,6 +95,30 @@ export const fixableRule: Rule.RuleModule = {
   },
 };
 
+/** Synthetic upstream rule declaring a `whitespace` fix type. */
+export const whitespaceFixRule: Rule.RuleModule = {
+  meta: {
+    type: "layout",
+    fixable: "whitespace",
+    schema: [],
+    messages: { spaced: "upstream: {{name}} needs spacing" },
+  },
+  create(context) {
+    return {
+      Identifier(node) {
+        if (node.name === "spaced") {
+          context.report({
+            node,
+            messageId: "spaced",
+            data: { name: node.name },
+            fix: (fixer) => fixer.insertTextBefore(node, " "),
+          });
+        }
+      },
+    };
+  },
+};
+
 /** Synthetic upstream rule that reports through the legacy form with a fix. */
 export const legacyFixRule: Rule.RuleModule = {
   meta: {
@@ -180,6 +204,7 @@ export const fixturePlugin = {
     "literal-message": literalRule,
     "legacy-message": multiArgRule,
     "fixable-identifier": fixableRule,
+    "whitespace-fix-identifier": whitespaceFixRule,
     "legacy-fix-identifier": legacyFixRule,
     "loc-message": locRule,
     "two-ids": twoIdsRule,
@@ -197,20 +222,34 @@ export interface LintOptions {
  * Lint `code` with `rule` registered under a stable synthetic id, so upstream
  * and composed runs can be compared message for message.
  */
+function lintConfig(rule: Rule.RuleModule, options: unknown[], settings?: Record<string, unknown>) {
+  return {
+    plugins: { fixture: { rules: { "the-rule": rule } } },
+    rules: { "fixture/the-rule": ["error", ...options] },
+    languageOptions: { ecmaVersion: 2022, sourceType: "module" },
+    ...(settings ? { settings } : {}),
+  };
+}
+
 export function lintWith(
   rule: Rule.RuleModule,
   code: string,
   { options = [], settings, filename }: LintOptions = {},
 ): Linter.LintMessage[] {
   const linter = new Linter();
-  return linter.verify(
-    code,
-    {
-      plugins: { fixture: { rules: { "the-rule": rule } } },
-      rules: { "fixture/the-rule": ["error", ...options] },
-      languageOptions: { ecmaVersion: 2022, sourceType: "module" },
-      ...(settings ? { settings } : {}),
-    },
-    filename,
-  );
+  return linter.verify(code, lintConfig(rule, options, settings), filename);
+}
+
+/**
+ * Model `eslint --fix` end to end: run `verify` and apply every `fix` in the
+ * report (up to ESLint's pass limit), exactly as the CLI does. Suggestions are
+ * never applied. The returned `output` is the would-be file contents.
+ */
+export function fixWith(
+  rule: Rule.RuleModule,
+  code: string,
+  { options = [], settings, filename }: LintOptions = {},
+): Linter.FixReport {
+  const linter = new Linter();
+  return linter.verifyAndFix(code, lintConfig(rule, options, settings), filename);
 }
