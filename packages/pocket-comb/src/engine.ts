@@ -1,8 +1,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
+import { ESLint } from "eslint";
 import { lintFiles, type DroppedFile, type FatalFile } from "./eslint.js";
 import { formatDirective, scanDirectives, splitRuleList } from "./scan.js";
 import type { ScannedDirective } from "./scan.js";
-import type { ESLint } from "eslint";
 import type {
   Action,
   BatchOutcome,
@@ -76,8 +76,9 @@ export const NEXT_LINE_DIRECTIVE_RE =
  */
 export const LINE_SUFFIX_DIRECTIVE_RE = /^(\s*.*\S)\s+\/\/\s*eslint-disable-line\b\s*(.*)$/;
 
-// `splitRuleList` lives in `scan.ts` (the shared full-file scan) so the engine
-// can import it without a cycle; re-exported here to keep the public surface.
+// `splitRuleList` and `RuleList` live in `scan.ts` (the shared full-file scan)
+// so the engine can import them without a cycle; re-exported here to keep the
+// public surface stable.
 export { splitRuleList } from "./scan.js";
 export type { RuleList } from "./scan.js";
 
@@ -200,9 +201,65 @@ export function scanSuppressFile(
   return targets;
 }
 
-// --- plan ---------------------------------------------------------------------
+// --- enclosing block/file-level guard (--reuse-blocks) ------------------------
 
-export type SuppressEditKind = "insert" | "prepend-line" | "prepend-next";
+/** An enclosing `block`-open or `file-level` directive (spec §6.1). */
+export interface BlockGuard {
+  /** 0-based index of the directive line. */
+  index: number;
+  /** 1-based line of the directive (the ledger anchor). */
+  line: number;
+  indent: string;
+  /** The comment opener, `//` or `/*`. */
+  open: string;
+  rules: string[];
+  desc: string;
+  bare: boolean;
+  cr: boolean;
+  /** `block` when an `eslint-enable` follows, else `file-level`. */
+  form: "block" | "file-level";
+}
+
+/**
+ * The enclosing-guard finder for `--reuse-blocks` (spec §6.1/§7): the nearest
+ * `eslint-disable` that still covers the violation — a `block`-open whose paired
+ * `eslint-enable` sits below the violation, or a `file-level` directive above
+ * it. Built on the shared full-file scan (`scanDirectives`), so it reuses the
+ * one directive grammar and the same block pairing as remove/replace/inventory.
+ * The selection walks the directives once and keeps the closest enclosing line.
+ */
+export function findEnclosingBlockGuard(
+  lines: readonly string[],
+  violationLine: number,
+): BlockGuard | undefined {
+  let best: ScannedDirective | undefined;
+  for (const directive of scanDirectives(lines)) {
+    if (directive.kind !== "disable") continue;
+    if (directive.form !== "block" && directive.form !== "file-level") continue;
+    if (directive.line >= violationLine) continue;
+    if (
+      directive.form === "block" &&
+      (directive.pairLine === undefined || directive.pairLine <= violationLine)
+    ) {
+      continue;
+    }
+    if (best === undefined || directive.line > best.line) best = directive;
+  }
+  if (best === undefined) return undefined;
+  return {
+    index: best.index,
+    line: best.line,
+    indent: best.indent,
+    open: best.comment,
+    rules: best.rules,
+    desc: best.description,
+    bare: best.bare,
+    cr: best.cr,
+    form: best.form === "block" ? "block" : "file-level",
+  };
+}
+
+export type SuppressEditKind = "insert" | "prepend-line" | "prepend-next" | "prepend-block";
 
 /** One planned directive edit, with its rendered before/after text. */
 export interface PlannedEdit {
@@ -236,15 +293,19 @@ export interface SuppressPlan {
  * A missing rule is prepended at position 0, preserving existing order and any
  * trailing `-- description`.
  *
- * `--reuse-blocks` (ticket 08) is intentionally not implemented here: the
- * default minimal-span insert is the fall-through when no line-local guard
- * exists, whether or not the line sits inside a span.
+ * With `--reuse-blocks` and the file's `lines` supplied, a violation with no
+ * line-local guard is checked against the enclosing `block`-open / `file-level`
+ * directive (a bounded upward scan, `findEnclosingBlockGuard`) and its rule is
+ * prepended there instead. Without the flag — or with no enclosing guard — the
+ * default minimal-span insert applies, whether or not the line sits in a span.
  */
 export function planSuppressEdits(
   targets: readonly SuppressTarget[],
   params: SuppressParams,
+  lines?: readonly string[],
 ): SuppressPlan {
   const reason = params.reason ? ` -- ${params.reason}` : "";
+  const reuseBlocks = params.reuseBlocks === true && lines !== undefined;
   const edits: PlannedEdit[] = [];
   let skippedBare = 0;
   let skippedGuarded = 0;
@@ -300,6 +361,37 @@ export function planSuppressEdits(
         form: "next-line",
       });
       continue;
+    }
+
+    // No line-local guard. With `--reuse-blocks`, look for an enclosing
+    // block-open / file-level directive and prepend there instead (spec §6.1).
+    if (reuseBlocks) {
+      const block = findEnclosingBlockGuard(lines!, target.line);
+      if (block !== undefined) {
+        if (block.bare) {
+          skippedBare += 1;
+          continue;
+        }
+        const missing = target.rules.filter((rule) => !block.rules.includes(rule));
+        if (missing.length === 0) {
+          skippedGuarded += 1;
+          continue;
+        }
+        const all = [...missing, ...block.rules];
+        const desc = block.desc ? ` -- ${block.desc}` : "";
+        const cr = block.cr ? "\r" : "";
+        const close = block.open === "/*" ? " */" : "";
+        edits.push({
+          kind: "prepend-block",
+          line: block.line,
+          index: block.index,
+          added: missing,
+          before: lines![block.index] ?? "",
+          after: `${block.indent}${block.open} eslint-disable ${all.join(", ")}${desc}${close}${cr}`,
+          form: block.form,
+        });
+        continue;
+      }
     }
 
     // No guard: the minimal-span insert — one directive suppressing exactly this
@@ -365,7 +457,11 @@ function suppressStrategy(options: RunActionForFileOptions): RunActionResult {
   const params = suppressParams(options.params);
   const lines = options.text.split("\n");
   const targets = scanSuppressFile(lines, options.messages);
-  const { edits, skippedBare, skippedGuarded } = planSuppressEdits(targets, params);
+  const { edits, skippedBare, skippedGuarded } = planSuppressEdits(
+    targets,
+    params,
+    params.reuseBlocks === true ? lines : undefined,
+  );
 
   const records: EditRecord[] = [];
   for (const edit of edits) records.push(...ledgerRecordsForEdit(options.filePath, edit));
@@ -594,12 +690,131 @@ export interface RunBatchOptions {
   action: Action;
   params: StrategyParams;
   mode: RunMode;
+  /**
+   * Ticket 08, `suppress --fix-first`: run the fix phase first (writes via
+   * `outputFixes` on apply), re-lint the fixed files, then suppress the
+   * remainder — all in one batch.
+   */
+  fixFirst?: boolean;
+  /**
+   * Ticket 08: the fix-enabled instance for the fix phase. Required whenever
+   * `fixFirst` is set; ignored otherwise (the `fix` action's own instance is
+   * already fix-enabled).
+   */
+  fixEslint?: ESLint;
 }
 
 export interface RunBatchResult {
   outcomes: BatchOutcome[];
   dropped: DroppedFile[];
   fatal: FatalFile[];
+}
+
+/** One `fix` ledger record for a file whose autofix changed the text. */
+function fixRecord(file: string): EditRecord {
+  // Autofix has no single anchoring rule/line: one record per changed file keeps
+  // the completion's "files fixed" count honest (spec §13's `fix` edit type).
+  return { file, line: 1, rule: "(autofix)", editType: "fix", form: null };
+}
+
+/**
+ * The `fix` action's batch (spec §6.2): one `lintFiles` call on the fix-enabled
+ * instance, then — on apply — a single `ESLint.outputFixes` write. Dry run ships
+ * the planned `output` back and never writes. ESLint converges internally (the
+ * 10-pass cap with circular-fix detection); the tool never loops.
+ */
+async function runFixBatch(
+  eslint: ESLint,
+  files: string[],
+  options: RunBatchOptions,
+): Promise<RunBatchResult> {
+  const { results, dropped, fatal } = await lintFiles(eslint, files);
+  if (options.mode === "apply" && results.length > 0) {
+    await ESLint.outputFixes(results);
+  }
+
+  const outcomes: BatchOutcome[] = results.map((result) => {
+    const changed = result.output !== undefined;
+    return {
+      filePath: result.filePath,
+      messages: result.messages,
+      edits: changed ? [fixRecord(result.filePath)] : [],
+      changed,
+      ...(changed && options.mode === "dry-run" ? { output: result.output } : {}),
+      stats: {
+        wouldFix: changed ? 1 : 0,
+        fixed: changed ? 1 : 0,
+        fixableErrors: result.fixableErrorCount,
+        fixableWarnings: result.fixableWarningCount,
+      },
+    };
+  });
+
+  return { outcomes, dropped, fatal };
+}
+
+/**
+ * `suppress --fix-first` (spec §6.1): fix first, then suppress only the
+ * remainder, in one batch. On apply the fix phase writes via `outputFixes`, so
+ * the re-lint genuinely re-reads the fixed files from disk. On a dry run the
+ * fix phase never writes; the fix pass's messages already describe the fixed
+ * text, so the suppress phase runs against the planned `output` in memory.
+ */
+async function runFixFirstBatch(
+  eslint: ESLint,
+  fixEslint: ESLint,
+  files: string[],
+  options: RunBatchOptions,
+): Promise<RunBatchResult> {
+  const fixPass = await lintFiles(fixEslint, files);
+  if (options.mode === "apply" && fixPass.results.length > 0) {
+    await ESLint.outputFixes(fixPass.results);
+  }
+
+  // The suppress phase's inputs: on apply, a fresh lint re-reads the written
+  // files from disk; on a dry run, the fix pass's results already hold the
+  // post-fix text (`output`) and messages.
+  const suppress = options.mode === "apply" ? await lintFiles(eslint, files) : fixPass;
+  const fixedFiles = new Set<string>();
+  for (const result of fixPass.results) {
+    if (result.output !== undefined) fixedFiles.add(result.filePath);
+  }
+
+  const outcomes: BatchOutcome[] = [];
+  for (const result of suppress.results) {
+    const onDisk = readFileSync(result.filePath, "utf8");
+    const baseText =
+      options.mode === "dry-run" && result.output !== undefined ? result.output : onDisk;
+    const planned = runActionForFile({
+      action: "suppress",
+      params: options.params,
+      filePath: result.filePath,
+      text: baseText,
+      messages: result.messages,
+      apply: options.mode === "apply",
+    });
+
+    const suppressChanged = planned.output !== baseText;
+    const changed = fixedFiles.has(result.filePath) || suppressChanged;
+    if (suppressChanged && options.mode === "apply") {
+      writeFileSync(result.filePath, planned.output);
+    }
+
+    const edits = [
+      ...(changed && fixedFiles.has(result.filePath) ? [fixRecord(result.filePath)] : []),
+      ...planned.edits,
+    ];
+    outcomes.push({
+      filePath: result.filePath,
+      messages: result.messages,
+      edits,
+      changed,
+      ...(changed && options.mode === "dry-run" ? { output: planned.output } : {}),
+      stats: { ...planned.stats, fixed: fixedFiles.has(result.filePath) ? 1 : 0 },
+    });
+  }
+
+  return { outcomes, dropped: suppress.dropped, fatal: suppress.fatal };
 }
 
 /**
@@ -614,6 +829,13 @@ export async function runBatch(
   files: string[],
   options: RunBatchOptions,
 ): Promise<RunBatchResult> {
+  if (options.action === "fix") {
+    return runFixBatch(eslint, files, options);
+  }
+  if (options.action === "suppress" && options.fixFirst === true && options.fixEslint !== undefined) {
+    return runFixFirstBatch(eslint, options.fixEslint, files, options);
+  }
+
   const { results, dropped, fatal } = await lintFiles(eslint, files);
 
   const outcomes: BatchOutcome[] = [];

@@ -160,6 +160,24 @@ test("violations inside block spans and under file-level directives get minimal-
   );
 });
 
+test("--reuse-blocks prepends onto the enclosing guard end-to-end", async () => {
+  const fix = fixture({
+    "block.js":
+      '/* eslint-disable no-unused-vars -- legacy */\nconsole.log("x");\n/* eslint-enable no-unused-vars */\n',
+  });
+
+  const { code } = await suppress(fix.dir, ["--apply", "--reuse-blocks"]);
+  assert.equal(code, 0);
+
+  assert.equal(
+    readFileSync(join(fix.target, "block.js"), "utf8"),
+    "/* eslint-disable no-console, no-unused-vars -- legacy */\n" +
+      'console.log("x");\n' +
+      "/* eslint-enable no-unused-vars */\n",
+    "the rule is prepended onto the block-open and the description survives",
+  );
+});
+
 test("both warn- and error-severity violations are suppressed", async () => {
   const fix = fixture({ "both.js": 'console.log("a");\nvar unused = 1;\n' });
 
@@ -189,7 +207,6 @@ test("verbs without a command exit 2 with a 'not implemented yet' operational me
   const fix = fixture({ "a.js": "export default 1;\n" });
 
   const invocations: string[][] = [
-    ["fix"],
     ["replace", "--from", "a", "--to", "b"],
     ["cleanup"],
     ["inventory"],

@@ -17,6 +17,12 @@ export interface WorkerInit {
   params: JsonValue;
   mode: RunMode;
   /**
+   * Ticket 08: `suppress --fix-first` — the worker builds a second, fix-enabled
+   * instance for the fix phase. The `fix` action instead fix-enables its one
+   * instance (`action === "fix"`).
+   */
+  fixFirst?: boolean;
+  /**
    * The first file this worker owns. Linted once at boot so the true warm cost
    * (config load + rule compilation) is paid before the pool dispatches work.
    */
@@ -78,13 +84,20 @@ async function main(init: WorkerInit, port: NonNullable<typeof parentPort>): Pro
   // ONE persistent ESLint instance, constructed at boot and reused for every
   // batch. Construct is lazy (~0.4 ms); the first lintFiles is the real warm.
   // The count is real, so a regression that rebuilt per batch would report > 1.
+  // The `fix` action fix-enables its one instance; `suppress --fix-first`
+  // builds a second, fix-enabled instance for the fix phase.
   let constructed = 0;
-  const buildInstance = (): ESLint => {
+  const buildInstance = (fix: boolean): ESLint => {
     constructed += 1;
-    return createIsolatedESLint({ configPath: init.configPath, cwd: init.cwd });
+    return createIsolatedESLint({
+      configPath: init.configPath,
+      cwd: init.cwd,
+      ...(fix ? { fix: true } : {}),
+    });
   };
   const constructStart = hr();
-  const eslint = buildInstance();
+  const eslint = buildInstance(init.action === "fix");
+  const fixEslint = init.fixFirst === true ? buildInstance(true) : undefined;
   const constructMs = hr() - constructStart;
 
   let warmMs = 0;
@@ -121,6 +134,8 @@ async function main(init: WorkerInit, port: NonNullable<typeof parentPort>): Pro
           action: init.action,
           params: init.params,
           mode: init.mode,
+          ...(init.fixFirst === true ? { fixFirst: true } : {}),
+          ...(fixEslint === undefined ? {} : { fixEslint }),
         });
         port.postMessage({
           type: "batch-done",

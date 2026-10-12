@@ -18,5 +18,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every directive shape, a separate `test:perf` timing suite (warmup + 5 runs,
   medians per stage), and a platform-keyed committed baseline with a ×1.15 gate
   and `--update-baseline` re-pinning.
+- `fix` action: autofix the action config's rules under the isolated instance,
+  writing via `ESLint.outputFixes`; a dry run reports the would-fix impact and
+  never writes (convergence is ESLint's internal 10-pass loop).
+- `suppress --fix-first`: autofix first, re-lint the fixed files from disk, then
+  suppress only the remainder — one ledgered run.
+- `suppress --reuse-blocks`: prepend the rule onto the enclosing `block`-open /
+  `file-level` directive's list (description preserved) instead of the default
+  minimal-span insert.
 
 [Unreleased]: https://github.com/aeyqora/Pocket/commits/main/packages/pocket-comb
