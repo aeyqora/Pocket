@@ -39,6 +39,7 @@ export {
   applySuppressEdits,
   splitRuleList,
   ledgerRecordsForEdit,
+  parseUnusedDirectiveMessage,
   LINE_SUFFIX_DIRECTIVE_RE,
   NEXT_LINE_DIRECTIVE_RE,
 } from "./engine.js";
@@ -57,6 +58,8 @@ export type {
   NextLineGuard,
   RuleList,
   RemoveParams,
+  CleanupParams,
+  UnusedDirectiveMessage,
 } from "./engine.js";
 export {
   scanDirectives,
