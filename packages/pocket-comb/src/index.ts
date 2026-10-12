@@ -40,6 +40,7 @@ export {
   findEnclosingBlockGuard,
   splitRuleList,
   ledgerRecordsForEdit,
+  parseUnusedDirectiveMessage,
   LINE_SUFFIX_DIRECTIVE_RE,
   NEXT_LINE_DIRECTIVE_RE,
 } from "./engine.js";
@@ -60,6 +61,8 @@ export type {
   RuleList,
   RemoveParams,
   ReplaceParams,
+  CleanupParams,
+  UnusedDirectiveMessage,
 } from "./engine.js";
 export {
   scanDirectives,

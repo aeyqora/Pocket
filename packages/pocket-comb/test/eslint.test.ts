@@ -121,6 +121,28 @@ test("synthetic ignored-file warnings never surface as violations", async () => 
   }
 });
 
+test("the isolated instance surfaces unused-disable-directive messages for cleanup", async () => {
+  const dir = tempDir();
+  const target = join(dir, "target");
+  const file = write(dir, "target/stale.js", "// eslint-disable-next-line no-debugger\nvar used = 1;\n");
+  const configPath = write(dir, "comb.config.mjs", ACTION_CONFIG);
+  const eslint = createIsolatedESLint({ configPath, cwd: target });
+
+  const { results } = await lintFiles(eslint, [file]);
+  const result = results.find((entry) => entry.filePath === file);
+  assert.ok(result, "stale.js was linted");
+
+  // Cleanup must never add `ruleFilter` (which exempts directives from unused
+  // reporting) or turn the reporting off; the built-in default surfaces them.
+  const unused = result.messages.filter(
+    (message) => message.ruleId === null && message.message.startsWith("Unused eslint-disable directive"),
+  );
+  assert.equal(unused.length, 1, "the stale directive is reported unused");
+  assert.equal(unused[0]?.line, 1, "located at the directive comment's own line");
+  assert.match(unused[0]?.message ?? "", /'no-debugger'/, "names the unused rule in the message text");
+  assert.equal(unused[0]?.severity, 1, "the built-in default reports unused directives as warnings");
+});
+
 test("a file with a syntax error is reported and skipped, and the run completes", async () => {
   const dir = tempDir();
   const target = join(dir, "target");

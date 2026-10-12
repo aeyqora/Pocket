@@ -30,5 +30,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   suppression directive across all four forms, per `(form, rule)` and per file
   (bare per form), with stable ordering for clean diffs over time. No lint pass;
   renders in all three report formats.
+- `cleanup`: prune unused suppression directives (spec §6.5) from ESLint's default
+  `reportUnusedDisableDirectives` reporting — config-scoped, so only the action
+  config's rules are stripped; multi-rule directives are edited surgically and
+  emptied comments deleted whole; unused `eslint-enable` directives are removed
+  whole. Every removal lands in the edit ledger (`prune`).
 
 [Unreleased]: https://github.com/aeyqora/Pocket/commits/main/packages/pocket-comb

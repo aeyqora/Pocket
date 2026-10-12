@@ -652,6 +652,375 @@ function removeStrategy(options: RunActionForFileOptions): RunActionResult {
 }
 
 /**
+ * The `cleanup` verb's parameters (spec §6.5): the action config's actionable
+ * rules, which scope the pruning. Same cloneable shape as `RemoveParams`.
+ */
+export interface CleanupParams {
+  rules: string[];
+}
+
+/**
+ * The unused-directive message ESLint emits (research 01 Q3): `ruleId: null`,
+ * no `messageId`, located at the directive comment's own start. The unused rule
+ * names live **only** in the quoted message text. `whole` means the message
+ * carried no `from '…'` clause — ESLint's signal for a fully-unused directive
+ * (which, for a bare comment, is the only shape it produces).
+ */
+export interface UnusedDirectiveMessage {
+  kind: "disable" | "enable";
+  /** Rule names quoted in the message text; empty when the message is whole. */
+  rules: string[];
+  /** True when no `from '…'` clause was present: the whole comment is unused. */
+  whole: boolean;
+  /** 1-based line of the directive comment's own start. */
+  line: number;
+  column?: number;
+}
+
+const UNUSED_DISABLE_PREFIX = "Unused eslint-disable directive (no problems were reported";
+const UNUSED_ENABLE_PREFIX =
+  "Unused eslint-enable directive (no matching eslint-disable directives were found";
+
+/** Pull the quoted rule names out of an ESLint description (`'a' or 'b'`). */
+function quotedRuleNames(description: string): string[] {
+  return [...description.matchAll(/'([^']+)'/g)].map((match) => match[1]!);
+}
+
+/**
+ * Parse an ESLint unused-directive message into its structured shape (research
+ * 01 Q3: `ruleId: null`, no `messageId`, names only in the quoted text). Returns
+ * `null` for any other message, so a normal violation can never be mistaken for
+ * an unused directive.
+ */
+export function parseUnusedDirectiveMessage(message: LintMessage): UnusedDirectiveMessage | null {
+  const text = message.message;
+  if (typeof message.line !== "number") return null;
+
+  let kind: "disable" | "enable";
+  let marker: string;
+  if (text.startsWith(UNUSED_DISABLE_PREFIX)) {
+    kind = "disable";
+    marker = " reported from ";
+  } else if (text.startsWith(UNUSED_ENABLE_PREFIX)) {
+    kind = "enable";
+    marker = " were found for ";
+  } else {
+    return null;
+  }
+
+  const at = text.indexOf(marker);
+  const base: UnusedDirectiveMessage = {
+    kind,
+    rules: [],
+    whole: true,
+    line: message.line,
+    ...(typeof message.column === "number" ? { column: message.column } : {}),
+  };
+  if (at < 0) return base;
+
+  // The message always closes with `).`; strip it before reading the list.
+  const description = text.slice(at + marker.length, -2);
+  const rules = quotedRuleNames(description);
+  return rules.length === 0 ? base : { ...base, rules, whole: false };
+}
+
+function cleanupParams(raw: StrategyParams): CleanupParams {
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    const rules = (raw as { rules?: unknown }).rules;
+    if (Array.isArray(rules)) {
+      return { rules: rules.filter((rule): rule is string => typeof rule === "string") };
+    }
+  }
+  return { rules: [] };
+}
+
+/** One aggregated unused report for a single directive line. */
+interface UnusedGroup {
+  rules: Set<string>;
+  whole: boolean;
+}
+
+function groupUnused(
+  messages: readonly LintMessage[],
+  kind: "disable" | "enable",
+): Map<number, UnusedGroup> {
+  const groups = new Map<number, UnusedGroup>();
+  for (const message of messages) {
+    const parsed = parseUnusedDirectiveMessage(message);
+    if (parsed === null || parsed.kind !== kind) continue;
+    let group = groups.get(parsed.line);
+    if (group === undefined) {
+      group = { rules: new Set(), whole: false };
+      groups.set(parsed.line, group);
+    }
+    if (parsed.whole) group.whole = true;
+    for (const rule of parsed.rules) group.rules.add(rule);
+  }
+  return groups;
+}
+
+/**
+ * Find the directive a message points at. Unused messages sit at the comment's
+ * own line, so the line plus the message kind (`disable`/`enable`) identifies it;
+ * two directives never share a line in well-formed source.
+ */
+function directiveAtLine(
+  byLine: Map<number, ScannedDirective[]>,
+  line: number,
+  kind: "disable" | "enable",
+): ScannedDirective | undefined {
+  const candidates = byLine.get(line);
+  if (candidates === undefined) return undefined;
+  return candidates.find((directive) => directive.kind === kind);
+}
+
+/** One cleanup edit: rewrite a directive's list, or delete the comment. */
+type CleanupEdit = {
+  kind: "rewrite" | "delete";
+  index: number;
+  line: number;
+  form: DirectiveForm;
+  removed: string[];
+  before: string;
+  after?: string;
+};
+
+/**
+ * The cleanup strategy (spec §6.5): prune **unused** disable directives, driven
+ * by ESLint's default `reportUnusedDisableDirectives` reporting, and **config-
+ * scoped** — only unused rules in the config's set are stripped, so a stale
+ * suppression naming a rule the config does not own is left untouched.
+ *
+ * The unused rule names come from the message text (research 01 Q3); the
+ * directive is read at the message's location via the shared full-file scan, its
+ * config-listed unused rules are stripped, and the comment is deleted when its
+ * list empties. A **bare** directive is deleted whole only when ESLint flags the
+ * whole comment unused (the no-description message); a bare directive cleanup
+ * cannot scope stays and is reported. Unused `eslint-enable` directives are
+ * removed whole, and a still-paired enable loses any rule its pruned disable no
+ * longer suppresses — so one apply converges and a re-run is a no-op.
+ */
+function cleanupStrategy(options: RunActionForFileOptions): RunActionResult {
+  const { rules: configRuleList } = cleanupParams(options.params);
+  const configRules = new Set(configRuleList);
+  const lines = options.text.split("\n");
+  const directives = scanDirectives(lines);
+
+  const byLine = new Map<number, ScannedDirective[]>();
+  for (const directive of directives) {
+    const list = byLine.get(directive.line);
+    if (list === undefined) byLine.set(directive.line, [directive]);
+    else list.push(directive);
+  }
+
+  const disableGroups = groupUnused(options.messages, "disable");
+  const enableGroups = groupUnused(options.messages, "enable");
+
+  const stripped = new Map<number, { directive: ScannedDirective; keep: string[]; removed: string[] }>();
+  const deletedDisables = new Map<number, { directive: ScannedDirective; removed: string[] }>();
+  const strippedEnables = new Map<number, { directive: ScannedDirective; keep: string[]; removed: string[] }>();
+  const deletedEnables = new Map<number, { directive: ScannedDirective; removed: string[] }>();
+
+  for (const [line, group] of disableGroups) {
+    const directive = directiveAtLine(byLine, line, "disable");
+    if (directive === undefined) continue;
+    if (directive.bare) {
+      // A bare comment names no rules, so it can only be pruned whole when ESLint
+      // says the entire comment is unused; otherwise its unused-ness is unscopable.
+      if (group.whole) deletedDisables.set(directive.index, { directive, removed: [] });
+      continue;
+    }
+    const unused = group.whole ? new Set(directive.rules) : group.rules;
+    const removed = directive.rules.filter((rule) => unused.has(rule) && configRules.has(rule));
+    if (removed.length === 0) continue;
+    const keep = directive.rules.filter((rule) => !removed.includes(rule));
+    if (keep.length === 0) deletedDisables.set(directive.index, { directive, removed });
+    else stripped.set(directive.index, { directive, keep, removed });
+  }
+
+  // The post-edit rule list of a block-open, keyed by line, so an enable can see
+  // what its closed disables still suppress once the disables are pruned.
+  const deletedDisableLines = new Set<number>();
+  const strippedRulesByLine = new Map<number, string[]>();
+  const rulesByDisableLine = new Map<number, string[]>();
+  const removedByDisableLine = new Map<number, string[]>();
+  for (const { directive, keep, removed } of stripped.values()) {
+    strippedRulesByLine.set(directive.line, keep);
+    removedByDisableLine.set(directive.line, removed);
+  }
+  for (const { directive, removed } of deletedDisables.values()) {
+    deletedDisableLines.add(directive.line);
+    removedByDisableLine.set(directive.line, removed);
+  }
+  for (const directive of directives) {
+    if (directive.kind === "disable") rulesByDisableLine.set(directive.line, directive.rules);
+  }
+  const postRulesForLine = (line: number): string[] => {
+    if (deletedDisableLines.has(line)) return [];
+    const kept = strippedRulesByLine.get(line);
+    if (kept !== undefined) return kept;
+    return rulesByDisableLine.get(line) ?? [];
+  };
+
+  // Enables: an unused `eslint-enable` (no matching disable) is removed whole, and
+  // a still-paired enable loses any rule its pruned disable no longer suppresses —
+  // so one apply converges and a re-run is a no-op. Rule lists stay config-scoped;
+  // a bare enable names no rules and is pruned structurally.
+  for (const directive of directives) {
+    if (directive.kind !== "enable") continue;
+    const group = enableGroups.get(directive.line);
+    const closed = directive.closes ?? [];
+    const surviving = closed.filter((line) => !deletedDisableLines.has(line));
+    const stranded = closed.length > 0 && surviving.length === 0;
+
+    const survivingRules = new Set<string>();
+    for (const line of surviving) for (const rule of postRulesForLine(line)) survivingRules.add(rule);
+
+    // Rules pruned from a disable this enable closes that no surviving closed
+    // disable still suppresses: the enable's re-enable of them is now unmatched.
+    const editRemoved = new Set<string>();
+    for (const line of closed) {
+      for (const rule of removedByDisableLine.get(line) ?? []) {
+        if (!survivingRules.has(rule)) editRemoved.add(rule);
+      }
+    }
+
+    if (group === undefined && !stranded && editRemoved.size === 0) continue;
+
+    if (stranded) {
+      // Every disable it closed is gone: the enable re-enables nothing, so it is
+      // removed whole and no orphan is left for a second pass.
+      deletedEnables.set(directive.index, { directive, removed: [...directive.rules] });
+      continue;
+    }
+    if (directive.rules.length === 0) {
+      // A bare enable names no rules: prune it whole when ESLint flagged it unused.
+      deletedEnables.set(directive.index, { directive, removed: [] });
+      continue;
+    }
+
+    const unmatched = new Set<string>();
+    if (group !== undefined) {
+      if (group.whole) for (const rule of directive.rules) unmatched.add(rule);
+      else for (const rule of group.rules) unmatched.add(rule);
+    }
+    for (const rule of editRemoved) if (directive.rules.includes(rule)) unmatched.add(rule);
+
+    const removed = directive.rules.filter((rule) => unmatched.has(rule) && configRules.has(rule));
+    if (removed.length === 0) continue;
+    const keep = directive.rules.filter((rule) => !removed.includes(rule));
+    if (keep.length === 0) deletedEnables.set(directive.index, { directive, removed });
+    else strippedEnables.set(directive.index, { directive, keep, removed });
+  }
+
+  const crOf = (directive: ScannedDirective): string => (directive.cr ? "\r" : "");
+  const deleteEdit = (
+    directive: ScannedDirective,
+    removed: string[],
+    form: DirectiveForm,
+  ): CleanupEdit => ({
+    kind: "delete",
+    index: directive.index,
+    line: directive.line,
+    form,
+    removed,
+    before: directive.text + crOf(directive),
+    // A suffix directive keeps the code it rides on; only the comment is deleted.
+    ...(directive.suffix ? { after: `${directive.code}${crOf(directive)}` } : {}),
+  });
+
+  const edits: CleanupEdit[] = [];
+  for (const { directive, keep, removed } of stripped.values()) {
+    edits.push({
+      kind: "rewrite",
+      index: directive.index,
+      line: directive.line,
+      form: directive.form,
+      removed,
+      before: directive.text + crOf(directive),
+      after: formatDirective(directive, keep),
+    });
+  }
+  for (const { directive, removed } of deletedDisables.values()) {
+    edits.push(deleteEdit(directive, removed, directive.form));
+  }
+  for (const { directive, keep, removed } of strippedEnables.values()) {
+    edits.push({
+      kind: "rewrite",
+      index: directive.index,
+      line: directive.line,
+      form: directive.form,
+      removed,
+      before: directive.text + crOf(directive),
+      after: formatDirective(directive, keep),
+    });
+  }
+  for (const { directive, removed } of deletedEnables.values()) {
+    edits.push(deleteEdit(directive, removed, directive.form));
+  }
+  edits.sort((a, b) => a.index - b.index);
+
+  // Every removal is ledgered (spec §6.5/§13). A bare comment names no rule, so
+  // its deletion records the `*` sentinel — the whole rule set — keeping the
+  // `(edit, rule)` grain exact without inventing a rule name.
+  const records: EditRecord[] = [];
+  for (const edit of edits) {
+    const rules = edit.removed.length > 0 ? edit.removed : ["*"];
+    for (const rule of rules) {
+      records.push({
+        file: options.filePath,
+        line: edit.line,
+        rule,
+        editType: "prune",
+        form: edit.form,
+        before: edit.before,
+        ...(edit.after === undefined ? {} : { after: edit.after }),
+      });
+    }
+  }
+
+  const ordered = [...edits].sort((a, b) => b.index - a.index);
+  for (const edit of ordered) {
+    if (edit.after === undefined) lines.splice(edit.index, 1);
+    else lines[edit.index] = edit.after;
+  }
+
+  // Bare directives cleanup could not scope: they stay and are reported (a bare
+  // guard names no rules, so it is never deleted unless ESLint flagged it whole).
+  const notActionable: NotActionableDirective[] = [];
+  for (const directive of directives) {
+    if (directive.kind !== "disable" || !directive.bare) continue;
+    if (deletedDisables.has(directive.index)) continue;
+    notActionable.push({
+      file: options.filePath,
+      line: directive.line,
+      form: directive.form,
+      reason: "bare",
+      text: directive.text,
+    });
+  }
+
+  let rulesRemoved = 0;
+  for (const entry of stripped.values()) rulesRemoved += entry.removed.length;
+  for (const entry of deletedDisables.values()) rulesRemoved += entry.removed.length;
+  for (const entry of strippedEnables.values()) rulesRemoved += entry.removed.length;
+  for (const entry of deletedEnables.values()) rulesRemoved += entry.removed.length;
+
+  return {
+    output: edits.length === 0 ? options.text : lines.join("\n"),
+    edits: records,
+    notActionable,
+    stats: {
+      stripped: stripped.size + strippedEnables.size,
+      deleted: deletedDisables.size + deletedEnables.size,
+      skippedBare: notActionable.length,
+      rulesRemoved,
+    },
+  };
+}
+
+
+/**
  * The `replace` verb's parameters (spec §6.4): one rename pair, passed to the
  * workers as cloneable JSON. `from` ending in `/` switches to prefix
  * re-pointing; see `renameRule`.
@@ -771,14 +1140,16 @@ function replaceStrategy(options: RunActionForFileOptions): RunActionResult {
 
 /**
  * The action strategies, keyed by action. Ticket 05 lands `suppress`; ticket 09
- * adds `remove`; ticket 10 adds `replace`; later tickets add the rest. Actions
- * without a strategy run `lint-only`, so the pool, worker and UI can still
- * complete a run without inventing behaviour the spec has not pinned yet.
+ * adds `remove`; ticket 10 adds `replace`; ticket 11 adds `cleanup`; later tickets
+ * add the rest. Actions without a strategy run `lint-only`, so the pool, worker
+ * and UI can still complete a run without inventing behaviour the spec has not
+ * pinned yet.
  */
 const STRATEGIES: Partial<Record<Action, Strategy>> = {
   suppress: suppressStrategy,
   remove: removeStrategy,
   replace: replaceStrategy,
+  cleanup: cleanupStrategy,
 };
 
 /**

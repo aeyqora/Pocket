@@ -203,21 +203,6 @@ test("the completion confirmation prints files touched, edit counts and elapsed"
   assert.match(out, /Done: 1 files touched, 1 edits \(1 inserted, 0 prepended\) — \d+\.\ds\n$/);
 });
 
-test("verbs without a command exit 2 with a 'not implemented yet' operational message", async () => {
-  const fix = fixture({ "a.js": "export default 1;\n" });
-
-  const invocations: string[][] = [
-    ["cleanup"],
-  ];
-
-  for (const invocation of invocations) {
-    const io = fakeIo({ cwd: fix.dir });
-    const code = await main([...invocation, "-c", "comb.config.mjs", "-t", "target"], io.io);
-    assert.equal(code, 2, `${invocation[0]} exits 2`);
-    assert.match(io.stderr(), /not implemented yet/, `${invocation[0]} names the gap`);
-  }
-});
-
 test("a target with no matching files is an operational error (exit 2)", async () => {
   const dir = tempDir();
   write(dir, "comb.config.mjs", CONFIG);

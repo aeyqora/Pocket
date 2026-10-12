@@ -3,6 +3,7 @@ import { runSuppress } from "./suppress.js";
 import { runFix } from "./fix.js";
 import { runRemove } from "./remove.js";
 import { runReplace } from "./replace.js";
+import { runCleanup } from "./cleanup.js";
 import { runInventory } from "./inventory.js";
 import type { Action } from "../types.js";
 import type { ActionContext, ActionHandler } from "./action.js";
@@ -17,6 +18,7 @@ const HANDLERS: Partial<Record<Action, ActionHandler>> = {
   fix: runFix,
   remove: runRemove,
   replace: runReplace,
+  cleanup: runCleanup,
   inventory: runInventory,
 };
 
