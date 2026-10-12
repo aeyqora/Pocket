@@ -87,6 +87,10 @@ export interface ExceptionRef {
 export interface Policy {
   enabled: boolean;
   governedRules: string[] | null;
+  /** Optional path allowlist; absent means every tracked path is governed. */
+  governedPaths: string[] | null;
+  /** Optional path subtractor, applied after the allowlist; exclusion wins. */
+  ungovernedPaths: string[] | null;
   /** Optional minimum severity per governed rule; absent means no floor gate. */
   minSeverities?: Record<string, SeverityBand>;
   /** The expiry policy: fallbacks apply when absent (`30d` / `3mo`). */

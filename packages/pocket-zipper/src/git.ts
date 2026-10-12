@@ -208,6 +208,21 @@ export class Git {
     return this.show(`${commit}:${normalizePath(path)}`);
   }
 
+  /**
+   * Every tracked path a commit carries — the repository's path inventory, the
+   * set the policy's path-key no-match check reads against. Files only: git
+   * tracks no empty directories, and a directory pattern's existence is judged
+   * by the files under it.
+   */
+  trackedPaths(commit: string): Set<string> {
+    const res = this.run(["ls-tree", "-r", "--name-only", "-z", commit]);
+    const paths = new Set<string>();
+    for (const path of res.stdout.split("\0")) {
+      if (path.length > 0) paths.add(path);
+    }
+    return paths;
+  }
+
   stagedFile(path: string): string | null {
     return this.show(`:${normalizePath(path)}`);
   }

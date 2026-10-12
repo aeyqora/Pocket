@@ -202,6 +202,7 @@ export async function main(
     suggestedExpiry: result.suggestedExpiry,
     maxExpiry: result.maxExpiry,
     unused: result.unused,
+    warnings: result.warnings,
   });
   if (report.length > 0) io.output.write(report);
 

@@ -43,6 +43,11 @@ export interface ReportOptions {
    * is a frozen statistics artifact, and these addresses are for a reader.
    */
   unused?: readonly UnusedException[];
+  /**
+   * Non-failing config warnings (e.g. a wildcard path pattern matching nothing),
+   * printed for a reader on stdout, never part of the record's `errors`.
+   */
+  warnings?: readonly string[];
 }
 
 /**
@@ -71,12 +76,14 @@ function color(text: string, code: string, tty: boolean): string {
 export function renderReport(record: EvaluationRecord, options: ReportOptions): string {
   const { verbose, tty, suggestedExpiry, maxExpiry, audience = "change-author" } = options;
   const unused = options.unused ?? [];
+  const warnings = options.warnings ?? [];
   const lines: string[] = [];
 
   if (record.verdict === "excluded") {
     if (record.mode === "check" || verbose) {
       lines.push(color("pocket-zipper: EXCLUDED (policy disabled)", YELLOW, tty));
     }
+    lines.push(...renderWarnings(warnings));
     return joinLines(lines);
   }
 
@@ -98,6 +105,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
     // change that was routed to review. Buried in the JSON record it would be
     // invisible; surface it.
     lines.push(...renderErrors(record.errors));
+    lines.push(...renderWarnings(warnings));
     return joinLines(lines);
   }
 
@@ -127,6 +135,7 @@ export function renderReport(record: EvaluationRecord, options: ReportOptions): 
   lines.push(...renderAuthorizedDebt(record.inventory));
   lines.push(...renderCleanup(record.summary.cleanup, unused, maxExpiry, "change-author"));
   lines.push(...renderErrors(record.errors));
+  lines.push(...renderWarnings(warnings));
 
   return joinLines(lines);
 }
@@ -209,6 +218,12 @@ function renderProblem(
 
 function renderError(err: RecordError): string {
   return `error[${err.code}]: ${err.message}`;
+}
+
+/** Non-failing config warnings, one per line — for a reader, never a gate term. */
+function renderWarnings(warnings: readonly string[]): string[] {
+  if (warnings.length === 0) return [];
+  return ["", ...warnings.map((warning) => `warning: ${warning}`)];
 }
 
 function joinLines(lines: string[]): string {

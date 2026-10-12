@@ -102,11 +102,18 @@ export interface EvaluateResult {
    * disagree.
    */
   unused: UnusedException[];
+  /**
+   * Non-failing config warnings the policy parse raised — a wildcard path
+   * pattern matching nothing, for example. Not gate terms: they ride the
+   * report's stdout, never the record's `errors`.
+   */
+  warnings: string[];
 }
 
 export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult> {
   const now = options.now ?? new Date();
   const errors: RecordError[] = [];
+  const warnings: string[] = [];
 
   try {
     const git = await Git.discover(options.cwd);
@@ -116,9 +123,13 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
 
     // The effective policy is the baseline's and shapes whether anything is
     // evaluated at all. Read it before touching ESLint so `enabled: false`
-    // genuinely evaluates nothing.
+    // genuinely evaluates nothing. The path inventory rides along from the
+    // start: the path pair's no-match check is filesystem-local, so it runs
+    // even while the gate is disabled, and a typo in a dormant policy fails
+    // closed rather than lying silent until the flip.
+    const pathInventory = git.trackedPaths(trees.baselineCommit);
     const baselinePolicyRaw = git.fileAt(trees.baselineCommit, PROTECTED_CONFIG);
-    const initialPolicy = parsePolicy(baselinePolicyRaw, new Set());
+    const initialPolicy = parsePolicy(baselinePolicyRaw, new Set(), pathInventory, warnings);
     if (!initialPolicy.enabled) {
       return {
         record: excludedRecord({
@@ -132,6 +143,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         suggestedExpiry: undefined,
         maxExpiry: initialPolicy.exceptions.maxExpiry,
         unused: [],
+        warnings,
       };
     }
 
@@ -148,7 +160,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       }
 
       const baselineRegistryRaw = git.fileAt(trees.baselineCommit, PROTECTED_REGISTRY);
-      const policy = parsePolicy(baselinePolicyRaw, knownRules);
+      const policy = parsePolicy(baselinePolicyRaw, knownRules, pathInventory, warnings);
       // The change map must exist before the baseline registry read: a repair is
       // the one case where a defective baseline registry may be replaced by the
       // head-side document. The policy above is already the fully known-rule
@@ -392,6 +404,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         suggestedExpiry: suggestedExpiry(now, policy.exceptions.defaultExpiry),
         maxExpiry: policy.exceptions.maxExpiry,
         unused,
+        warnings,
       };
     } finally {
       for (const dir of tmpDirs) git.cleanup(dir);
@@ -401,13 +414,13 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       // A defective registry read reports one error per defect, so the record
       // names every thing wrong with the file rather than only the first.
       errors.push(...errorRecords(err));
-      return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined, unused: [] };
+      return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined, unused: [], warnings };
     }
     errors.push({
       code: "INTERNAL_ERROR",
       message: err instanceof Error ? err.message : String(err),
     });
-    return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined, unused: [] };
+    return { record: failureRecord({ mode: options.mode, baseRef: options.baseRef, errors }), exitCode: 2, report: "", suggestedExpiry: undefined, maxExpiry: undefined, unused: [], warnings };
   }
 }
 

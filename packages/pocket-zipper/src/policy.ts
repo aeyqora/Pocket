@@ -1,5 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { configError } from "./errors.js";
+import { foreignSyntax, patternMatches } from "./path-pattern.js";
 import type { DurationLiteral, Host, Policy, SeverityBand } from "./types.js";
 
 export const DEFAULT_EXPIRY = "30d" as const;
@@ -8,6 +9,8 @@ export const DEFAULT_MAX_EXPIRY = "3mo" as const;
 export const DEFAULT_POLICY: Policy = {
   enabled: true,
   governedRules: null,
+  governedPaths: null,
+  ungovernedPaths: null,
   exceptions: { defaultExpiry: DEFAULT_EXPIRY, maxExpiry: DEFAULT_MAX_EXPIRY },
   allowSameChangeExceptions: false,
   host: null,
@@ -44,6 +47,8 @@ export function canGuaranteePathApproval(host: Host | null): boolean {
 const KNOWN_KEYS = new Set([
   "enabled",
   "governedRules",
+  "governedPaths",
+  "ungovernedPaths",
   "minSeverities",
   "exceptions",
   "allowSameChangeExceptions",
@@ -97,6 +102,10 @@ export interface PolicyView {
   enabledValid: boolean;
   governedRules: string[] | null;
   governedRulesValid: boolean;
+  governedPaths: string[] | null;
+  governedPathsValid: boolean;
+  ungovernedPaths: string[] | null;
+  ungovernedPathsValid: boolean;
   minSeverities: Record<string, SeverityBand> | null;
   minSeveritiesValid: boolean;
   minSeveritiesInvalidKeys: string[];
@@ -127,6 +136,10 @@ function emptyView(): PolicyView {
     enabledValid: true,
     governedRules: null,
     governedRulesValid: true,
+    governedPaths: null,
+    governedPathsValid: true,
+    ungovernedPaths: null,
+    ungovernedPathsValid: true,
     minSeverities: null,
     minSeveritiesValid: true,
     minSeveritiesInvalidKeys: [],
@@ -172,6 +185,34 @@ export function viewPolicy(raw: string | null): PolicyView {
     }
   }
 
+  const governedPathsRaw = obj["governedPaths"];
+  let governedPaths: string[] | null = null;
+  let governedPathsValid = true;
+  if (governedPathsRaw !== undefined && governedPathsRaw !== null) {
+    if (
+      !Array.isArray(governedPathsRaw) ||
+      governedPathsRaw.some((p) => typeof p !== "string" || p.trim().length === 0)
+    ) {
+      governedPathsValid = false;
+    } else {
+      governedPaths = governedPathsRaw as string[];
+    }
+  }
+
+  const ungovernedPathsRaw = obj["ungovernedPaths"];
+  let ungovernedPaths: string[] | null = null;
+  let ungovernedPathsValid = true;
+  if (ungovernedPathsRaw !== undefined && ungovernedPathsRaw !== null) {
+    if (
+      !Array.isArray(ungovernedPathsRaw) ||
+      ungovernedPathsRaw.some((p) => typeof p !== "string" || p.trim().length === 0)
+    ) {
+      ungovernedPathsValid = false;
+    } else {
+      ungovernedPaths = ungovernedPathsRaw as string[];
+    }
+  }
+
   const floorsRaw = obj["minSeverities"];
   let minSeverities: Record<string, SeverityBand> | null = null;
   let minSeveritiesValid = true;
@@ -209,6 +250,10 @@ export function viewPolicy(raw: string | null): PolicyView {
     enabledValid,
     governedRules,
     governedRulesValid,
+    governedPaths,
+    governedPathsValid,
+    ungovernedPaths,
+    ungovernedPathsValid,
     minSeverities,
     minSeveritiesValid,
     minSeveritiesInvalidKeys,
@@ -271,7 +316,12 @@ function durationError(key: string): string {
   return `.pocket-zipper/config.yml: '${key}' is not a duration literal — a positive integer plus 'd' (days) or 'mo' (months), strict lowercase (e.g. 30d, 3mo)`;
 }
 
-export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy {
+export function parsePolicy(
+  raw: string | null,
+  knownRules: Set<string>,
+  pathInventory: ReadonlySet<string> | null = null,
+  warnings: string[] = [],
+): Policy {
   const view = viewPolicy(raw);
   if (view.malformed) throw configError("malformed .pocket-zipper/config.yml");
   if (!view.enabledValid) {
@@ -328,6 +378,21 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
   if (!view.allowSameChangeValid) {
     throw configError(".pocket-zipper/config.yml: 'allowSameChangeExceptions' must be a boolean");
   }
+
+  // The path pair: structural shape, dialect, and the filesystem-local no-match
+  // posture. All three run even when the gate is off — a typo in a dormant
+  // policy must not lie silent until the flip. Only the no-match check needs the
+  // repository's path inventory, so it alone is gated on the caller supplying
+  // one (the way the allowlist's rule check is gated on a non-empty known set).
+  if (!view.governedPathsValid) {
+    throw configError(".pocket-zipper/config.yml: 'governedPaths' must be a list of non-empty strings");
+  }
+  if (!view.ungovernedPathsValid) {
+    throw configError(".pocket-zipper/config.yml: 'ungovernedPaths' must be a list of non-empty strings");
+  }
+  validatePathList("governedPaths", view.governedPaths, pathInventory, warnings);
+  validatePathList("ungovernedPaths", view.ungovernedPaths, pathInventory, warnings);
+
   if (!view.hostValid) {
     throw configError(`.pocket-zipper/config.yml: 'host' must be one of: ${HOSTS.join(", ")}`);
   }
@@ -380,6 +445,8 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
   return {
     enabled: view.enabled,
     governedRules: view.governedRules,
+    governedPaths: view.governedPaths,
+    ungovernedPaths: view.ungovernedPaths,
     ...(view.minSeverities === null ? {} : { minSeverities: view.minSeverities }),
     exceptions,
     allowSameChangeExceptions: view.allowSameChangeExceptions,
@@ -389,6 +456,54 @@ export function parsePolicy(raw: string | null, knownRules: Set<string>): Policy
 
 function isSeverityBand(value: unknown): value is SeverityBand {
   return value === "off" || value === "warn" || value === "error";
+}
+
+/**
+ * The path pair's per-entry validation: out-of-dialect syntax fails closed, and
+ * the filesystem-local no-match posture runs against the repository's path
+ * inventory — a wildcard-free entry matching no existing path is a config error
+ * (with a trailing-slash suggestion when the entry names a directory), while a
+ * wildcard matching nothing only warns (covering future paths is legitimate).
+ */
+function validatePathList(
+  key: "governedPaths" | "ungovernedPaths",
+  entries: string[] | null,
+  pathInventory: ReadonlySet<string> | null,
+  warnings: string[],
+): void {
+  for (const entry of entries ?? []) {
+    const foreign = foreignSyntax(entry);
+    if (foreign !== null) {
+      throw configError(
+        `.pocket-zipper/config.yml: ${key} entry '${entry}' uses ${foreign}, which the path pattern dialect does not support`,
+      );
+    }
+    if (pathInventory === null || pathInventory.size === 0) continue;
+    const matches = [...pathInventory].some((path) => patternMatches(entry, path));
+    if (matches) continue;
+    if (entry.includes("*")) {
+      warnings.push(
+        `.pocket-zipper/config.yml: ${key} entry '${entry}' matches no existing path (a wildcard may cover paths that do not exist yet)`,
+      );
+      continue;
+    }
+    // A wildcard-free entry matching nothing is a typo: fail closed rather than
+    // silently ungovern the path. When it names a directory, the trailing slash
+    // is the fix, so the diagnostic says so in one glance.
+    if (!entry.endsWith("/")) {
+      const namesDirectory = [...pathInventory].some((path) =>
+        path.startsWith(`${entry}/`),
+      );
+      if (namesDirectory) {
+        throw configError(
+          `.pocket-zipper/config.yml: ${key} entry '${entry}' matches no existing path; if it names a directory, add a trailing slash ('${entry}/')`,
+        );
+      }
+    }
+    throw configError(
+      `.pocket-zipper/config.yml: ${key} entry '${entry}' matches no existing path`,
+    );
+  }
 }
 
 function isForwardDeclaredPluginRule(rule: string, knownRules: Set<string>): boolean {

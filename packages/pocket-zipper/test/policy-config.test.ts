@@ -310,6 +310,100 @@ describe("policy: exceptions stanza parsing", () => {
   });
 });
 
+describe("policy: the governed-path pair", () => {
+  const INVENTORY = new Set(["app.js", "src/util.js", "packages/legacy/old.js", "packages/core/a.js"]);
+
+  it("parses both keys as lists of non-empty strings, absent by default", () => {
+    assert.deepEqual(parsePolicy(null, KNOWN).governedPaths, null);
+    assert.deepEqual(parsePolicy(null, KNOWN).ungovernedPaths, null);
+    const policy = parsePolicy(
+      "governedPaths:\n  - src/\nungovernedPaths:\n  - packages/legacy/\n",
+      KNOWN,
+    );
+    assert.deepEqual(policy.governedPaths, ["src/"]);
+    assert.deepEqual(policy.ungovernedPaths, ["packages/legacy/"]);
+  });
+
+  it("rejects a malformed list", () => {
+    assertConfigError(
+      () => parsePolicy("governedPaths: src/\n", KNOWN),
+      /'governedPaths' must be a list/,
+    );
+    assertConfigError(
+      () => parsePolicy("ungovernedPaths: [1, 2]\n", KNOWN),
+      /'ungovernedPaths' must be a list/,
+    );
+    assertConfigError(
+      () => parsePolicy("governedPaths:\n  - ''\n", KNOWN),
+      /'governedPaths' must be a list/,
+    );
+  });
+
+  it("accepts empty lists, which govern nothing and subtract nothing", () => {
+    const policy = parsePolicy("governedPaths: []\nungovernedPaths: []\n", KNOWN);
+    assert.deepEqual(policy.governedPaths, []);
+    assert.deepEqual(policy.ungovernedPaths, []);
+  });
+
+  it("rejects foreign syntax as a config error naming the dialect", () => {
+    assertConfigError(
+      () => parsePolicy("governedPaths:\n  - '!src/'\n", KNOWN, INVENTORY),
+      /negation/,
+    );
+    assertConfigError(
+      () => parsePolicy("governedPaths:\n  - '*.{js,ts}'\n", KNOWN, INVENTORY),
+      /brace alternation/,
+    );
+    assertConfigError(
+      () => parsePolicy("ungovernedPaths:\n  - '[abc].js'\n", KNOWN, INVENTORY),
+      /character class/,
+    );
+  });
+
+  it("runs the dialect check even when the gate is disabled", () => {
+    assertConfigError(
+      () => parsePolicy("enabled: false\ngovernedPaths:\n  - '*.{js,ts}'\n", KNOWN, INVENTORY),
+      /brace alternation/,
+    );
+  });
+
+  it("fails closed on a wildcard-free entry matching no existing path", () => {
+    assertConfigError(
+      () => parsePolicy("governedPaths:\n  - src/nope.js\n", KNOWN, INVENTORY),
+      /'src\/nope\.js' matches no existing path/,
+    );
+  });
+
+  it("suggests the trailing slash when a wildcard-free entry names a directory", () => {
+    assertConfigError(
+      () => parsePolicy("governedPaths:\n  - packages/legacy\n", KNOWN, INVENTORY),
+      /if it names a directory, add a trailing slash \('packages\/legacy\/'\)/,
+    );
+  });
+
+  it("warns rather than errors when a wildcard matches nothing", () => {
+    const warnings: string[] = [];
+    const policy = parsePolicy("governedPaths:\n  - generated/**\n", KNOWN, INVENTORY, warnings);
+    assert.deepEqual(policy.governedPaths, ["generated/**"]);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0]!, /matches no existing path/);
+  });
+
+  it("runs the no-match check even when the gate is disabled", () => {
+    assertConfigError(
+      () => parsePolicy("enabled: false\ngovernedPaths:\n  - src/nope.js\n", KNOWN, INVENTORY),
+      /matches no existing path/,
+    );
+  });
+
+  it("skips the no-match check when no path inventory is supplied", () => {
+    // Forward declaration is legitimate when the caller cannot see the tree —
+    // the same posture as an empty known-rules set skipping the ESLint check.
+    const policy = parsePolicy("governedPaths:\n  - src/nope.js\n", KNOWN);
+    assert.deepEqual(policy.governedPaths, ["src/nope.js"]);
+  });
+});
+
 describe("policy: duration arithmetic", () => {
   it("adds exact days", () => {
     assert.equal(addDuration("2026-01-15", "30d"), "2026-02-14");
@@ -481,5 +575,36 @@ describe("policy config through the CLI fixture seam", () => {
     assert.equal(res.status, 0);
     assert.equal((res.record as EvaluationRecord | null)?.verdict, "excluded");
     assert.deepEqual(res.record?.errors, []);
+  });
+
+  it("a typo'd literal path exits 2 with the config error", () => {
+    const r = baselineWithConfig("governedPaths:\n  - missing.js\n");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 2);
+    assert.equal(res.record?.errors[0]?.code, "CONFIG_ERROR", res.stderr);
+    assert.match(res.record?.errors[0]?.message ?? "", /'missing\.js' matches no existing path/);
+  });
+
+  it("a typo'd directory entry suggests the trailing slash", () => {
+    const r = repo();
+    r.write("eslint.config.mjs", eslintConfig({ "no-console": "error" }));
+    r.write(PROTECTED_CONFIG, "governedPaths:\n  - src\n");
+    r.write("src/util.js", "export const a = 1;\n");
+    r.commit("base");
+    r.branch("base");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 2);
+    assert.match(
+      res.record?.errors[0]?.message ?? "",
+      /if it names a directory, add a trailing slash \('src\/'\)/,
+    );
+  });
+
+  it("a matching wildcard draws its warning, never an error", () => {
+    const r = baselineWithConfig("governedPaths:\n  - generated/**\n");
+    const res = r.runCli(["check", "--base", "base"]);
+    assert.equal(res.status, 0);
+    assert.deepEqual(res.record?.errors, []);
+    assert.match(res.stdout, /warning: .*matches no existing path/);
   });
 });
