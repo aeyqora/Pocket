@@ -20,6 +20,13 @@ import { availableParallelism, cpus, platform as osPlatform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_EXTENSIONS, discover } from "../src/discovery.js";
+import {
+  applySuppressEdits,
+  planSuppressEdits,
+  scanSuppressFile,
+  type PlannedEdit,
+  type SuppressTarget,
+} from "../src/engine.js";
 import { DEFAULT_BATCH_SIZE, defaultWorkerCount, runPool } from "../src/pool.js";
 import type { RunPoolResult } from "../src/pool.js";
 import type { Action } from "../src/types.js";
@@ -288,6 +295,30 @@ export interface StageContext {
    * what scan/plan/apply will consume, so they never re-lint (spec §7, §11).
    */
   lint?: RunPoolResult;
+  /** Memoized file texts, read once so the engine stages measure engine time. */
+  texts?: Map<string, string>;
+  /** The scan stage's per-file targets, consumed by the plan stage. */
+  suppressTargets?: Map<string, SuppressTarget[]>;
+  /** The plan stage's per-file edits, consumed by the apply stage. */
+  suppressEdits?: Map<string, PlannedEdit[]>;
+}
+
+/** Files with at least one message: the denominator for engine µs/file. */
+function filesWithMessages(context: StageContext): number {
+  let count = 0;
+  for (const outcome of context.lint?.files ?? []) if (outcome.messages.length > 0) count += 1;
+  return count;
+}
+
+/** Read every linted file's text once, memoized across the engine stages. */
+function corpusTexts(context: StageContext): Map<string, string> {
+  if (context.texts !== undefined) return context.texts;
+  const texts = new Map<string, string>();
+  for (const outcome of context.lint?.files ?? []) {
+    texts.set(outcome.filePath, readFileSync(outcome.filePath, "utf8"));
+  }
+  context.texts = texts;
+  return texts;
 }
 
 export interface PerfStage {
@@ -299,12 +330,11 @@ export interface PerfStage {
  * The measured stages, in order. Each `run` is the whole stage body; the runner
  * wraps it with warmup, repetition and timing.
  *
- * Ticket 05 extension point: append the engine stages here.
- *  - `scan` / `plan` / `apply` operate per file over `context.lint.files[...].messages`
- *    and the file text, on the main thread — no pool construction.
- *  - Record µs/file on the returned `StageResult.perFileUs` (spec §11's micro-timings);
- *    divide accumulated µs by the number of files with messages.
- *  - Keep the `lint` stage first: the engine stages depend on its recorded result.
+ * The engine stages (`scan` / `plan` / `apply`) operate per file over
+ * `context.lint.files[...].messages` and the file text, on the main thread — no
+ * pool construction (spec §11). They never re-lint; `lint` stays first because
+ * the engine stages consume its recorded result. Each engine stage's
+ * `StageResult.perFileUs` is the stage median divided by the files with messages.
  */
 export function createStages(): PerfStage[] {
   return [
@@ -328,6 +358,55 @@ export function createStages(): PerfStage[] {
           batchSize: context.batchSize,
           serial: context.serial,
         });
+      },
+    },
+    {
+      name: "scan",
+      async run(context) {
+        const lint = context.lint;
+        if (lint === undefined) return;
+        const texts = corpusTexts(context);
+        const targets = new Map<string, SuppressTarget[]>();
+        for (const outcome of lint.files) {
+          if (outcome.messages.length === 0) continue;
+          const text = texts.get(outcome.filePath);
+          if (text === undefined) continue;
+          targets.set(outcome.filePath, scanSuppressFile(text.split("\n"), outcome.messages));
+        }
+        context.suppressTargets = targets;
+      },
+    },
+    {
+      name: "plan",
+      async run(context) {
+        const lint = context.lint;
+        const targets = context.suppressTargets;
+        if (lint === undefined || targets === undefined) return;
+        const planned = new Map<string, PlannedEdit[]>();
+        for (const outcome of lint.files) {
+          const fileTargets = targets.get(outcome.filePath);
+          if (fileTargets === undefined) continue;
+          planned.set(outcome.filePath, planSuppressEdits(fileTargets, { reason: "perf" }).edits);
+        }
+        context.suppressEdits = planned;
+      },
+    },
+    {
+      name: "apply",
+      async run(context) {
+        const lint = context.lint;
+        const planned = context.suppressEdits;
+        if (lint === undefined || planned === undefined) return;
+        const texts = corpusTexts(context);
+        for (const outcome of lint.files) {
+          const edits = planned.get(outcome.filePath);
+          if (edits === undefined || edits.length === 0) continue;
+          const text = texts.get(outcome.filePath);
+          if (text === undefined) continue;
+          const lines = text.split("\n");
+          applySuppressEdits(lines, edits);
+          lines.join("\n");
+        }
       },
     },
   ];
@@ -388,6 +467,9 @@ async function measureStage(
   };
 }
 
+/** Stages whose cost is reported per file (spec §11 micro-timings). */
+const ENGINE_STAGES = new Set(["scan", "plan", "apply"]);
+
 /** Generate the corpus, then measure every stage: warmup, 5 runs, median. */
 export async function measureScale(options: MeasureScaleOptions): Promise<ScaleMeasurement> {
   const seed = options.seed ?? DEFAULT_SEED;
@@ -413,6 +495,10 @@ export async function measureScale(options: MeasureScaleOptions): Promise<ScaleM
       runs,
       delayMs: options.stageDelays?.[stage.name] ?? 0,
     });
+    if (ENGINE_STAGES.has(result.stage)) {
+      const messageFiles = filesWithMessages(context);
+      if (messageFiles > 0) result.perFileUs = (result.medianMs * 1000) / messageFiles;
+    }
     stages.push(result);
     options.onStage?.(result);
   }
@@ -644,7 +730,8 @@ export async function runPerfCli(argv: string[], io: PerfIo = consoleIo): Promis
       onStage: (stage) =>
         io.out(
           `  ${stage.stage.padEnd(10)} median ${fmt(stage.medianMs)} ms  ` +
-            `(min ${stage.minMs.toFixed(2)}, max ${stage.maxMs.toFixed(2)})`,
+            `(min ${stage.minMs.toFixed(2)}, max ${stage.maxMs.toFixed(2)})` +
+            (stage.perFileUs === undefined ? "" : `  ${stage.perFileUs.toFixed(3)} µs/file`),
         ),
     });
     measurement.scales.push(result);

@@ -1,5 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createIsolatedESLint } from "../src/eslint.js";
 import { runActionForFile, runBatch } from "../src/engine.js";
@@ -13,32 +14,35 @@ const CONFIG = `export default [
 ];
 `;
 
-function message(severity: 1 | 2, rule: string): LintMessage {
+function message(severity: 1 | 2, rule: string, line: number): LintMessage {
   return {
     ruleId: rule,
     severity,
     message: "boom",
-    line: 1,
+    line,
     column: 1,
   } as LintMessage;
 }
 
-test("the lint-only strategy edits nothing and tallies messages by severity", () => {
+test("the suppress strategy inserts an indent-matched guard and ledgers the edit", () => {
   const result = runActionForFile({
     action: "suppress",
     params: {},
     filePath: "/tmp/x.js",
-    text: "debugger;\nvar unused = 1;\n",
-    messages: [message(1, "no-debugger"), message(2, "no-unused-vars")],
+    text: "function f() {\n  debugger;\n}\n",
+    messages: [message(1, "no-debugger", 2)],
     apply: false,
   });
 
-  assert.equal(result.output, "debugger;\nvar unused = 1;\n", "text is returned unchanged");
-  assert.deepEqual(result.edits, [], "no edits exist until a real strategy lands");
-  assert.deepEqual(result.stats, { messages: 2, errors: 1, warnings: 1 });
+  assert.equal(result.output, "function f() {\n  // eslint-disable-next-line no-debugger\n  debugger;\n}\n");
+  assert.equal(result.edits.length, 1);
+  assert.equal(result.edits[0]?.rule, "no-debugger");
+  assert.equal(result.edits[0]?.editType, "insert");
+  assert.equal(result.edits[0]?.form, "next-line");
+  assert.deepEqual(result.stats, { inserted: 1, prepended: 0, skippedBare: 0, skippedGuarded: 0 });
 });
 
-test("runBatch lints a batch and produces one unchanged outcome per linted file", async () => {
+test("runBatch lints a batch and plans inserts without writing on a dry run", async () => {
   const dir = tempDir();
   const target = join(dir, "target");
   const dirty = write(dir, "target/dirty.js", "debugger;\ndebugger;\n");
@@ -56,11 +60,38 @@ test("runBatch lints a batch and produces one unchanged outcome per linted file"
   assert.deepEqual(fatal, []);
   const byFile = new Map(outcomes.map((outcome) => [outcome.filePath, outcome]));
   assert.equal(outcomes.length, 2);
-  assert.equal(byFile.get(dirty)?.messages.length, 2);
-  assert.equal(byFile.get(clean)?.messages.length, 0);
-  for (const outcome of outcomes) {
-    assert.equal(outcome.changed, false);
-    assert.equal(outcome.output, undefined, "no planned text is shipped when nothing changes");
-    assert.deepEqual(outcome.edits, []);
-  }
+
+  const dirtyOutcome = byFile.get(dirty)!;
+  assert.equal(dirtyOutcome.messages.length, 2);
+  assert.equal(dirtyOutcome.changed, true);
+  assert.equal(
+    dirtyOutcome.output,
+    "// eslint-disable-next-line no-debugger\ndebugger;\n// eslint-disable-next-line no-debugger\ndebugger;\n",
+  );
+  assert.equal(dirtyOutcome.edits.length, 2);
+  assert.equal(readFileSync(dirty, "utf8"), "debugger;\ndebugger;\n", "a dry run never writes");
+
+  const cleanOutcome = byFile.get(clean)!;
+  assert.equal(cleanOutcome.changed, false);
+  assert.equal(cleanOutcome.output, undefined, "no planned text is shipped when nothing changes");
+  assert.deepEqual(cleanOutcome.edits, []);
+});
+
+test("runBatch in apply mode writes the suppressed text", async () => {
+  const dir = tempDir();
+  const target = join(dir, "target");
+  const dirty = write(dir, "target/dirty.js", "debugger;\n");
+  const configPath = write(dir, "comb.config.mjs", CONFIG);
+  const eslint = createIsolatedESLint({ configPath, cwd: target });
+
+  const { outcomes } = await runBatch(eslint, [dirty], {
+    action: "suppress",
+    params: {},
+    mode: "apply",
+  });
+
+  const outcome = outcomes[0]!;
+  assert.equal(outcome.changed, true);
+  assert.equal(outcome.output, undefined, "on apply the planned text lives on disk, not the wire");
+  assert.equal(readFileSync(dirty, "utf8"), "// eslint-disable-next-line no-debugger\ndebugger;\n");
 });

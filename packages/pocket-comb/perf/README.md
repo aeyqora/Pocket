@@ -54,10 +54,12 @@ Commit the resulting `baseline.json` diff with the change that justified it.
   reference is a central estimate rather than one noisy sample (`--runs`
   overrides both).
 - **Scales**: `default` (2,000) and `stress` (20,000).
-- **Stages**: `discover` and `lint` today. The engine stages (`scan` / `plan` /
-  `apply`) append to `createStages()` in `run-perf.ts` (see the marked extension
-  point); they consume the lint stage's recorded messages so they measure only
-  engine time, and report µs/file micro-timings.
+- **Stages**: `discover`, `lint`, then the engine stages `scan` / `plan` / `apply`.
+  The engine stages consume the lint stage's recorded messages and the file text,
+  with no pool construction and no re-lint, so they measure engine time only; each
+  reports a µs/file micro-timing (the stage median divided by the files with
+  messages). Sub-10 ms engine medians are reported but not gated (see the gate
+  floor); the stress-scale `scan`/`apply` are gated.
 
 ### The gate floor
 
