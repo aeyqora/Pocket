@@ -59,6 +59,7 @@ export type {
 } from "./engine.js";
 export {
   buildRunReport,
+  orderEdits,
   rollupByRule,
   rollupByForm,
   rollupByFile,
@@ -71,6 +72,26 @@ export type {
   FormCount,
   FileCount,
 } from "./ledger.js";
+export {
+  DEFAULT_REPORT_BASENAME,
+  defaultReportPath,
+  emitReport,
+  isCensusReport,
+  renderCsv,
+  renderHtml,
+  renderJson,
+  renderReport,
+  resolveReportOptions,
+} from "./report/index.js";
+export type {
+  CensusReport,
+  CensusTotal,
+  EmitReportOptions,
+  EmitReportResult,
+  ReportData,
+  ReportOptionsInput,
+  ResolvedReportOptions,
+} from "./report/index.js";
 export { runPool, defaultWorkerCount, PoolRecoveryError, DEFAULT_BATCH_SIZE } from "./pool.js";
 export type {
   Progress,
