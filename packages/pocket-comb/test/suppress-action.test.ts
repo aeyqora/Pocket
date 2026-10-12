@@ -208,7 +208,6 @@ test("verbs without a command exit 2 with a 'not implemented yet' operational me
 
   const invocations: string[][] = [
     ["cleanup"],
-    ["inventory"],
   ];
 
   for (const invocation of invocations) {

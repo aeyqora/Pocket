@@ -1,4 +1,5 @@
 import { EDIT_TYPES, type EditRecord, type EditType } from "./types.js";
+import type { FormCount } from "./ledger.js";
 
 /** What the spinner renders: the stage name plus a done/total count. */
 export interface Progress {
@@ -117,6 +118,40 @@ export function writeCompletion(
   summary: CompletionSummary,
 ): void {
   output.write(`${formatCompletion(summary)}\n`);
+}
+
+/**
+ * The `inventory` run's human line (spec §6.6): a read-only census has no edits
+ * and no impact, so it reports what it counted instead of the mutating
+ * completion line. `files` is the number of files scanned; `directives` the
+ * number of disable directives found; `byForm` breaks those directives down per
+ * form.
+ */
+export interface CensusSummary {
+  files: number;
+  directives: number;
+  byForm: FormCount[];
+  elapsedMs: number;
+}
+
+/** The census completion line: `Census: 3 directives in 2 files (next-line 2, line 1) — 0.1s`. */
+export function formatCensusSummary(summary: CensusSummary): string {
+  const byForm =
+    summary.byForm.length === 0
+      ? "none"
+      : summary.byForm.map((entry) => `${entry.form} ${entry.count}`).join(", ");
+  return (
+    `Census: ${summary.directives} directives in ${summary.files} files ` +
+    `(${byForm}) — ${(summary.elapsedMs / 1000).toFixed(1)}s`
+  );
+}
+
+/** Print the census completion line, newline-terminated. */
+export function writeCensusSummary(
+  output: NodeJS.WritableStream,
+  summary: CensusSummary,
+): void {
+  output.write(`${formatCensusSummary(summary)}\n`);
 }
 
 /** One `by type` entry: an edit kind and how many ledger records it produced. */
