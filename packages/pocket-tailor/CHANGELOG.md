@@ -15,9 +15,17 @@ upstream rule keeping sole ownership of detection.
 - **`defineTailoredRule`** — declares a tailored rule, referencing its upstream
   rule either by name (resolved later by `tailor()`) or by direct rule module
   (runnable with `RuleTester` and no harness).
+- **`tailor`** — wraps a plugin: returns a new plugin object shaped exactly like
+  the upstream one, with each name-form tailored rule composed in place under the
+  same rule ID and every named config that embeds the plugin rewritten to point
+  at the wrapper, so upstream recommended configs serve the tailored rules.
 - **`composeRule`** — builds the composed rule module: the upstream `create()`
   runs detection and every upstream `context.report()` passes through the
   authored `report()` hook.
+- **Injected fixes and suggestions** — an authored `fix` becomes an editor
+  suggestion by default; `autofix: true` opts into a `--fix` autofix. A hook may
+  also return `suggest` entries directly, and `suggestionDesc` /
+  `suggestionMessageId` / `suggestionData` describe a converted fix.
 - **Message interpolation** — `helpers.message(id, data)` reimplements ESLint's
   `{{placeholder}}` interpolation so upstream report data flows into custom
   messages.
