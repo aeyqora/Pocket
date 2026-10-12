@@ -1,0 +1,61 @@
+{
+  "name": "pocket-tailor",
+  "version": "0.1.0",
+  "description": "Wrap existing ESLint plugins so their rules' reports can be tailored: rewrite messages and add fixes or suggestions, while the upstream plugin keeps sole ownership of detection.",
+  "keywords": [
+    "eslint",
+    "plugin",
+    "rule",
+    "message",
+    "fix",
+    "suggestion",
+    "wrapper",
+    "presentation"
+  ],
+  "author": {
+    "name": "aeyqora",
+    "email": "git@aeyqora.com"
+  },
+  "type": "module",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/aeyqora/Pocket/blob/main/packages/pocket-tailor/README.md",
+  "bugs": {
+    "url": "https://github.com/aeyqora/Pocket/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aeyqora/Pocket.git"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"test/*.test.ts\"",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "eslint": "^10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "peerDependencies": {
+    "eslint": ">=9.34"
+  }
+}
