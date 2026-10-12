@@ -109,6 +109,57 @@ the allowlist excludes, or for a rule id ESLint doesn't recognize, fails closed 
 floor for a real rule from a plugin you have not installed yet is accepted and simply
 ungated. See the [config reference](config-reference.md#minseverities--the-floor-is-the-authorization).
 
+## Step 5 — govern paths a few at a time
+
+The same narrow-then-widen rhythm works on the path axis. In a large monorepo, don't opt
+the whole tree in at once: govern the directories that are ready, and widen over time.
+
+```yaml
+enabled: true
+governedPaths:
+  - packages/core/
+```
+
+Change the allowlist in protected policy PRs. To widen, add entries:
+
+```yaml
+enabled: true
+governedPaths:
+  - packages/core/
+  - packages/transport/
+```
+
+The same facts that keep rule onboarding safe keep path onboarding safe:
+
+- **Narrowing a policy is recorded but not gate-failed on its own.** A path allowlist that
+  leaves debt outside the governed set is a policy-change signal, and consumed by new debt
+  under the old, broader policy it fails (`POLICY_CHANGE`, exit 1); a pure policy edit lands
+  through review.
+- **Baseline-authoritative means one merge of lag.** A head-side policy edit never shapes
+  its own evaluation. **Widen the allowlist in this change; its effect is felt from the next
+  one.** Everything present when the widened policy lands is grandfathered as **existing
+  debt** — so a directory you just brought under governance never floods you with
+  exceptions at widening time.
+- **De-governing a path spends its exception records.** A record whose file leaves the
+  governed set is reported as spent cleanup (never a gate failure), and the authoring wizard
+  will not offer a record for an ungoverned file. Re-governing the path does not revive the
+  records — its suppressions are existing debt through the one-merge lag.
+- **The subtractor is the inverse.** To govern *everything except a few stragglers*, leave
+  `governedPaths` absent (or broad) and subtract:
+
+  ```yaml
+  enabled: true
+  ungovernedPaths:
+    - packages/legacy/
+  ```
+
+- **Entries are the CODEOWNERS subset.** A trailing `/` claims a directory, a slashless
+  entry matches that basename at any depth, any `/` anchors to the repository root, `*`
+  stays within a segment and `**` crosses it. No negation, braces, or character classes. A
+  wildcard-free entry matching no existing path fails closed (with a trailing-slash
+  suggestion when it names a directory); a wildcard matching nothing only warns. See the
+  [config reference](config-reference.md#governed-path-scope).
+
 ## Protecting the policy
 
 `.pocket-zipper/config.yml` and `.pocket-zipper/exceptions.yml` are the policy surface:

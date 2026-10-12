@@ -14,6 +14,8 @@ explicitly, so a copy-paste default pins the policy against future tool-fallback
 ```yaml
 enabled: true
 # governedRules:              # optional; absent = every applicable rule is governed
+# governedPaths:              # optional; absent = every tracked path is governed
+# ungovernedPaths:            # optional; absent = nothing is subtracted
 # minSeverities:              # optional; absent = no rule has a severity floor
 #   no-console: error         # a proposed change may not put no-console below `error`
 exceptions:
@@ -24,6 +26,9 @@ allowSameChangeExceptions: false   # fallback; host required iff this is true
 
 - `governedRules` is commented out: the default is "every applicable rule governed", with
   the allowlist as the documented way to narrow.
+- `governedPaths` and `ungovernedPaths` are commented out: the default is "every tracked
+  path governed", and they are the documented way to narrow the path scope — see
+  [Governed-path scope](#governed-path-scope).
 - `minSeverities` is commented out because the default is **no floors**: an ESLint-config
   weakening records (`POLICY_CHANGE`) and passes. Naming a rule is what makes a step-down
   of that rule a gate failure — see [the floor is the authorization](#minseverities--the-floor-is-the-authorization).
@@ -44,6 +49,8 @@ repo's authorizers, because governance is not a mid-flow decision the wizard may
 |---|---|---|---|
 | `enabled` | boolean | `true` | Gate on/off. `false` → exit 0 in both modes, nothing evaluated. |
 | `governedRules` | list of exact rule ids | absent = every applicable rule | Allowlist ∩ applicable set = the governed set. Globs/wildcards are out. |
+| `governedPaths` | list of path patterns | absent = every tracked path | Path allowlist: only claimed paths are governed. CODEOWNERS-subset dialect; see [Governed-path scope](#governed-path-scope). |
+| `ungovernedPaths` | list of path patterns | absent = nothing subtracted | Path subtractor, applied after the allowlist; exclusion wins over overlap. |
 | `minSeverities` | map of exact rule id → `off` \| `warn` \| `error` | absent = no floors | Per-rule severity floor: the lowest band a proposed change may leave that governed rule at. Stepping below it fails the gate (`SEVERITY_FLOOR`, exit 1) — unless the band was already below the floor when the policy declared it, which is grandfathered. Absent ⇒ every step down the ladder records `POLICY_CHANGE` and passes, exactly as today. |
 | `exceptions.defaultExpiry` | duration literal | `30d` | The expiry prefilled when a temporary exception is authored (`today + defaultExpiry`). |
 | `exceptions.maxExpiry` | duration literal | `3mo` | Ceiling on a newly written expiry (`EXPIRY_POLICY` refusal, exit 1). Applies to temporaries only; permanents are orthogonal. |
@@ -60,6 +67,68 @@ repo's authorizers, because governance is not a mid-flow decision the wizard may
 
 Bare integers (`30`), uppercase (`30D`), ISO durations (`P3M`) are `CONFIG_ERROR`s naming
 the key and the valid forms. Absent/empty stanza or missing key → that key's fallback.
+
+## Governed-path scope
+
+The two path keys declare which repository paths the gate runs on, mirroring the rule-axis
+`governedRules` allowlist:
+
+```yaml
+governedPaths:                # optional allowlist
+  - packages/                 # govern packages/ and everything under it
+  - "**/*.spec.ts"            # govern every spec file, at any depth
+ungovernedPaths:              # optional subtractor, applied after the allowlist
+  - packages/legacy/          # …but not the legacy package
+```
+
+**Precedence.** The governed set is `(governedPaths ?? every tracked path) −
+ungovernedPaths` — the allowlist narrows, the subtractor removes, exclusion wins over
+overlap. Both keys absent = the whole repository is governed, which is today's behavior
+exactly; `enabled` stays the only off-switch. An empty `governedPaths: []` governs nothing;
+an empty `ungovernedPaths: []` subtracts nothing. A subtractor entry that points outside the
+current governed set is a legal **forward declaration**: it pre-excludes a path a future
+allowlist widening would otherwise sweep in, and it is silent.
+
+**Pattern dialect.** Patterns are the CODEOWNERS subset, case-sensitive:
+
+- a trailing `/` claims a directory and everything under it — `packages/` is one entry, not a
+  tree enumeration;
+- a slashless pattern matches that basename at any depth — `package.json` claims every
+  `package.json` in the tree;
+- any `/` anchors the pattern to the repository root — `/src/util.js` and `src/util.js` mean
+  the same root path;
+- `*` stays within a path segment, `**` crosses it, and `**` alone matches everything;
+- file classes are native — `**/*.spec.ts` claims every spec file, at any depth.
+
+**Deliberate exclusions.** There is no `!` negation, no brace alternation (`*.{js,ts}`), and
+no character classes (`[abc]`). Out-of-dialect syntax is a `CONFIG_ERROR` naming the
+construct — the matcher never silently treats your braces as a literal filename. If you need
+to say "everything except a few paths", list the allowlist broad and subtract the stragglers;
+that is what the second key is for.
+
+**Validation posture.** Both keys are validated end to end, even while the gate is disabled:
+
+- a **wildcard-free** entry matching no existing path fails closed (`CONFIG_ERROR`, exit 2) —
+  a typo can never silently ungovern a directory. When the entry names a directory, the
+  diagnostic suggests the trailing `/` (`'src' matches no existing path; if it names a
+  directory, add a trailing slash ('src/')`);
+- a **wildcard** matching nothing only warns — pre-covering paths that do not exist yet is
+  legitimate, so it is a warning on stdout, not an error;
+- a list that is not a list of non-empty strings is a `CONFIG_ERROR`, as is any foreign
+  syntax.
+
+The no-match check reads the repository's file tree, not ESLint, so it runs in both `check`
+and `pre-commit`, and even while the gate is disabled.
+
+**Scope applies at the inventory level.** A suppression in an ungoverned path is not a
+logical suppression on either side of the comparison, so one moved from an ungoverned path
+into a governed one in a single change reads as **new debt**; a config-off or severity
+weakening is governed by its config block's declared reach (`files`/`ignores`) intersecting
+the governed paths, never by the config file's own path. An exception record whose file
+leaves the governed set is **spent** — reported as cleanup, never a gate failure — and the
+authoring wizard will not offer a record for an ungoverned file. Widening the allowlist is
+grandfathered through the one-merge lag: everything present when the widened policy lands is
+existing debt.
 
 ## Validation rules
 
@@ -196,7 +265,8 @@ for why the tool declined to own it.
 
 Unknown-key rejection is **new behavior** for the exception-flow effort. An existing
 `config.yml` carrying stray keys — anything outside `enabled`, `governedRules`,
-`minSeverities`, `exceptions.*`, `allowSameChangeExceptions`, `host` — now fails closed on
+`governedPaths`, `ungovernedPaths`, `minSeverities`, `exceptions.*`,
+`allowSameChangeExceptions`, `host` — now fails closed on
 upgrade (`CONFIG_ERROR` naming the key) instead of being silently ignored. Fix: remove the
 stray keys, or restate the config from the canonical default above; land the corrected file
 through a protected policy PR. Upgrade in a controlled change; the structural checks run
