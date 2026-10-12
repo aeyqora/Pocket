@@ -30,8 +30,13 @@ export type JsonValue =
 /** The four directive shapes a scan understands (spec §6, CONTEXT.md). */
 export type DirectiveForm = "next-line" | "line" | "block" | "file-level";
 
-/** The kinds of edit the engine records in the ledger (spec §13). */
-export type EditType = "insert" | "prepend" | "strip" | "rename" | "prune" | "fix";
+/**
+ * The kinds of edit the engine records in the ledger (spec §13), in canonical
+ * order. Exported as a value so rollups (`by type`) sort stably across runs.
+ */
+export const EDIT_TYPES = ["insert", "prepend", "strip", "rename", "prune", "fix"] as const;
+
+export type EditType = (typeof EDIT_TYPES)[number];
 
 /**
  * One edit-ledger record (spec §13). Defined here rather than in `ledger.ts`

@@ -51,15 +51,16 @@ test("a valid auto-detected config runs the action to success", async () => {
   assert.equal(err, "");
 });
 
-test("replace with a settings pair runs non-interactively", async () => {
+test("replace with a settings pair dispatches past validation to the unimplemented verb", async () => {
   const dir = tempDir();
   write(
     dir,
     "pocket-comb.config.mjs",
     `export default [{ rules: {}, settings: { "pocket-comb": { replace: { from: "a", to: "b" } } } }];\n`,
   );
-  const { code } = await run(["replace"], dir);
-  assert.equal(code, 0);
+  const { code, err } = await run(["replace"], dir);
+  assert.equal(code, 2);
+  assert.match(err, /not implemented yet/);
 });
 
 test("non-TTY replace without a pair exits 2 listing exactly --from and --to", async () => {
@@ -71,11 +72,13 @@ test("non-TTY replace without a pair exits 2 listing exactly --from and --to", a
   assert.match(err, /--to/);
 });
 
-test("a TTY replace without a pair does not error (a wizard would fill the gap)", async () => {
+test("a TTY replace without a pair is not a missing-flags error (a wizard would fill the gap)", async () => {
   const dir = tempDir();
   write(dir, "pocket-comb.config.mjs", BASIC_CONFIG);
-  const { code } = await run(["replace"], dir, true);
-  assert.equal(code, 0);
+  const { code, err } = await run(["replace"], dir, true);
+  assert.equal(code, 2);
+  assert.doesNotMatch(err, /missing required/);
+  assert.match(err, /not implemented yet/);
 });
 
 test("a missing config exits 2 with a message naming --config", async () => {
@@ -92,9 +95,10 @@ test("an unloadable config exits 2", async () => {
   assert.match(err, /pocket-comb\.config\.mjs/);
 });
 
-test("inventory runs non-interactively off the auto-detected config", async () => {
+test("inventory is not wired yet: exit 2 with an operational message", async () => {
   const dir = tempDir();
   write(dir, "pocket-comb.config.mjs", BASIC_CONFIG);
-  const { code } = await run(["inventory"], dir);
-  assert.equal(code, 0);
+  const { code, err } = await run(["inventory"], dir);
+  assert.equal(code, 2);
+  assert.match(err, /not implemented yet/);
 });

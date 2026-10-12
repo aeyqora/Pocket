@@ -2,6 +2,7 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs, usage } from "./args.js";
+import { runAction } from "./actions/index.js";
 import { loadConfig } from "./config.js";
 import { isOperationalError } from "./errors.js";
 import { ACTIONS } from "./types.js";
@@ -109,10 +110,11 @@ export async function main(
       return 2;
     }
 
-    // Ticket 01 stops at a validated invocation and a loaded config: discovery,
-    // the worker pool, the engine, the actions, reports, and the wizard land in
-    // later tickets, each wiring into this dispatch point.
-    return 0;
+    // Dispatch the validated invocation. Each action command lives in
+    // `actions/<verb>.ts` and is registered in `actions/index.ts`; the command
+    // returns its exit code (0 success, 1 dry-run impact) and any operational
+    // failure throws for the handler below to map to 2.
+    return await runAction(parsed.action, { parsed, config, io });
   } catch (err) {
     if (isOperationalError(err)) {
       io.stderr.write(`pocket-comb: ${err.message}\n`);

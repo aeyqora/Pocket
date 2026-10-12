@@ -16,9 +16,10 @@ export {
   OperationalError,
   UsageError,
   ConfigError,
+  NotImplementedError,
   isOperationalError,
 } from "./errors.js";
-export { ACTIONS, REPORT_FORMATS } from "./types.js";
+export { ACTIONS, REPORT_FORMATS, EDIT_TYPES } from "./types.js";
 export type { Action, ReportFormat, RunMode } from "./types.js";
 export { discover, DEFAULT_EXTENSIONS } from "./discovery.js";
 export type { DiscoverOptions, DiscoverResult } from "./discovery.js";
@@ -90,7 +91,19 @@ export type {
 export {
   createSpinner,
   formatCompletion,
+  formatImpactSummary,
+  summarizeImpact,
   summarizeRun,
   writeCompletion,
+  writeImpactSummary,
 } from "./ui.js";
-export type { CompletionSummary, Spinner, SpinnerOptions } from "./ui.js";
+export type {
+  CompletionSummary,
+  ImpactRuleCount,
+  ImpactSummary,
+  ImpactTypeCount,
+  Spinner,
+  SpinnerOptions,
+} from "./ui.js";
+export { runAction } from "./actions/index.js";
+export type { ActionContext, ActionHandler } from "./actions/action.js";
