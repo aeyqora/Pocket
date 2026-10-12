@@ -22,7 +22,7 @@ options, and config ordering all stay valid.
 npm install --save-dev pocket-tailor
 ```
 
-## Quickstart
+## Quick start
 
 Three steps: author a tailored rule file, call `tailor()` once in the consuming
 config, and extend the upstream plugin's recommended config as usual. This
@@ -191,16 +191,16 @@ and it is far smaller than owning a permanent fork.
 
 ## API
 
-### `tailor(upstreamPlugin, tailoringModules)`
+### `tailor(upstreamPlugin, tailoredRuleModules)`
 
 Wraps a plugin. Returns a new plugin object shaped exactly like `upstreamPlugin`:
 every rule is carried over (un-tailored rules by object identity), each name-form
-tailoring module is composed in place under the upstream rule ID, and every
+tailored rule module is composed in place under the upstream rule ID, and every
 named config that embeds the plugin object is rewritten to point at the wrapper.
 Rule IDs, `meta.namespace`, processors, and languages are unchanged.
 
 - `upstreamPlugin` — the original plugin object.
-- `tailoringModules` — modules built with `defineTailoredRule` whose `tailors`
+- `tailoredRuleModules` — modules built with `defineTailoredRule` whose `tailors`
   is the upstream rule's name. At most one module per upstream rule.
 - A module naming a rule the plugin does not define, two modules naming the same
   rule, or a non-module value all throw at load time with the offending module
@@ -225,6 +225,11 @@ Declares a tailored rule. `definition.tailors` is either the upstream rule's
 - `autofix` — `true` makes an authored `fix` a real `--fix` autofix (and
   synthesizes `meta.fixable`, reusing the upstream fix type). Omitted, an
   authored fix becomes an editor suggestion (ADR-0003).
+- `meta.fixable` is synthesized only under `autofix: true`. `meta.hasSuggestions`
+  is declared whenever the rule is in suggestion mode (`autofix` omitted) or
+  upstream already declares it. ESLint requires both flags statically on `meta`,
+  before any report exists, so the composed rule declares the *capability* of
+  its mode, not the presence of a fix or suggestion in a particular report.
 - `suggestionDesc` / `suggestionMessageId` / `suggestionData` on a returned
   report describe the suggestion an authored fix becomes.
 

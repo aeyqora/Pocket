@@ -7,11 +7,12 @@ import type { AST, Rule } from "eslint";
 export type ReportLocation = AST.SourceLocation | { line: number; column: number };
 
 /**
- * The upstream report details handed to a tailoring's `report()` hook: what the
- * upstream rule detected, where, under which message id and data, plus the
- * options the user configured.
+ * The report fields shared by an upstream {@link Detection}, a hook's returned
+ * {@link TailoredReport}, and the internal descriptor they are merged into:
+ * what is reported, where, under which message id and data, and with which fix
+ * or suggestions.
  */
-export interface Detection {
+export interface ReportFields {
   messageId?: string;
   message?: string;
   data?: Record<string, unknown>;
@@ -19,6 +20,14 @@ export interface Detection {
   loc?: ReportLocation;
   fix?: Rule.ReportFixer | null;
   suggest?: Rule.SuggestionReportDescriptor[] | null;
+}
+
+/**
+ * The upstream report details handed to a tailoring's `report()` hook: what the
+ * upstream rule detected, where, under which message id and data, plus the
+ * options the user configured.
+ */
+export interface Detection extends ReportFields {
   /** The rule options exactly as configured (upstream `defaultOptions` merged). */
   options: readonly unknown[];
 }
@@ -43,14 +52,7 @@ export interface ReportHelpers {
  * the upstream detection — most importantly the location, so a hook can return
  * `{ message }` alone.
  */
-export interface TailoredReport {
-  message?: string;
-  messageId?: string;
-  data?: Record<string, unknown>;
-  node?: Rule.Node;
-  loc?: ReportLocation;
-  fix?: Rule.ReportFixer | null;
-  suggest?: Rule.SuggestionReportDescriptor[] | null;
+export interface TailoredReport extends ReportFields {
   /**
    * Description for the editor suggestion an authored `fix` becomes when the
    * tailoring did not opt into `autofix: true`. Ignored when the report already
@@ -111,7 +113,6 @@ export interface UpstreamPlugin {
   configs?: Record<string, unknown>;
   processors?: Record<string, unknown>;
   languages?: Record<string, unknown>;
-  environments?: Record<string, unknown>;
 }
 
 /**

@@ -12,9 +12,9 @@ import {
  * upstream rules keep sole ownership of detection.
  *
  * Returns a new plugin object shaped exactly like `upstreamPlugin`: every rule
- * is carried over (un-tailored rules by object identity), each tailoring module
- * resolves its upstream rule by name and is composed in place under the same
- * rule ID, and named configs are rewritten so any self-reference to the
+ * is carried over (un-tailored rules by object identity), each tailored rule
+ * module resolves its upstream rule by name and is composed in place under the
+ * same rule ID, and named configs are rewritten so any self-reference to the
  * upstream plugin points at the wrapper instead.
  *
  * Flat config compares plugin objects by reference and refuses to register two
@@ -24,26 +24,27 @@ import {
  * tailored rules automatically.
  *
  * @param upstreamPlugin the original plugin object (or a config-compatible bag).
- * @param tailoringModules tailoring modules built with `defineTailoredRule`
- *   whose `tailors` is the upstream rule's name. At most one module per rule.
+ * @param tailoredRuleModules tailored rule modules built with
+ *   `defineTailoredRule` whose `tailors` is the upstream rule's name. At most
+ *   one module per rule.
  */
 export function tailor<P extends UpstreamPlugin>(
   upstreamPlugin: P,
-  tailoringModules: readonly TailoredRuleModule[] = [],
+  tailoredRuleModules: readonly TailoredRuleModule[] = [],
 ): P {
   const upstreamRules: Record<string, Rule.RuleModule> = upstreamPlugin.rules ?? {};
   const pluginName = upstreamPlugin.meta?.name ?? "(unnamed plugin)";
 
-  // Resolve and validate every tailoring module before composing anything, so a
-  // wiring mistake fails at load time with a message that names the module.
+  // Resolve and validate every tailored rule module before composing anything,
+  // so a wiring mistake fails at load time with a message that names the module.
   const moduleIndexByRule = new Map<string, number>();
 
-  tailoringModules.forEach((module, index) => {
+  tailoredRuleModules.forEach((module, index) => {
     const definition: TailoringDefinition | undefined = module?.[TAILORING];
     if (!definition) {
       throw new Error(
         `pocket-tailor: tailor() was given a value that is not a tailored rule module ` +
-          `at index ${index}. Create tailoring modules with defineTailoredRule().`,
+          `at index ${index}. Create tailored rule modules with defineTailoredRule().`,
       );
     }
 
@@ -77,7 +78,7 @@ export function tailor<P extends UpstreamPlugin>(
 
   const rules: Record<string, Rule.RuleModule> = { ...upstreamRules };
   for (const [ruleName, index] of moduleIndexByRule) {
-    const module = tailoringModules[index]!;
+    const module = tailoredRuleModules[index]!;
     rules[ruleName] = composeRule(upstreamRules[ruleName]!, module[TAILORING]);
   }
 
@@ -91,7 +92,7 @@ export function tailor<P extends UpstreamPlugin>(
   return wrapped as P;
 }
 
-/** A human-readable pointer to the offending tailoring module. */
+/** A human-readable pointer to the offending tailored rule module. */
 function describeModule(definition: TailoringDefinition, index: number): string {
   const description = definition.meta?.docs?.description;
   const label = typeof description === "string" ? `"${description}"` : "no description";
