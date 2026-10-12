@@ -57,6 +57,7 @@ export type {
   NextLineGuard,
   RuleList,
   RemoveParams,
+  ReplaceParams,
 } from "./engine.js";
 export {
   scanDirectives,

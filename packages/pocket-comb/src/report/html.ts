@@ -88,7 +88,10 @@ function runHtml(report: RunReport): string {
 
   return frame(
     report.meta,
-    summaryRows(report.meta, [["Edits", String(editCount)]]),
+    summaryRows(report.meta, [
+      ["Edits", String(editCount)],
+      ...(report.hint === undefined ? [] : [["Next step", report.hint] as const]),
+    ]),
     [
       section(
         "By rule",

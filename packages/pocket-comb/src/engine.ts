@@ -556,14 +556,133 @@ function removeStrategy(options: RunActionForFileOptions): RunActionResult {
 }
 
 /**
+ * The `replace` verb's parameters (spec §6.4): one rename pair, passed to the
+ * workers as cloneable JSON. `from` ending in `/` switches to prefix
+ * re-pointing; see `renameRule`.
+ */
+export interface ReplaceParams {
+  from: string;
+  to: string;
+}
+
+function replaceParams(raw: StrategyParams): ReplaceParams {
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    const from = (raw as { from?: unknown }).from;
+    const to = (raw as { to?: unknown }).to;
+    if (typeof from === "string" && typeof to === "string") return { from, to };
+  }
+  return { from: "", to: "" };
+}
+
+/** True when the pair re-points a namespace prefix rather than one exact token. */
+export function isPrefixRename(from: string): boolean {
+  return from.endsWith("/");
+}
+
+/**
+ * The new name for a rule token under the pair, or `null` when the token does
+ * not match (spec §6.4). Exact token match by default; a `from` ending in `/`
+ * matches every rule token starting with that prefix and rewrites the matched
+ * prefix to `to` — the plugin-migration case (`from: "jsx-autofocus/"`,
+ * `to: "jsx-a11y/"` turns `jsx-autofocus/autofocus` into
+ * `jsx-a11y/autofocus`). The prefix is the `from` value verbatim, slash
+ * included, so `to` should carry its own trailing `/` to re-point a namespace.
+ */
+export function renameRule(rule: string, pair: ReplaceParams): string | null {
+  if (isPrefixRename(pair.from)) {
+    return rule.startsWith(pair.from) ? `${pair.to}${rule.slice(pair.from.length)}` : null;
+  }
+  return rule === pair.from ? pair.to : null;
+}
+
+/** One planned replace edit: a directive line with one or more tokens renamed. */
+type ReplaceEdit = {
+  index: number;
+  line: number;
+  form: DirectiveForm;
+  /** The renamed tokens, old name -> new name, in directive order. */
+  renamed: Array<{ from: string; to: string }>;
+  before: string;
+  after: string;
+};
+
+/**
+ * The replace strategy (spec §6.4): full-file scan, then rewrite the matching
+ * rule token in **every** directive — all four forms, and `eslint-enable`s too,
+ * so a renamed block pair keeps closing. A bare directive names no rules and is
+ * left untouched. Only the rule list changes; the directive's form, comment
+ * spelling, code prefix/indent, trailing description and CR all survive
+ * (`formatDirective`).
+ */
+function replaceStrategy(options: RunActionForFileOptions): RunActionResult {
+  const pair = replaceParams(options.params);
+  if (pair.from === "") return { output: options.text, edits: [], stats: { renamed: 0, directives: 0 } };
+
+  const lines = options.text.split("\n");
+  const directives = scanDirectives(lines);
+
+  const edits: ReplaceEdit[] = [];
+  for (const directive of directives) {
+    if (directive.bare) continue;
+    const renamed: Array<{ from: string; to: string }> = [];
+    const next = directive.rules.map((rule) => {
+      const to = renameRule(rule, pair);
+      if (to === null || to === rule) return rule;
+      renamed.push({ from: rule, to });
+      return to;
+    });
+    if (renamed.length === 0) continue;
+    edits.push({
+      index: directive.index,
+      line: directive.line,
+      form: directive.form,
+      renamed,
+      before: directive.text + (directive.cr ? "\r" : ""),
+      after: formatDirective(directive, next),
+    });
+  }
+
+  // One record per renamed token; `rule` is the name the directive now carries.
+  const records: EditRecord[] = [];
+  for (const edit of edits) {
+    for (const { to } of edit.renamed) {
+      records.push({
+        file: options.filePath,
+        line: edit.line,
+        rule: to,
+        editType: "rename",
+        form: edit.form,
+        before: edit.before,
+        after: edit.after,
+      });
+    }
+  }
+
+  // Renames rewrite lines in place (no splice), so any order is safe; bottom-up
+  // matches the other strategies and keeps one code path for index arithmetic.
+  const ordered = [...edits].sort((a, b) => b.index - a.index);
+  for (const edit of ordered) lines[edit.index] = edit.after;
+
+  let renamed = 0;
+  for (const edit of edits) renamed += edit.renamed.length;
+
+  return {
+    output: edits.length === 0 ? options.text : lines.join("\n"),
+    edits: records,
+    stats: { renamed, directives: edits.length },
+  };
+}
+
+/**
  * The action strategies, keyed by action. Ticket 05 lands `suppress`; ticket 09
- * adds `remove`; later tickets add the rest. Actions without a strategy run
- * `lint-only`, so the pool, worker and UI can still complete a run without
- * inventing behaviour the spec has not pinned yet.
+ * adds `remove`; ticket 10 adds `replace`; later tickets add the rest. Actions
+ * without a strategy run `lint-only`, so the pool, worker and UI can still
+ * complete a run without inventing behaviour the spec has not pinned yet.
  */
 const STRATEGIES: Partial<Record<Action, Strategy>> = {
   suppress: suppressStrategy,
   remove: removeStrategy,
+  replace: replaceStrategy,
 };
 
 /**
