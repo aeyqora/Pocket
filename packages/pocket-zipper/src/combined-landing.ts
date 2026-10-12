@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Git } from "./git.js";
+import { patternMatches } from "./path-pattern.js";
 import type { Host, Policy } from "./types.js";
 
 /**
@@ -184,47 +185,7 @@ export function ownersCover(text: string, path: string): boolean {
     // never interpreted as anything but a pattern and an owner list.
     const pattern = line.split(/\s+/)[0];
     if (pattern === undefined) continue;
-    if (ownersPatternMatches(pattern, path)) covered = true;
+    if (patternMatches(pattern, path)) covered = true;
   }
   return covered;
-}
-
-function ownersPatternMatches(pattern: string, path: string): boolean {
-  const directoryOnly = pattern.endsWith("/");
-  const body = directoryOnly ? pattern.slice(0, -1) : pattern;
-  // A pattern with no slash anywhere matches at any level, as in gitignore; a
-  // pattern that does is relative to the repository root, whether or not that
-  // root is spelled with a leading `/`.
-  const anyLevel = !body.includes("/") ? "(?:.*/)?" : "";
-  const glob = globToRegExp(body.startsWith("/") ? body.slice(1) : body);
-  const tail = directoryOnly ? "(?:/.*)?" : "";
-  return new RegExp(`^${anyLevel}${glob}${tail}$`).test(path);
-}
-
-/**
- * A CODEOWNERS pattern as a regular expression: a single `*` stops at a `/`, a
- * double `*` does not, and a double `*` between two slashes spans any number of
- * directory levels, including none.
- */
-function globToRegExp(pattern: string): string {
-  let out = "";
-  for (let i = 0; i < pattern.length; i += 1) {
-    const ch = pattern[i]!;
-    if (ch === "*") {
-      if (pattern[i + 1] === "*") {
-        if (pattern[i + 2] === "/") {
-          out += "(?:.*/)?";
-          i += 2;
-        } else {
-          out += ".*";
-          i += 1;
-        }
-      } else {
-        out += "[^/]*";
-      }
-    } else {
-      out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
-  }
-  return out;
 }
