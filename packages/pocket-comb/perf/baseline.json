@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "baselines": {
+    "darwin|Apple M3 Pro|v26.3.0": {
+      "platform": {
+        "os": "darwin",
+        "cpuModel": "Apple M3 Pro",
+        "node": "v26.3.0"
+      },
+      "scales": {
+        "default": {
+          "files": 2000,
+          "warmup": 5,
+          "runs": 15,
+          "stages": {
+            "discover": 5.098,
+            "lint": 561.88
+          }
+        },
+        "stress": {
+          "files": 20000,
+          "warmup": 5,
+          "runs": 15,
+          "stages": {
+            "discover": 50.584,
+            "lint": 2059.504
+          }
+        }
+      }
+    }
+  }
+}

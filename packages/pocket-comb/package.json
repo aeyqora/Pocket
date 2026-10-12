@@ -46,9 +46,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --import tsx --test \"test/**/*.test.ts\"",
+    "test": "npm run build && node --import tsx --test \"test/*.test.ts\"",
     "test:one": "node --import tsx --test",
-    "test:perf": "node --import tsx --test \"test/perf/**/*.test.ts\"",
+    "test:perf": "node --import tsx perf/run-perf.ts",
+    "test:perf:harness": "node --import tsx --test \"test/perf/**/*.test.ts\"",
+    "perf:generate": "node --import tsx perf/generate.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
