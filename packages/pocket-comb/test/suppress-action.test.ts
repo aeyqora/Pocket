@@ -213,3 +213,49 @@ test("a target with no matching files is an operational error (exit 2)", async (
   assert.equal(code, 2);
   assert.match(io.stderr(), /no files matched/);
 });
+
+test("an unrecoverable worker failure writes the partial ledger before exiting 2", async () => {
+  const dir = tempDir();
+  write(dir, "target/a.js", 'console.log("a");\n');
+  // A parser that does not exist makes ESLint throw inside the worker and again
+  // in the in-process recovery — the second failure is the exit-2 path (spec §8).
+  write(
+    dir,
+    "comb.config.mjs",
+    `export default [\n  {\n    files: ["**/*.js"],\n` +
+      `    languageOptions: { parser: "./missing-parser.mjs" },\n` +
+      `    rules: { "no-console": "warn" },\n  },\n];\n`,
+  );
+  const reportPath = join(dir, "partial.json");
+  const io = fakeIo({ cwd: dir });
+  const code = await main(
+    [
+      "suppress",
+      "-c",
+      "comb.config.mjs",
+      "-t",
+      "target",
+      "--workers",
+      "1",
+      "--no-report",
+      "--format",
+      "json",
+      "--out",
+      reportPath,
+    ],
+    io.io,
+  );
+
+  assert.equal(code, 2, "the second failure is an operational error");
+  assert.match(io.stderr(), /worker failure could not be recovered/);
+  assert.match(io.stderr(), /partial ledger written/);
+
+  // The partial ledger/report is written even under --no-report (spec §8).
+  const partial = JSON.parse(readFileSync(reportPath, "utf8")) as {
+    meta: { action: string; dryRun: boolean };
+    edits: unknown[];
+  };
+  assert.equal(partial.meta.action, "suppress");
+  assert.equal(partial.meta.dryRun, true);
+  assert.ok(Array.isArray(partial.edits));
+});

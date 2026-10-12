@@ -1,8 +1,16 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { ESLint } from "eslint";
 import { lintFiles, type DroppedFile, type FatalFile } from "./eslint.js";
-import { formatDirective, scanDirectives, splitRuleList } from "./scan.js";
+import {
+  formatDirective,
+  scanDirectives,
+  splitRuleList,
+  stripCr,
+  SUFFIX_LINE_RE,
+  WHOLE_NEXT_LINE_RE,
+} from "./scan.js";
 import type { ScannedDirective } from "./scan.js";
+import { BARE_RULE } from "./types.js";
 import type {
   Action,
   BatchOutcome,
@@ -43,8 +51,6 @@ export interface RunActionForFileOptions {
   filePath: string;
   text: string;
   messages: LintMessage[];
-  /** Reserved: the caller owns the write; the strategy only reports the text. */
-  apply: boolean;
 }
 
 export interface RunActionResult {
@@ -58,27 +64,11 @@ export interface RunActionResult {
 
 type Strategy = (options: RunActionForFileOptions) => RunActionResult;
 
-// --- directive grammar (shared with ticket 08/09) -----------------------------
+// --- directive grammar (shared with the full-file scan) -----------------------
 
-/**
- * A whole-line directive: `// eslint-disable-next-line <rules> [ -- desc]` or
- * the `/* ... *\/` spelling, and the `-line` form. Deliberately does **not**
- * match block/file-level directives (`eslint-disable` with no `-next-line`/`-line`
- * suffix) nor bare `eslint-disable` — those are spans, handled elsewhere.
- */
-export const NEXT_LINE_DIRECTIVE_RE =
-  /^(\s*)(?:\/\/|\/\*)\s*eslint-disable-(next-line|line)\b\s*(.*?)\s*(?:\*\/)?\s*$/;
-
-/**
- * The `line` form riding at the end of a code line:
- * `<code> // eslint-disable-line <rules> [ -- desc]`. Group 1 is the code
- * prefix up to its last non-space character.
- */
-export const LINE_SUFFIX_DIRECTIVE_RE = /^(\s*.*\S)\s+\/\/\s*eslint-disable-line\b\s*(.*)$/;
-
-// `splitRuleList` and `RuleList` live in `scan.ts` (the shared full-file scan)
-// so the engine can import them without a cycle; re-exported here to keep the
-// public surface stable.
+// The suppress lazy scan's two guard matchers live in `scan.ts`, alongside the
+// full-file scan's grammar, so both scans share one definition per form
+// (`WHOLE_NEXT_LINE_RE`, `SUFFIX_LINE_RE`). `splitRuleList`/`RuleList` likewise.
 export { splitRuleList } from "./scan.js";
 export type { RuleList } from "./scan.js";
 
@@ -121,11 +111,6 @@ export interface SuppressTarget {
   lineGuard?: LineGuard;
   /** A `next-line`-form directive on the line above. */
   nextLineGuard?: NextLineGuard;
-}
-
-/** Strip one trailing CR (CRLF files keep the CR on the stored line). */
-function stripCr(line: string): { probe: string; cr: boolean } {
-  return line.endsWith("\r") ? { probe: line.slice(0, -1), cr: true } : { probe: line, cr: false };
 }
 
 function leadingWhitespace(line: string): string {
@@ -175,17 +160,18 @@ export function scanSuppressFile(
       cr: own.cr,
     };
 
-    const suffix = LINE_SUFFIX_DIRECTIVE_RE.exec(own.probe);
+    const suffix = SUFFIX_LINE_RE.exec(own.probe);
     if (suffix !== null) {
       const { rules: listed, desc, bare } = splitRuleList(suffix[2] ?? "");
       target.lineGuard = { text: own.probe, code: suffix[1] ?? "", rules: listed, desc, bare, cr: own.cr };
     } else {
       const above = stripCr(lines[line - 2] ?? "");
-      const whole = NEXT_LINE_DIRECTIVE_RE.exec(above.probe);
+      const whole = WHOLE_NEXT_LINE_RE.exec(above.probe);
       // A `line`-form whole comment on the line above guards its own line, not
-      // this violation — only `next-line` counts here.
-      if (whole !== null && whole[2] === "next-line") {
-        const { rules: listed, desc, bare } = splitRuleList(whole[3] ?? "");
+      // this violation — only `next-line` counts here. Group 3 is the form,
+      // group 4 the directive's tail (`WHOLE_NEXT_LINE_RE`'s extra comment group).
+      if (whole !== null && whole[3] === "next-line") {
+        const { rules: listed, desc, bare } = splitRuleList(whole[4] ?? "");
         target.nextLineGuard = {
           text: above.probe,
           indent: whole[1] ?? "",
@@ -212,6 +198,8 @@ export interface BlockGuard {
   indent: string;
   /** The comment opener, `//` or `/*`. */
   open: string;
+  /** The directive line's text without a trailing CR. */
+  text: string;
   rules: string[];
   desc: string;
   bare: boolean;
@@ -251,6 +239,7 @@ export function findEnclosingBlockGuard(
     line: best.line,
     indent: best.indent,
     open: best.comment,
+    text: best.text,
     rules: best.rules,
     desc: best.description,
     bare: best.bare,
@@ -277,12 +266,22 @@ export interface PlannedEdit {
   form: DirectiveForm;
 }
 
+/**
+ * A bare guard the suppress plan left untouched: it names no rule list, so the
+ * missing rule cannot be prepended and rewriting it would break other
+ * suppressions (spec §6.1 step 3). Surfaced to the command as a not-actionable
+ * note, like remove/cleanup's bare directives.
+ */
+export type BareGuardSkip = Omit<NotActionableDirective, "file">;
+
 export interface SuppressPlan {
   edits: PlannedEdit[];
   /** Lines skipped because the guard was bare (no rule list): defensive. */
   skippedBare: number;
   /** Lines skipped because the guard already listed every rule: idempotent. */
   skippedGuarded: number;
+  /** The bare guards behind `skippedBare`, for the command to report. */
+  notActionable: BareGuardSkip[];
 }
 
 /**
@@ -307,14 +306,15 @@ export function planSuppressEdits(
   const reason = params.reason ? ` -- ${params.reason}` : "";
   const reuseBlocks = params.reuseBlocks === true && lines !== undefined;
   const edits: PlannedEdit[] = [];
-  let skippedBare = 0;
+  const notActionable: BareGuardSkip[] = [];
   let skippedGuarded = 0;
 
   for (const target of targets) {
     const lineGuard = target.lineGuard;
     if (lineGuard !== undefined) {
       if (lineGuard.bare) {
-        skippedBare += 1;
+        // Bare guard on the violation's own line: report the directive's line.
+        notActionable.push({ line: target.line, form: "line", text: lineGuard.text });
         continue;
       }
       const missing = target.rules.filter((rule) => !lineGuard.rules.includes(rule));
@@ -340,7 +340,8 @@ export function planSuppressEdits(
     const nextLine = target.nextLineGuard;
     if (nextLine !== undefined) {
       if (nextLine.bare) {
-        skippedBare += 1;
+        // Bare guard on the line above: report the guard's own line.
+        notActionable.push({ line: target.line - 1, form: "next-line", text: nextLine.text });
         continue;
       }
       const missing = target.rules.filter((rule) => !nextLine.rules.includes(rule));
@@ -369,7 +370,7 @@ export function planSuppressEdits(
       const block = findEnclosingBlockGuard(lines!, target.line);
       if (block !== undefined) {
         if (block.bare) {
-          skippedBare += 1;
+          notActionable.push({ line: block.line, form: block.form, text: block.text });
           continue;
         }
         const missing = target.rules.filter((rule) => !block.rules.includes(rule));
@@ -409,7 +410,7 @@ export function planSuppressEdits(
     });
   }
 
-  return { edits, skippedBare, skippedGuarded };
+  return { edits, skippedBare: notActionable.length, skippedGuarded, notActionable };
 }
 
 // --- apply --------------------------------------------------------------------
@@ -457,7 +458,7 @@ function suppressStrategy(options: RunActionForFileOptions): RunActionResult {
   const params = suppressParams(options.params);
   const lines = options.text.split("\n");
   const targets = scanSuppressFile(lines, options.messages);
-  const { edits, skippedBare, skippedGuarded } = planSuppressEdits(
+  const { edits, skippedBare, skippedGuarded, notActionable } = planSuppressEdits(
     targets,
     params,
     params.reuseBlocks === true ? lines : undefined,
@@ -473,6 +474,8 @@ function suppressStrategy(options: RunActionForFileOptions): RunActionResult {
   return {
     output: edits.length === 0 ? options.text : lines.join("\n"),
     edits: records,
+    // Bare guards are reported through the same channel remove/cleanup use.
+    notActionable: notActionable.map((skip) => ({ file: options.filePath, ...skip })),
     // Counters are per *directive* edit (one per violation line, matching the
     // spike), while `edits` holds one record per rule. A multi-rule line is one
     // `inserted` here and several records above.
@@ -493,8 +496,11 @@ export interface RemoveParams {
   rules: string[];
 }
 
-/** One planned remove edit: rewrite a directive's list, or delete the comment. */
-type RemoveEdit = {
+/**
+ * One planned list edit shared by `remove` and `cleanup`: rewrite a directive's
+ * list, or delete the comment when the list empties.
+ */
+type DirectiveListEdit = {
   kind: "rewrite" | "delete";
   index: number;
   line: number;
@@ -508,14 +514,41 @@ type RemoveEdit = {
   after?: string;
 };
 
-function removeParams(raw: StrategyParams): RemoveParams {
+/** Parse a `{ rules: string[] }` strategy param, ignoring anything malformed. */
+function rulesParams(raw: StrategyParams): string[] {
   if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
     const rules = (raw as { rules?: unknown }).rules;
     if (Array.isArray(rules)) {
-      return { rules: rules.filter((rule): rule is string => typeof rule === "string") };
+      return rules.filter((rule): rule is string => typeof rule === "string");
     }
   }
-  return { rules: [] };
+  return [];
+}
+
+/** The line's CR suffix, so a rewrite/delete keeps CRLF endings. */
+function crOf(directive: ScannedDirective): string {
+  return directive.cr ? "\r" : "";
+}
+
+/**
+ * A delete edit for a directive: a whole-line directive is spliced out entirely;
+ * a suffix directive keeps the code it rides on and loses only the comment
+ * (spec §6.3/§6.5: delete the directive, not the line).
+ */
+function deleteEdit(
+  directive: ScannedDirective,
+  removed: string[],
+  form: DirectiveForm,
+): DirectiveListEdit {
+  return {
+    kind: "delete",
+    index: directive.index,
+    line: directive.line,
+    form,
+    removed,
+    before: directive.text + crOf(directive),
+    ...(directive.suffix ? { after: `${directive.code}${crOf(directive)}` } : {}),
+  };
 }
 
 /**
@@ -530,8 +563,7 @@ function removeParams(raw: StrategyParams): RemoveParams {
  * multi-rule block never strands the other rules by dropping their closer.
  */
 function removeStrategy(options: RunActionForFileOptions): RunActionResult {
-  const { rules: configRuleList } = removeParams(options.params);
-  const configRules = new Set(configRuleList);
+  const configRules = new Set(rulesParams(options.params));
   const lines = options.text.split("\n");
   const directives = scanDirectives(lines);
 
@@ -547,7 +579,6 @@ function removeStrategy(options: RunActionForFileOptions): RunActionResult {
         file: options.filePath,
         line: directive.line,
         form: directive.form,
-        reason: "bare",
         text: directive.text,
       });
       continue;
@@ -576,24 +607,8 @@ function removeStrategy(options: RunActionForFileOptions): RunActionResult {
   }
 
   // A whole-line directive is spliced out entirely; a suffix directive keeps its
-  // code and loses only the comment (spec §6.3: delete the directive, not the
-  // line it rides on).
-  const crOf = (directive: ScannedDirective): string => (directive.cr ? "\r" : "");
-  const deleteEdit = (
-    directive: ScannedDirective,
-    removed: string[],
-    form: DirectiveForm,
-  ): RemoveEdit => ({
-    kind: "delete",
-    index: directive.index,
-    line: directive.line,
-    form,
-    removed,
-    before: directive.text + crOf(directive),
-    ...(directive.suffix ? { after: `${directive.code}${crOf(directive)}` } : {}),
-  });
-
-  const edits: RemoveEdit[] = [];
+  // code and loses only the comment (spec §6.3).
+  const edits: DirectiveListEdit[] = [];
   for (const { directive, kept, removed } of stripped.values()) {
     edits.push({
       kind: "rewrite",
@@ -655,9 +670,7 @@ function removeStrategy(options: RunActionForFileOptions): RunActionResult {
  * The `cleanup` verb's parameters (spec §6.5): the action config's actionable
  * rules, which scope the pruning. Same cloneable shape as `RemoveParams`.
  */
-export interface CleanupParams {
-  rules: string[];
-}
+export type CleanupParams = RemoveParams;
 
 /**
  * The unused-directive message ESLint emits (research 01 Q3): `ruleId: null`,
@@ -724,16 +737,6 @@ export function parseUnusedDirectiveMessage(message: LintMessage): UnusedDirecti
   return rules.length === 0 ? base : { ...base, rules, whole: false };
 }
 
-function cleanupParams(raw: StrategyParams): CleanupParams {
-  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-    const rules = (raw as { rules?: unknown }).rules;
-    if (Array.isArray(rules)) {
-      return { rules: rules.filter((rule): rule is string => typeof rule === "string") };
-    }
-  }
-  return { rules: [] };
-}
-
 /** One aggregated unused report for a single directive line. */
 interface UnusedGroup {
   rules: Set<string>;
@@ -774,17 +777,6 @@ function directiveAtLine(
   return candidates.find((directive) => directive.kind === kind);
 }
 
-/** One cleanup edit: rewrite a directive's list, or delete the comment. */
-type CleanupEdit = {
-  kind: "rewrite" | "delete";
-  index: number;
-  line: number;
-  form: DirectiveForm;
-  removed: string[];
-  before: string;
-  after?: string;
-};
-
 /**
  * The cleanup strategy (spec §6.5): prune **unused** disable directives, driven
  * by ESLint's default `reportUnusedDisableDirectives` reporting, and **config-
@@ -801,8 +793,7 @@ type CleanupEdit = {
  * longer suppresses — so one apply converges and a re-run is a no-op.
  */
 function cleanupStrategy(options: RunActionForFileOptions): RunActionResult {
-  const { rules: configRuleList } = cleanupParams(options.params);
-  const configRules = new Set(configRuleList);
+  const configRules = new Set(rulesParams(options.params));
   const lines = options.text.split("\n");
   const directives = scanDirectives(lines);
 
@@ -870,6 +861,17 @@ function cleanupStrategy(options: RunActionForFileOptions): RunActionResult {
     if (directive.kind !== "enable") continue;
     const group = enableGroups.get(directive.line);
     const closed = directive.closes ?? [];
+
+    // An orphan enable closes no disable at all: ESLint flags it unused ("no
+    // matching eslint-disable directives"), and there is no config-scoping
+    // decision to make (nothing to reconcile), so it is removed whole (spec
+    // §6.5). A still-paired enable keeps the reconciliation below.
+    if (closed.length === 0) {
+      if (group === undefined) continue;
+      deletedEnables.set(directive.index, { directive, removed: [...directive.rules] });
+      continue;
+    }
+
     const surviving = closed.filter((line) => !deletedDisableLines.has(line));
     const stranded = closed.length > 0 && surviving.length === 0;
 
@@ -913,23 +915,7 @@ function cleanupStrategy(options: RunActionForFileOptions): RunActionResult {
     else strippedEnables.set(directive.index, { directive, keep, removed });
   }
 
-  const crOf = (directive: ScannedDirective): string => (directive.cr ? "\r" : "");
-  const deleteEdit = (
-    directive: ScannedDirective,
-    removed: string[],
-    form: DirectiveForm,
-  ): CleanupEdit => ({
-    kind: "delete",
-    index: directive.index,
-    line: directive.line,
-    form,
-    removed,
-    before: directive.text + crOf(directive),
-    // A suffix directive keeps the code it rides on; only the comment is deleted.
-    ...(directive.suffix ? { after: `${directive.code}${crOf(directive)}` } : {}),
-  });
-
-  const edits: CleanupEdit[] = [];
+  const edits: DirectiveListEdit[] = [];
   for (const { directive, keep, removed } of stripped.values()) {
     edits.push({
       kind: "rewrite",
@@ -961,11 +947,11 @@ function cleanupStrategy(options: RunActionForFileOptions): RunActionResult {
   edits.sort((a, b) => a.index - b.index);
 
   // Every removal is ledgered (spec §6.5/§13). A bare comment names no rule, so
-  // its deletion records the `*` sentinel — the whole rule set — keeping the
+  // its deletion records `BARE_RULE` — the whole rule set — keeping the
   // `(edit, rule)` grain exact without inventing a rule name.
   const records: EditRecord[] = [];
   for (const edit of edits) {
-    const rules = edit.removed.length > 0 ? edit.removed : ["*"];
+    const rules = edit.removed.length > 0 ? edit.removed : [BARE_RULE];
     for (const rule of rules) {
       records.push({
         file: options.filePath,
@@ -995,7 +981,6 @@ function cleanupStrategy(options: RunActionForFileOptions): RunActionResult {
       file: options.filePath,
       line: directive.line,
       form: directive.form,
-      reason: "bare",
       text: directive.text,
     });
   }
@@ -1281,7 +1266,6 @@ async function runFixFirstBatch(
       filePath: result.filePath,
       text: baseText,
       messages: result.messages,
-      apply: options.mode === "apply",
     });
 
     const suppressChanged = planned.output !== baseText;
@@ -1337,7 +1321,6 @@ export async function runBatch(
       filePath: result.filePath,
       text,
       messages: result.messages,
-      apply: options.mode === "apply",
     });
 
     const changed = planned.output !== text;

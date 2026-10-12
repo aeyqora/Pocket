@@ -75,7 +75,6 @@ function run(name: string, params: SuppressParams = {}): ReturnType<typeof runAc
     filePath: `/repo/${name}`,
     text: read(FIXTURES, name),
     messages: spec.messages.map((m) => msg(m.line, m.rule, m.severity ?? 1)),
-    apply: false,
   });
 }
 
@@ -207,7 +206,6 @@ test("CRLF files keep their line endings through insert and prepend", () => {
     filePath: "/repo/crlf.js",
     text: 'console.log("x");\r\nconst y = 1;\r\n',
     messages: [msg(1, "no-console")],
-    apply: false,
   });
   assert.equal(
     inserted.output,
@@ -220,7 +218,6 @@ test("CRLF files keep their line endings through insert and prepend", () => {
     filePath: "/repo/crlf.js",
     text: 'console.log("x"); // eslint-disable-line no-console\r\n',
     messages: [msg(1, "no-unused-vars")],
-    apply: false,
   });
   assert.equal(
     prependedLine.output,
@@ -233,7 +230,6 @@ test("CRLF files keep their line endings through insert and prepend", () => {
     filePath: "/repo/crlf.js",
     text: '// eslint-disable-next-line no-console\r\nconsole.log("x");\r\n',
     messages: [msg(2, "no-unused-vars")],
-    apply: false,
   });
   assert.equal(
     prependedNext.output,
@@ -263,5 +259,29 @@ test("applySuppressEdits applies bottom-up so indices stay valid", () => {
 
 test("plan produces no edit when there are no messages", () => {
   const plan = planSuppressEdits([], {});
-  assert.deepEqual(plan, { edits: [], skippedBare: 0, skippedGuarded: 0 });
+  assert.deepEqual(plan, { edits: [], skippedBare: 0, skippedGuarded: 0, notActionable: [] });
+});
+
+test("a bare guard is reported as not-actionable through the same channel remove/cleanup use", () => {
+  // Spec §6.1 step 3: a bare guard is skip + report. The guard names no rules, so
+  // rewriting it would break other suppressions.
+  const nextLine = run("guard-bare.js");
+  assert.deepEqual(nextLine.notActionable, [
+    {
+      file: "/repo/guard-bare.js",
+      line: 1,
+      form: "next-line",
+      text: "// eslint-disable-next-line",
+    },
+  ]);
+
+  const lineForm = run("line-guard-bare.js");
+  assert.deepEqual(lineForm.notActionable, [
+    {
+      file: "/repo/line-guard-bare.js",
+      line: 1,
+      form: "line",
+      text: 'console.log("x"); // eslint-disable-line',
+    },
+  ]);
 });

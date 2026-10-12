@@ -10,7 +10,6 @@ function remove(text: string, rules: string[]): ReturnType<typeof runActionForFi
     filePath: "/repo/a.js",
     text,
     messages: [],
-    apply: false,
   });
 }
 
@@ -55,7 +54,7 @@ test("remove strips exactly the config's rules across all four forms; others are
   );
   assert.deepEqual(result.stats, { stripped: 2, deleted: 2, skippedBare: 1, rulesRemoved: 4 });
   assert.deepEqual(result.notActionable, [
-    { file: "/repo/a.js", line: 7, form: "file-level", reason: "bare", text: "// eslint-disable" },
+    { file: "/repo/a.js", line: 7, form: "file-level", text: "// eslint-disable" },
   ]);
 });
 
@@ -140,10 +139,9 @@ test("bare directives are untouched and reported as not-actionable", () => {
       file: "/repo/a.js",
       line: 1,
       form: "next-line",
-      reason: "bare",
       text: "// eslint-disable-next-line",
     },
-    { file: "/repo/a.js", line: 2, form: "file-level", reason: "bare", text: "/* eslint-disable */" },
+    { file: "/repo/a.js", line: 2, form: "file-level", text: "/* eslint-disable */" },
   ]);
   assert.equal(result.stats.skippedBare, 2);
 });

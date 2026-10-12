@@ -1,6 +1,6 @@
 # Performance harness
 
-The deterioration tripwire (spec §11). Two pieces, both dev-only (not shipped):
+The deterioration tripwire (spec §11). Dev-only pieces (none are shipped):
 
 - **`generate.ts`** — the committed, deterministic corpus generator.
 - **`run-perf.ts`** — the timing suite, wired to `npm run test:perf`.
@@ -22,11 +22,13 @@ deterministic; `test:perf` is run on its own, on an **otherwise idle machine**.
 npm run test:perf                 # measure default (2,000) + stress (20,000)
 npm run test:perf -- --scales default
 npm run test:perf -- --files 500  # a one-off custom scale
+POCKET_COMB_PERF_STRESS_FILES=50000 npm run test:perf -- --scales stress
 ```
 
-The suite warms each stage up, takes 5 measured runs, and reports the median per
-stage. It fails when a gated stage's median exceeds the committed baseline for
-this platform by more than ×1.15 (`--threshold`).
+The suite warms each stage up, takes measured runs, and reports the median per
+stage. It fails when **any** stage's **minimum across runs** exceeds the
+committed baseline for this platform by more than ×1.15 (`--threshold`). No stage
+is exempt.
 
 ### Re-pinning a baseline
 
@@ -42,33 +44,44 @@ Commit the resulting `baseline.json` diff with the change that justified it.
 
 ## Methodology
 
-- **Corpus**: 2,000 files by default (`--stress` / `--files 20000` for the stress
-  scale). Same seed ⇒ byte-identical corpus, so medians compare like for like.
-  The corpus is generated into the OS temp dir, not the repo — discovery honours
-  `.gitignore`, so a corpus under a gitignored path would measure zero files.
-- **Runs**: warmup (default 5) then 5 measured runs; the **median** is reported.
-  The spec pins only "after warmup"; 5 warmups were chosen because the pool
-  rebuilds its workers every measured run, and a cold first process inflated the
-  first stage's median past 1.15 (~28% spread at 3 warmups vs ~7% at 5).
-  `--update-baseline` deliberately uses **15** measured runs, so the committed
-  reference is a central estimate rather than one noisy sample (`--runs`
-  overrides both).
-- **Scales**: `default` (2,000) and `stress` (20,000).
-- **Stages**: `discover`, `lint`, then the engine stages `scan` / `plan` / `apply`.
-  The engine stages consume the lint stage's recorded messages and the file text,
-  with no pool construction and no re-lint, so they measure engine time only; each
-  reports a µs/file micro-timing (the stage median divided by the files with
-  messages). Sub-10 ms engine medians are reported but not gated (see the gate
-  floor); the stress-scale `scan`/`apply` are gated.
-
-### The gate floor
-
-Stages whose committed baseline is below `MIN_GATED_BASELINE_MS` (10 ms) are
-measured and reported but **not gated** (`info` in the output). A ~5 ms walk has
-no stable ±15% — the default-scale `discover` stage swung 5.1–6.1 ms across
-fresh, idle processes from filesystem/timer jitter alone, and no warmup removed
-it. Every larger stage (stress `discover` ~50 ms, `lint` at both scales) is gated
-normally.
+- **Corpus**: 2,000 files by default (`POCKET_COMB_PERF_STRESS_FILES` / `--files`
+  for other sizes; `--scales stress` uses 20,000). Same seed ⇒ byte-identical
+  corpus, so statistics compare like for like. The corpus is generated into the
+  OS temp dir, not the repo — discovery honours `.gitignore`, so a corpus under a
+  gitignored path would measure zero files.
+- **Runs**: warmup (default 10) then 15 measured runs; the **median** is
+  reported, and the **minimum across the runs** is what the gate compares. Ten
+  warmups are needed because the cheapest stage (`discover`) walks in ~5 ms and a
+  cold filesystem cache makes the first several walks much slower; ten settles it
+  to a ±3% band across fresh processes. Fifteen runs give the minimum a good
+  chance of catching the stage's uncontended cost. Pinning uses the same 15 runs
+  so a baseline and a comparison sample identically (`--runs` overrides both).
+- **One execution per sample, GC first**: each measured sample is a single
+  execution of the stage, immediately preceded by a forced garbage collection
+  (`npm run test:perf` runs Node with `--expose-gc`; the harness calls
+  `global.gc()`). Single executions keep the allocation-heavy stages from paying
+  GCs they would not pay in production — a calibrated repeat loop was tried first
+  and rejected, because it manufactures exactly the GC pressure it then
+  attributes to the stage.
+- **Gate on the minimum**: the gate compares the minimum across runs, not the
+  median. At the 2,000-file default the post-lint stages are 0.3–10 ms, and on a
+  shared machine the median swings 20–30% from process to process (background
+  Spotlight indexing, browsers, other jobs) — no ±15% median gate is stable
+  there. The minimum is the least-contended sample, so it estimates the stage's
+  real cost and holds steady; a genuine regression raises the minimum too (the
+  injected-slowdown test in `test/perf/run-perf.test.ts` proves it). The median
+  is still reported next to it, and every stage is gated — none is exempt.
+- **Scales**: `default` (2,000) and `stress` (20,000; override with
+  `POCKET_COMB_PERF_STRESS_FILES` or pick an ad-hoc size with `--files`).
+- **Stages** (spec §11): `discover`, `lint`, `scan`, `plan`, `apply`,
+  `scan-full`, `report`, then one `action:<verb>` stage per action
+  (`suppress`, `remove`, `replace`, `cleanup`, `inventory`). The engine and
+  `action:*` stages consume the lint stage's recorded messages and the memoized
+  file text — no pool construction and **no re-lint** — so they measure engine
+  time only; each reports a µs/file micro-timing (per the files with messages for
+  the suppress hot path, per corpus file for the full-file scan and the
+  scan-based actions). `report` assembles and renders the run report (HTML, the
+  default format).
 
 ## Corpus shapes
 
@@ -77,3 +90,10 @@ normally.
 directive forms (`next-line`, `line`, `block`, `file-level`), bare guards,
 multi-rule lists, `-- description` suffixes, block pairs with their
 `eslint-enable`, CRLF line endings, a BOM, and long lines.
+
+## Census scope (deliberate)
+
+The census (`inventory`) counts **disable** directives only — the spec's "all
+four forms" (`next-line`, `line`, `block`, `file-level`). `eslint-enable` closers
+are not a suppression form, so they are excluded from the census totals and
+per-file counts. See `src/census.ts` and the package README.

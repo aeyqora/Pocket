@@ -1,16 +1,19 @@
 /**
  * The separate perf timing suite (spec §11) — the deterioration tripwire.
  *
- * Methodology: warm up, then take 5 measured runs per stage and compare medians
- * against a committed baseline **keyed by platform** (`os` + CPU model + Node
- * version), failing when a median exceeds the baseline by more than 15%
- * (`--threshold`). `--update-baseline` re-pins deliberately; it is never part of
- * a normal run.
+ * Methodology: warm up, then take measured runs per stage and compare the
+ * **minimum across runs** against a committed baseline **keyed by platform**
+ * (`os` + CPU model + Node version), failing when **any** stage exceeds the
+ * baseline by more than 15% (`--threshold`). **Every** stage is gated; the median
+ * is reported but the gate uses the minimum (see `gatedMs`), and a forced GC
+ * precedes each sample. `--update-baseline` re-pins deliberately; it is never
+ * part of a normal run.
  *
- * The stages start with `discover` and `lint`. The engine stages (scan / plan /
- * apply) land with the engine and append to `createStages()` — the extension
- * point is marked there; each will consume the lint stage's recorded messages so
- * it measures engine time only.
+ * The stages cover the whole pipeline: `discover` / `lint` / `scan` / `plan` /
+ * `apply` / `scan-full` / `report`, plus one `action:<verb>` stage per action
+ * (each runs that action's strategy over the **already-linted** corpus — no
+ * re-lint). The engine stages consume the lint stage's recorded messages and the
+ * file text, so they measure engine time only.
  *
  * This module is wired to `npm run test:perf`; it must never run under
  * `npm test`, which is correctness-only.
@@ -19,17 +22,23 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism, cpus, platform as osPlatform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { censusFileScan } from "../src/census.js";
 import { DEFAULT_EXTENSIONS, discover } from "../src/discovery.js";
 import {
   applySuppressEdits,
   planSuppressEdits,
+  runActionForFile,
   scanSuppressFile,
   type PlannedEdit,
+  type StrategyParams,
   type SuppressTarget,
 } from "../src/engine.js";
 import { scanDirectives } from "../src/scan.js";
+import { buildRunReport, orderEdits, type RunMeta } from "../src/ledger.js";
 import { DEFAULT_BATCH_SIZE, defaultWorkerCount, runPool } from "../src/pool.js";
 import type { RunPoolResult } from "../src/pool.js";
+import { renderReport } from "../src/report/index.js";
+import { VERSION } from "../src/version.js";
 import type { Action } from "../src/types.js";
 import {
   DEFAULT_FILE_COUNT,
@@ -48,37 +57,29 @@ export const BASELINE_PATH = fileURLToPath(new URL("./baseline.json", import.met
 /** The only action the lint stage runs today (the engine's strategies land later). */
 const LINT_ACTION: Action = "suppress";
 
-/** Default regression factor: fail when a median exceeds baseline × 1.15. */
+/** Default regression factor: fail when the gated statistic exceeds baseline × 1.15. */
 export const DEFAULT_THRESHOLD = 1.15;
 
 /**
- * Stages whose committed baseline is below this many milliseconds are measured
- * and reported but **not gated**. A 5ms walk has no stable ±15%: on this machine
- * the default-scale discover stage ranged 5.1–6.1 ms across fresh processes
- * (a 1.19 ratio) purely from filesystem/timer jitter, and no warmup removed it.
- * The alternative — a gate that flakes — is a tripwire no one trusts. Larger
- * stages (stress discover ~50 ms, lint at both scales) are gated normally.
+ * Measured runs after warmup (spec §11). **Every** measured stage is gated, and
+ * the gate compares the **minimum** across runs (see `gatedMs`), so a higher run
+ * count directly tightens the statistic: more samples means a better chance of
+ * catching the stage's uncontended cost. Fifteen matches the pinning count so a
+ * pinned baseline and a comparison run sample identically.
  */
-export const MIN_GATED_BASELINE_MS = 10;
-
-/** Measured runs after warmup (spec §11). */
-export const DEFAULT_RUNS = 5;
+export const DEFAULT_RUNS = 15;
 
 /**
- * Warmup runs before measuring. The spec pins only "after warmup"; 5 is chosen
- * empirically: the pool rebuilds its workers every measured run, so a cold first
- * process inflates the first stage's median past the 1.15 gate at lower counts
- * (measured spread across fresh processes was ~28% at warmup 3, ~7% at warmup 5).
+ * Warmup runs before measuring. The spec pins only "after warmup". Ten is chosen
+ * empirically: the cheapest stage (`discover` on the 2,000-file default corpus)
+ * walks in ~5 ms, and a cold filesystem cache makes the first several walks
+ * 15–22 ms; seven warmups left a tail that could drag the statistic past the
+ * 1.15 gate on an unlucky process, while ten settles it to a ±3% band across
+ * fresh processes (see `perf/README.md`). The pool also rebuilds its workers
+ * every measured run, so a longer warmup keeps that cost out of the measured
+ * band.
  */
-export const DEFAULT_WARMUP = 5;
-
-/**
- * Measured runs used when *pinning* a baseline (`--update-baseline`). A single
- * 5-run median is itself a noisy sample; pinning from 15 runs gives a central
- * reference, so a later comparison run has to be genuinely slower to trip the
- * gate. Normal comparison runs still use the spec's 5 (see `DEFAULT_RUNS`).
- */
-export const BASELINE_RUNS = 15;
+export const DEFAULT_WARMUP = 10;
 
 // --- measurement shapes -------------------------------------------------------
 
@@ -119,7 +120,7 @@ export interface BaselineScale {
   files: number;
   warmup: number;
   runs: number;
-  /** stage name -> median ms. */
+  /** stage name -> gated ms (the minimum across runs; see `gatedMs`). */
   stages: Record<string, number>;
 }
 
@@ -134,20 +135,37 @@ export interface BaselineFile {
   baselines: Record<string, BaselineEntry>;
 }
 
+/**
+ * The statistic the gate compares: the **minimum** across the measured runs, not
+ * the median. The spec reports medians (and `StageResult.medianMs` is still
+ * reported), but a median on a shared, non-idle machine inherits whatever
+ * background load (Spotlight, browsers, other CI jobs) the process happened to
+ * run under — at the 2,000-file default the post-lint stages are 0.3–10 ms, and
+ * the median swung 20–30% process to process. The minimum is the least-contended
+ * sample, so it estimates the stage's real cost and is stable enough to gate at
+ * ×1.15; a genuine regression raises the minimum too (proven by the injected-
+ * slowdown test). This is the anti-flake control the review follow-up sanctioned;
+ * see `perf/README.md`.
+ */
+export function gatedMs(stage: StageResult): number {
+  return stage.minMs;
+}
+
 export interface StageComparison {
   stage: string;
+  /** The measured median (always reported). */
   medianMs: number;
+  /** The statistic the gate compares: the minimum across runs. */
+  gatedMs: number;
   baselineMs: number;
   ratio: number;
-  /** False when the baseline is below `MIN_GATED_BASELINE_MS` (reported, not gated). */
-  gated: boolean;
   ok: boolean;
 }
 
 export interface StageFailure {
   scale: string;
   stage: string;
-  medianMs: number;
+  gatedMs: number;
   baselineMs: number;
   ratio: number;
 }
@@ -207,7 +225,7 @@ export function updateBaseline(path: string, measurement: PerfMeasurement): void
   for (const scale of [...measurement.scales].sort((a, b) => a.scale.localeCompare(b.scale))) {
     const stages: Record<string, number> = {};
     for (const stage of [...scale.stages].sort((a, b) => a.stage.localeCompare(b.stage))) {
-      stages[stage.stage] = roundMs(stage.medianMs);
+      stages[stage.stage] = roundMs(gatedMs(stage));
     }
     scales[scale.scale] = { files: scale.files, warmup: scale.warmup, runs: scale.runs, stages };
   }
@@ -232,23 +250,25 @@ export function compareScale(
   for (const stage of measured.stages) {
     const baselineMs = baseline?.stages[stage.stage];
     if (baselineMs === undefined) continue;
-    // Decide on the ratio we print, not `median > baseline * factor`: `1.15` is
+    const gated = gatedMs(stage);
+    // Decide on the ratio we print, not `gated > baseline * factor`: `1.15` is
     // not exactly representable, so the product form would fail a run sitting
     // exactly on the limit (100 * 1.15 === 114.99999999999999).
     const ratio =
       baselineMs === 0
-        ? stage.medianMs === 0
+        ? gated === 0
           ? 1
           : Number.POSITIVE_INFINITY
-        : stage.medianMs / baselineMs;
-    const gated = baselineMs >= MIN_GATED_BASELINE_MS;
+        : gated / baselineMs;
     rows.push({
       stage: stage.stage,
       medianMs: stage.medianMs,
+      gatedMs: gated,
       baselineMs,
       ratio,
-      gated,
-      ok: !gated || !(ratio > factor),
+      // Every measured stage is gated (spec §11): the minimum across runs over
+      // baseline × 1.15 fails. The median is reported but not gated.
+      ok: !(ratio > factor),
     });
   }
   return rows;
@@ -270,7 +290,7 @@ export function evaluate(
         failures.push({
           scale: scale.scale,
           stage: row.stage,
-          medianMs: row.medianMs,
+          gatedMs: row.gatedMs,
           baselineMs: row.baselineMs,
           ratio: row.ratio,
         });
@@ -328,14 +348,43 @@ export interface PerfStage {
 }
 
 /**
+ * A per-action strategy stage: run one action's per-file strategy over the
+ * **already-linted** corpus (spec §11). It never re-lints — it consumes
+ * `context.lint`'s messages and the memoized file text — so the stage measures
+ * the action's own scan/plan/apply work on the main thread.
+ */
+function actionStage(name: string, action: Action, params: StrategyParams): PerfStage {
+  return {
+    name: `action:${name}`,
+    async run(context) {
+      const lint = context.lint;
+      if (lint === undefined) return;
+      const texts = corpusTexts(context);
+      for (const outcome of lint.files) {
+        const text = texts.get(outcome.filePath);
+        if (text === undefined) continue;
+        runActionForFile({
+          action,
+          params,
+          filePath: outcome.filePath,
+          text,
+          messages: outcome.messages,
+        });
+      }
+    },
+  };
+}
+
+/**
  * The measured stages, in order. Each `run` is the whole stage body; the runner
  * wraps it with warmup, repetition and timing.
  *
- * The engine stages (`scan` / `plan` / `apply`) operate per file over
- * `context.lint.files[...].messages` and the file text, on the main thread — no
- * pool construction (spec §11). They never re-lint; `lint` stays first because
- * the engine stages consume its recorded result. Each engine stage's
- * `StageResult.perFileUs` is the stage median divided by the files with messages.
+ * The engine stages (`scan` / `plan` / `apply`) and the per-action `action:*`
+ * stages operate per file over `context.lint.files[...].messages` and the file
+ * text, on the main thread — no pool construction, no re-lint (spec §11). `lint`
+ * stays first because they consume its recorded result. `report` renders the run
+ * report from the same ledger. `scan-full` and the non-suppress `action:*` stages
+ * touch **every** corpus file, not just the ones with messages (spec §7).
  */
 export function createStages(): PerfStage[] {
   return [
@@ -420,6 +469,49 @@ export function createStages(): PerfStage[] {
         for (const text of texts.values()) scanDirectives(text.split("\n"));
       },
     },
+    {
+      name: "report",
+      async run(context) {
+        // The report stage (spec §11): assemble and render the run report from
+        // the lint ledger. HTML is the default format (spec §4), so that is what
+        // the gate measures.
+        const lint = context.lint;
+        if (lint === undefined) return;
+        const edits = orderEdits(lint.files.flatMap((outcome) => outcome.edits));
+        const meta: RunMeta = {
+          tool: "pocket-comb",
+          version: VERSION,
+          action: LINT_ACTION,
+          configPath: context.configPath,
+          configHash: "",
+          target: context.corpusDir,
+          startedAt: "1970-01-01T00:00:00.000Z",
+          durationMs: 0,
+          dryRun: true,
+          workers: context.workers,
+          counts: {
+            discovered: context.files.length,
+            linted: lint.files.length,
+            dropped: lint.dropped.length,
+            touched: lint.files.filter((outcome) => outcome.changed).length,
+          },
+        };
+        renderReport(buildRunReport(meta, edits), "html");
+      },
+    },
+    actionStage("suppress", "suppress", {}),
+    actionStage("remove", "remove", { rules: ["no-console", "no-unused-vars"] }),
+    actionStage("replace", "replace", { from: "no-console", to: "no-alert" }),
+    actionStage("cleanup", "cleanup", { rules: ["no-console", "no-unused-vars"] }),
+    {
+      name: "action:inventory",
+      async run(context) {
+        // Inventory never lints and has no `runActionForFile` strategy; its real
+        // work is the census scan, so measure that directly over every file.
+        const texts = corpusTexts(context);
+        for (const text of texts.values()) censusFileScan(text.split("\n"));
+      },
+    },
   ];
 }
 
@@ -456,14 +548,38 @@ export function median(values: number[]): number {
   return sorted[(sorted.length - 1) >> 1] ?? 0;
 }
 
+/**
+ * Force a garbage collection before each measured sample when the process allows
+ * it (`node --expose-gc`; `npm run test:perf` passes it). This is the harness's
+ * jitter control (spec §11): the allocation-heavy stages otherwise inherit the
+ * previous stage's garbage and pay a major GC **inside** the measured region,
+ * which could double the 0.3 ms `plan` stage in an unlucky process. Cleaning the
+ * heap before the timed region keeps each sample honest without inflating it,
+ * and — unlike a calibrated repeat loop — it does not manufacture the very GC
+ * pressure it would then attribute to the stage. A no-op when `global.gc` is
+ * absent (e.g. the in-process harness unit tests).
+ */
+function collectGarbage(): void {
+  (globalThis as { gc?: () => void }).gc?.();
+}
+
+/**
+ * Measure one stage: warmup, then `runs` single-execution samples, each preceded
+ * by a forced GC. The **median** is reported and the **minimum** is what the gate
+ * compares (see `gatedMs`); single executions keep the allocation-heavy stages
+ * from paying GCs they would not pay in production, which is what made the
+ * sub-millisecond `plan` stage flaky under a calibrated repeat loop.
+ */
 async function measureStage(
   name: string,
   run: () => Promise<void>,
   options: { warmup: number; runs: number; delayMs: number },
 ): Promise<StageResult> {
   for (let i = 0; i < options.warmup; i++) await run();
+
   const runsMs: number[] = [];
   for (let i = 0; i < options.runs; i++) {
+    collectGarbage();
     const start = nowMs();
     await run();
     if (options.delayMs > 0) await sleep(options.delayMs);
@@ -478,16 +594,26 @@ async function measureStage(
   };
 }
 
-/** Stages whose cost is reported per file (spec §11 micro-timings). */
-const ENGINE_STAGES = new Set(["scan", "plan", "apply"]);
+/**
+ * Stages whose µs/file is over the files **with messages** (the suppress hot
+ * path only touches those, spec §6.1).
+ */
+const MESSAGE_FILE_STAGES = new Set(["scan", "plan", "apply", "action:suppress"]);
 
 /**
  * Stages whose per-file cost is over **every** corpus file, not just the files
- * with lint messages: the full-file scan touches them all (spec §7).
+ * with lint messages: the full-file scan (and the actions built on it) touch
+ * them all (spec §7).
  */
-const ALL_FILE_STAGES = new Set(["scan-full"]);
+const ALL_FILE_STAGES = new Set([
+  "scan-full",
+  "action:remove",
+  "action:replace",
+  "action:cleanup",
+  "action:inventory",
+]);
 
-/** Generate the corpus, then measure every stage: warmup, 5 runs, median. */
+/** Generate the corpus, then measure every stage: warmup, measured runs, median reported. */
 export async function measureScale(options: MeasureScaleOptions): Promise<ScaleMeasurement> {
   const seed = options.seed ?? DEFAULT_SEED;
   const warmup = options.warmup ?? DEFAULT_WARMUP;
@@ -512,7 +638,7 @@ export async function measureScale(options: MeasureScaleOptions): Promise<ScaleM
       runs,
       delayMs: options.stageDelays?.[stage.name] ?? 0,
     });
-    if (ENGINE_STAGES.has(result.stage)) {
+    if (MESSAGE_FILE_STAGES.has(result.stage)) {
       const messageFiles = filesWithMessages(context);
       if (messageFiles > 0) result.perFileUs = (result.medianMs * 1000) / messageFiles;
     } else if (ALL_FILE_STAGES.has(result.stage) && context.files.length > 0) {
@@ -548,24 +674,32 @@ interface PerfArgs {
   threshold: number;
   warmup: number;
   runs: number;
-  /** True when `--runs` was passed; `--update-baseline` otherwise raises the default. */
-  runsExplicit: boolean;
   workers: number;
   batchSize: number;
   serial: boolean;
   help: boolean;
 }
 
-const SCALE_COUNTS: Record<string, number> = {
-  default: DEFAULT_FILE_COUNT,
-  stress: STRESS_FILE_COUNT,
-};
+/**
+ * The stress scale's file count is env-configurable as well as flag-selectable
+ * (spec §11: "stress 20,000 (flag/env)"): set this to resize the stress scale
+ * without touching the committed default.
+ */
+export const STRESS_FILES_ENV = "POCKET_COMB_PERF_STRESS_FILES";
+
+/** The named scale counts, with the stress size overridable by env (spec §11). */
+export function scaleCounts(): Record<string, number> {
+  const env = Number(process.env[STRESS_FILES_ENV]);
+  const stress = Number.isFinite(env) && env >= 1 ? Math.floor(env) : STRESS_FILE_COUNT;
+  return { default: DEFAULT_FILE_COUNT, stress };
+}
 
 const USAGE = `Usage: npm run test:perf -- [flags]
 
-The separate perf timing suite (never part of \`npm test\`). WARMS UP, takes 5
-measured runs per stage, and fails when a stage median exceeds the committed
-platform baseline by more than 15%.
+The separate perf timing suite (never part of \`npm test\`). WARMS UP, takes
+measured runs per stage, and fails when **any** stage's minimum across runs
+exceeds the committed platform baseline by more than 15% (the median is reported
+too; no stage is exempt).
 
 Flags:
   --scales <a,b>        scales to measure (default: default,stress)
@@ -577,12 +711,15 @@ Flags:
   --require-baseline    treat a missing platform baseline as a failure
   --threshold <x>       regression factor (default ${DEFAULT_THRESHOLD})
   --warmup <n>          warmup runs per stage (default ${DEFAULT_WARMUP})
-  --runs <n>            measured runs per stage (default ${DEFAULT_RUNS}; ${BASELINE_RUNS} when pinning)
+  --runs <n>            measured runs per stage (default ${DEFAULT_RUNS})
   --workers <n>         pool size (default ceil(cores x 0.75))
   --batch-size <n>      files per task (default ${DEFAULT_BATCH_SIZE})
   --serial              single in-process instance (no pool)
   --json                print the raw measurement JSON
-  --help                this message`;
+  --help                this message
+
+Env:
+  ${STRESS_FILES_ENV}  override the stress scale's file count (default ${STRESS_FILE_COUNT})`;
 
 function parseArgs(argv: string[]): PerfArgs {
   let scalesArg = "default,stress";
@@ -596,7 +733,6 @@ function parseArgs(argv: string[]): PerfArgs {
   let threshold = DEFAULT_THRESHOLD;
   let warmup = DEFAULT_WARMUP;
   let runs = DEFAULT_RUNS;
-  let runsExplicit = false;
   let workers = defaultWorkerCount(availableParallelism());
   let batchSize = DEFAULT_BATCH_SIZE;
   let serial = false;
@@ -643,7 +779,6 @@ function parseArgs(argv: string[]): PerfArgs {
         break;
       case "--runs":
         runs = int(arg, argv[++i]);
-        runsExplicit = true;
         break;
       case "--workers":
         workers = int(arg, argv[++i]);
@@ -673,7 +808,7 @@ function parseArgs(argv: string[]): PerfArgs {
       .map((name) => name.trim())
       .filter((name) => name.length > 0)
       .map((name) => {
-        const files = SCALE_COUNTS[name];
+        const files = scaleCounts()[name];
         if (files === undefined) throw new Error(`unknown scale: ${name} (default|stress)`);
         return { name, files };
       });
@@ -691,7 +826,6 @@ function parseArgs(argv: string[]): PerfArgs {
     threshold,
     warmup,
     runs,
-    runsExplicit,
     workers,
     batchSize,
     serial,
@@ -719,10 +853,11 @@ export async function runPerfCli(argv: string[], io: PerfIo = consoleIo): Promis
   }
 
   const platform = platformKey();
-  const runs = args.updateBaseline && !args.runsExplicit ? BASELINE_RUNS : args.runs;
+  const runs = args.runs;
   io.out(`pocket-comb perf harness — ${platformId(platform)}`);
   io.out(
-    `methodology: warmup ${args.warmup}, ${runs} measured runs, median per stage` +
+    `methodology: warmup ${args.warmup}, ${runs} measured runs, gated on the ` +
+      `minimum across runs (median reported)` +
       (args.serial ? ", serial" : `, pool ${args.workers} x batch ${args.batchSize}`),
   );
 
@@ -776,10 +911,10 @@ export async function runPerfCli(argv: string[], io: PerfIo = consoleIo): Promis
   let failed = false;
   for (const scale of measurement.scales) {
     for (const row of compareScale(scale, entry.scales[scale.scale], args.threshold)) {
-      const verdict = !row.gated ? "info" : row.ok ? "ok" : "FAIL";
+      const verdict = row.ok ? "ok" : "FAIL";
       if (!row.ok) failed = true;
       io.out(
-        `  ${scale.scale}/${row.stage} median ${fmt(row.medianMs)} ms  ` +
+        `  ${scale.scale}/${row.stage} min ${fmt(row.gatedMs)} ms  ` +
           `baseline ${fmt(row.baselineMs)} ms  ratio ${row.ratio.toFixed(2)}  ${verdict}`,
       );
     }

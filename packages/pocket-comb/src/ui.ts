@@ -1,4 +1,5 @@
-import { EDIT_TYPES, type EditRecord, type EditType } from "./types.js";
+import { relative } from "node:path";
+import { EDIT_TYPES, type EditRecord, type EditType, type NotActionableDirective } from "./types.js";
 import type { FormCount } from "./ledger.js";
 
 /** What the spinner renders: the stage name plus a done/total count. */
@@ -254,4 +255,26 @@ export function writeImpactSummary(
   dryRun: boolean,
 ): void {
   output.write(`${formatImpactSummary(summary, dryRun)}\n`);
+}
+
+/**
+ * List the directives an action recognised but could not act on (spec §6.1,
+ * §6.3, §6.5): a bare guard names no rules, so it cannot be scoped — remove and
+ * cleanup leave it, and suppress will not rewrite it. Stable order: file, then
+ * line. Shared by every action that can surface one.
+ */
+export function writeNotActionable(
+  output: NodeJS.WritableStream,
+  cwd: string,
+  outcomes: ReadonlyArray<{ notActionable?: NotActionableDirective[] }>,
+): void {
+  const notes = outcomes
+    .flatMap((outcome) => outcome.notActionable ?? [])
+    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+  if (notes.length === 0) return;
+
+  output.write(`Not actionable: ${notes.length} bare directives (no rule list)\n`);
+  for (const note of notes) {
+    output.write(`  ${relative(cwd, note.file)}:${note.line} ${note.form} ${note.text}\n`);
+  }
 }

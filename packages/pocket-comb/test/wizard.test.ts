@@ -100,7 +100,6 @@ function stubConfig(overrides: Partial<LoadedConfig> = {}): LoadedConfig {
     targetRoot: "/tmp/target",
     rules: [],
     settings: {},
-    rawConfig: [],
     ...overrides,
   };
 }

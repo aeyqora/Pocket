@@ -19,7 +19,6 @@ function run(
     filePath: "/repo/reuse.js",
     text,
     messages,
-    apply: false,
   });
 }
 

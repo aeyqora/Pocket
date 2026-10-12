@@ -19,7 +19,7 @@ export {
   NotImplementedError,
   isOperationalError,
 } from "./errors.js";
-export { ACTIONS, REPORT_FORMATS, EDIT_TYPES } from "./types.js";
+export { ACTIONS, REPORT_FORMATS, EDIT_TYPES, BARE_RULE } from "./types.js";
 export type { Action, ReportFormat, RunMode } from "./types.js";
 export { discover, DEFAULT_EXTENSIONS } from "./discovery.js";
 export type { DiscoverOptions, DiscoverResult } from "./discovery.js";
@@ -39,10 +39,6 @@ export {
   applySuppressEdits,
   findEnclosingBlockGuard,
   splitRuleList,
-  ledgerRecordsForEdit,
-  parseUnusedDirectiveMessage,
-  LINE_SUFFIX_DIRECTIVE_RE,
-  NEXT_LINE_DIRECTIVE_RE,
 } from "./engine.js";
 export type {
   RunActionForFileOptions,
@@ -62,7 +58,6 @@ export type {
   RemoveParams,
   ReplaceParams,
   CleanupParams,
-  UnusedDirectiveMessage,
 } from "./engine.js";
 export {
   scanDirectives,
@@ -70,7 +65,7 @@ export {
   directiveName,
 } from "./scan.js";
 export type { ScannedDirective } from "./scan.js";
-export { censusEntries, censusFiles, censusFileScan } from "./census.js";
+export { censusFiles, censusFileScan } from "./census.js";
 export type { CensusEntry, CensusFileScan, CensusInput, CensusResult } from "./census.js";
 export {
   buildRunReport,
@@ -115,15 +110,6 @@ export type {
   WorkerStat,
 } from "./pool.js";
 export type { BatchOutcome, DirectiveForm, EditRecord, EditType, JsonValue, NotActionableDirective } from "./types.js";
-export type {
-  BatchDoneMessage,
-  BatchFailedMessage,
-  LintBatchMessage,
-  ParentToWorker,
-  ReadyMessage,
-  WorkerInit,
-  WorkerToParent,
-} from "./worker.js";
 export {
   createSpinner,
   formatCompletion,
@@ -134,6 +120,7 @@ export {
   writeCompletion,
   writeCensusSummary,
   writeImpactSummary,
+  writeNotActionable,
 } from "./ui.js";
 export type {
   CensusSummary,

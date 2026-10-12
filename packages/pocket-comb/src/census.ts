@@ -58,8 +58,13 @@ export interface CensusResult {
 }
 
 /**
- * Scan one file's lines for census entries: every disable directive, one entry
- * per rule it names (or one bare entry). Enables are excluded.
+ * Scan one file's lines for census entries: every **disable** directive, one
+ * entry per rule it names (or one bare entry). Enables are excluded.
+ *
+ * **Census scope (deliberate):** the census counts disable directives only — the
+ * spec's "all four forms" (`next-line`, `line`, `block`, `file-level`).
+ * `eslint-enable` closers are not a suppression form, so they are excluded from
+ * both grains. The interpretation is recorded in the README.
  */
 export function censusFileScan(lines: readonly string[]): CensusFileScan {
   const disables: ScannedDirective[] = [];
@@ -74,11 +79,6 @@ export function censusFileScan(lines: readonly string[]): CensusFileScan {
     for (const rule of directive.rules) entries.push({ form: directive.form, rule });
   }
   return { disables, entries };
-}
-
-/** The rule-incidence entries of one file (the `totals` grain). */
-export function censusEntries(lines: readonly string[]): CensusEntry[] {
-  return censusFileScan(lines).entries;
 }
 
 const FORM_RANK = new Map<DirectiveForm, number>(

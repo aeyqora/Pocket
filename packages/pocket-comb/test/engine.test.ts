@@ -31,7 +31,6 @@ test("the suppress strategy inserts an indent-matched guard and ledgers the edit
     filePath: "/tmp/x.js",
     text: "function f() {\n  debugger;\n}\n",
     messages: [message(1, "no-debugger", 2)],
-    apply: false,
   });
 
   assert.equal(result.output, "function f() {\n  // eslint-disable-next-line no-debugger\n  debugger;\n}\n");
