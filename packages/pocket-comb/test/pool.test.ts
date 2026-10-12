@@ -88,7 +88,7 @@ test("an unconfigured run uses the default pool size", async () => {
   assert.equal(result.files.length, 10);
 });
 
-test("apply mode flows through the pool without touching files (lint-only has no edits)", async () => {
+test("apply mode flows through the pool and the workers write the suppressed text", async () => {
   const fix = fixture(3);
   const stages: string[] = [];
   const before = fix.files.map((file) => readFileSync(file, "utf8"));
@@ -105,11 +105,14 @@ test("apply mode flows through the pool without touching files (lint-only has no
   assert.ok(stages.includes("apply"), "apply is the reported stage");
   assert.ok(!stages.includes("lint"), "apply does not masquerade as a lint stage");
   assert.equal(result.files.length, 3);
-  assert.deepEqual(
-    fix.files.map((file) => readFileSync(file, "utf8")),
-    before,
-    "the lint-only strategy writes nothing",
-  );
+  for (const file of fix.files) {
+    assert.equal(
+      readFileSync(file, "utf8"),
+      "// eslint-disable-next-line no-debugger\ndebugger;\n",
+      "the suppress strategy wrote the guarded text",
+    );
+  }
+  assert.notDeepEqual(before, fix.files.map((file) => readFileSync(file, "utf8")));
 });
 
 test("a pooled run lints every file with real, persistent worker threads", async () => {

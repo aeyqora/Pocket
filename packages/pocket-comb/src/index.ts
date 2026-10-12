@@ -30,7 +30,17 @@ export type {
   FatalFile,
   LintFilesResult,
 } from "./eslint.js";
-export { runActionForFile, runBatch } from "./engine.js";
+export {
+  runActionForFile,
+  runBatch,
+  scanSuppressFile,
+  planSuppressEdits,
+  applySuppressEdits,
+  splitRuleList,
+  ledgerRecordsForEdit,
+  LINE_SUFFIX_DIRECTIVE_RE,
+  NEXT_LINE_DIRECTIVE_RE,
+} from "./engine.js";
 export type {
   RunActionForFileOptions,
   RunActionResult,
@@ -38,7 +48,28 @@ export type {
   RunBatchResult,
   StrategyParams,
   SuppressParams,
+  SuppressPlan,
+  SuppressTarget,
+  SuppressEditKind,
+  PlannedEdit,
+  LineGuard,
+  NextLineGuard,
+  RuleList,
 } from "./engine.js";
+export {
+  buildRunReport,
+  rollupByRule,
+  rollupByForm,
+  rollupByFile,
+  DIRECTIVE_FORMS,
+} from "./ledger.js";
+export type {
+  RunMeta,
+  RunReport,
+  RuleCount,
+  FormCount,
+  FileCount,
+} from "./ledger.js";
 export { runPool, defaultWorkerCount, PoolRecoveryError, DEFAULT_BATCH_SIZE } from "./pool.js";
 export type {
   Progress,
