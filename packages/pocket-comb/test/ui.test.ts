@@ -43,6 +43,7 @@ test("summarizeRun counts touched files and edits by type", () => {
     edits: 3,
     inserted: 2,
     prepended: 1,
+    fixed: 0,
     elapsedMs: 1000,
   });
 });
