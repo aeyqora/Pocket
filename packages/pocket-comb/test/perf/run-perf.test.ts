@@ -211,6 +211,26 @@ test("a run with no committed baseline exits 0 unless --require-baseline", async
   assert.equal(await runPerfCli([...common, "--require-baseline"], silentIo()), 1);
 });
 
+test("the harness measures the shared full-file scan over every file at µs scale", async () => {
+  const dir = tempDir("pc-perf-scan-");
+  const measured = await measureScale({
+    scale: "tiny",
+    files: 80,
+    seed: 7,
+    corpusDir: join(dir, "corpus"),
+    configPath: CORPUS_CONFIG_PATH,
+    warmup: 1,
+    runs: 3,
+  });
+  const scanFull = measured.stages.find((s) => s.stage === "scan-full");
+  assert.ok(scanFull, "the shared full-file scan is a measured stage");
+  assert.ok(scanFull!.perFileUs !== undefined, "its cost is reported per file");
+  assert.ok(
+    scanFull!.perFileUs! < 200,
+    `the full-file scan should be µs-scale, got ${scanFull!.perFileUs} µs/file`,
+  );
+});
+
 test("platformKey reports os, CPU model, and Node version", () => {
   const key = platformKey();
   assert.ok(key.os.length > 0);
