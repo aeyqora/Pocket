@@ -2,6 +2,7 @@ import { NotImplementedError } from "../errors.js";
 import { runSuppress } from "./suppress.js";
 import { runFix } from "./fix.js";
 import { runRemove } from "./remove.js";
+import { runReplace } from "./replace.js";
 import type { Action } from "../types.js";
 import type { ActionContext, ActionHandler } from "./action.js";
 
@@ -14,6 +15,7 @@ const HANDLERS: Partial<Record<Action, ActionHandler>> = {
   suppress: runSuppress,
   fix: runFix,
   remove: runRemove,
+  replace: runReplace,
 };
 
 /**

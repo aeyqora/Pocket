@@ -207,7 +207,6 @@ test("verbs without a command exit 2 with a 'not implemented yet' operational me
   const fix = fixture({ "a.js": "export default 1;\n" });
 
   const invocations: string[][] = [
-    ["replace", "--from", "a", "--to", "b"],
     ["cleanup"],
     ["inventory"],
   ];
