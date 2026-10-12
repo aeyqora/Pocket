@@ -109,6 +109,17 @@ test("renderJson(false) is a single compact line", () => {
   assert.deepEqual(JSON.parse(compact), RUN);
 });
 
+test("buildRunReport carries an optional hint (replace's follow-on) into JSON and HTML", () => {
+  const hint = "run cleanup to prune now-unused directives";
+  const withHint = buildRunReport(META, EDITS, hint);
+
+  assert.equal(withHint.hint, hint);
+  assert.equal(JSON.parse(renderJson(withHint)).hint, hint);
+  assert.match(renderHtml(withHint), /Next step/);
+  assert.ok(renderHtml(withHint).includes(hint));
+  assert.equal(buildRunReport(META, EDITS).hint, undefined, "no hint unless the action supplies one");
+});
+
 // --- renderCsv ----------------------------------------------------------------
 
 test("renderCsv emits a header and one RFC-4180-quoted row per edit", () => {

@@ -51,7 +51,7 @@ test("a valid auto-detected config runs the action to success", async () => {
   assert.equal(err, "");
 });
 
-test("replace with a settings pair dispatches past validation to the unimplemented verb", async () => {
+test("replace with a settings pair runs the action (no longer a placeholder)", async () => {
   const dir = tempDir();
   write(
     dir,
@@ -59,8 +59,8 @@ test("replace with a settings pair dispatches past validation to the unimplement
     `export default [{ rules: {}, settings: { "pocket-comb": { replace: { from: "a", to: "b" } } } }];\n`,
   );
   const { code, err } = await run(["replace"], dir);
-  assert.equal(code, 2);
-  assert.match(err, /not implemented yet/);
+  assert.equal(code, 0, "a settings-carried pair dispatches to the action; nothing matched here");
+  assert.doesNotMatch(err, /not implemented/);
 });
 
 test("non-TTY replace without a pair exits 2 listing exactly --from and --to", async () => {
@@ -76,9 +76,9 @@ test("a TTY replace without a pair is not a missing-flags error (a wizard would 
   const dir = tempDir();
   write(dir, "pocket-comb.config.mjs", BASIC_CONFIG);
   const { code, err } = await run(["replace"], dir, true);
-  assert.equal(code, 2);
+  assert.equal(code, 2, "ticket 13's wizard fills the gap; until then it is an operational error");
   assert.doesNotMatch(err, /missing required/);
-  assert.match(err, /not implemented yet/);
+  assert.match(err, /--from/);
 });
 
 test("a missing config exits 2 with a message naming --config", async () => {
@@ -95,10 +95,10 @@ test("an unloadable config exits 2", async () => {
   assert.match(err, /pocket-comb\.config\.mjs/);
 });
 
-test("inventory is not wired yet: exit 2 with an operational message", async () => {
+test("inventory is wired: a census exits 0", async () => {
   const dir = tempDir();
   write(dir, "pocket-comb.config.mjs", BASIC_CONFIG);
   const { code, err } = await run(["inventory"], dir);
-  assert.equal(code, 2);
-  assert.match(err, /not implemented yet/);
+  assert.equal(code, 0);
+  assert.equal(err, "");
 });

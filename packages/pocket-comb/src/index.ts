@@ -37,6 +37,7 @@ export {
   scanSuppressFile,
   planSuppressEdits,
   applySuppressEdits,
+  findEnclosingBlockGuard,
   splitRuleList,
   ledgerRecordsForEdit,
   parseUnusedDirectiveMessage,
@@ -56,8 +57,10 @@ export type {
   PlannedEdit,
   LineGuard,
   NextLineGuard,
+  BlockGuard,
   RuleList,
   RemoveParams,
+  ReplaceParams,
   CleanupParams,
   UnusedDirectiveMessage,
 } from "./engine.js";
@@ -67,6 +70,8 @@ export {
   directiveName,
 } from "./scan.js";
 export type { ScannedDirective } from "./scan.js";
+export { censusEntries, censusFiles, censusFileScan } from "./census.js";
+export type { CensusEntry, CensusFileScan, CensusInput, CensusResult } from "./census.js";
 export {
   buildRunReport,
   orderEdits,
@@ -122,13 +127,16 @@ export type {
 export {
   createSpinner,
   formatCompletion,
+  formatCensusSummary,
   formatImpactSummary,
   summarizeImpact,
   summarizeRun,
   writeCompletion,
+  writeCensusSummary,
   writeImpactSummary,
 } from "./ui.js";
 export type {
+  CensusSummary,
   CompletionSummary,
   ImpactRuleCount,
   ImpactSummary,

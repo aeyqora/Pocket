@@ -65,6 +65,12 @@ export interface FileCount {
 /** The canonical run report (spec §13): metadata + ledger + rollups. */
 export interface RunReport {
   meta: RunMeta;
+  /**
+   * Optional follow-on guidance the action wants carried in the report — e.g.
+   * replace's "run cleanup to prune now-unused directives" (spec §6.4). Omitted
+   * when the action has nothing to add.
+   */
+  hint?: string;
   edits: EditRecord[];
   byRule: RuleCount[];
   byForm: FormCount[];
@@ -122,11 +128,15 @@ export function orderEdits(edits: readonly EditRecord[]): EditRecord[] {
   );
 }
 
-/** Assemble the canonical report from metadata and the merged ledger. */
-export function buildRunReport(meta: RunMeta, edits: readonly EditRecord[]): RunReport {
+/**
+ * Assemble the canonical report from metadata and the merged ledger. `hint`
+ * (spec §6.4) is carried verbatim when the action supplies one.
+ */
+export function buildRunReport(meta: RunMeta, edits: readonly EditRecord[], hint?: string): RunReport {
   const ledger = [...edits];
   return {
     meta,
+    ...(hint === undefined ? {} : { hint }),
     edits: ledger,
     byRule: rollupByRule(ledger),
     byForm: rollupByForm(ledger),

@@ -160,6 +160,24 @@ test("violations inside block spans and under file-level directives get minimal-
   );
 });
 
+test("--reuse-blocks prepends onto the enclosing guard end-to-end", async () => {
+  const fix = fixture({
+    "block.js":
+      '/* eslint-disable no-unused-vars -- legacy */\nconsole.log("x");\n/* eslint-enable no-unused-vars */\n',
+  });
+
+  const { code } = await suppress(fix.dir, ["--apply", "--reuse-blocks"]);
+  assert.equal(code, 0);
+
+  assert.equal(
+    readFileSync(join(fix.target, "block.js"), "utf8"),
+    "/* eslint-disable no-console, no-unused-vars -- legacy */\n" +
+      'console.log("x");\n' +
+      "/* eslint-enable no-unused-vars */\n",
+    "the rule is prepended onto the block-open and the description survives",
+  );
+});
+
 test("both warn- and error-severity violations are suppressed", async () => {
   const fix = fixture({ "both.js": 'console.log("a");\nvar unused = 1;\n' });
 
@@ -183,23 +201,6 @@ test("the completion confirmation prints files touched, edit counts and elapsed"
 
   const { out } = await suppress(fix.dir);
   assert.match(out, /Done: 1 files touched, 1 edits \(1 inserted, 0 prepended\) — \d+\.\ds\n$/);
-});
-
-test("verbs without a command exit 2 with a 'not implemented yet' operational message", async () => {
-  const fix = fixture({ "a.js": "export default 1;\n" });
-
-  const invocations: string[][] = [
-    ["fix"],
-    ["replace", "--from", "a", "--to", "b"],
-    ["inventory"],
-  ];
-
-  for (const invocation of invocations) {
-    const io = fakeIo({ cwd: fix.dir });
-    const code = await main([...invocation, "-c", "comb.config.mjs", "-t", "target"], io.io);
-    assert.equal(code, 2, `${invocation[0]} exits 2`);
-    assert.match(io.stderr(), /not implemented yet/, `${invocation[0]} names the gap`);
-  }
 });
 
 test("a target with no matching files is an operational error (exit 2)", async () => {
