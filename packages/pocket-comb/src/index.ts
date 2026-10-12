@@ -20,3 +20,13 @@ export {
 } from "./errors.js";
 export { ACTIONS, REPORT_FORMATS } from "./types.js";
 export type { Action, ReportFormat, RunMode } from "./types.js";
+export { discover, DEFAULT_EXTENSIONS } from "./discovery.js";
+export type { DiscoverOptions, DiscoverResult } from "./discovery.js";
+export { createIsolatedESLint, lintFiles } from "./eslint.js";
+export type {
+  CreateIsolatedESLintOptions,
+  DropKind,
+  DroppedFile,
+  FatalFile,
+  LintFilesResult,
+} from "./eslint.js";
