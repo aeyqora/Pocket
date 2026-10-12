@@ -11,7 +11,7 @@ export type {
   ReportSetting,
 } from "./config.js";
 export { main, processIo } from "./cli.js";
-export type { CommandIo } from "./cli.js";
+export type { CommandIo, MainDeps } from "./cli.js";
 export {
   OperationalError,
   UsageError,
@@ -146,3 +146,21 @@ export type {
 } from "./ui.js";
 export { runAction } from "./actions/index.js";
 export type { ActionContext, ActionHandler } from "./actions/action.js";
+export {
+  WIZARD_CANCEL,
+  createClackPrompter,
+  isCancelled,
+  runWizard,
+} from "./wizard.js";
+export type {
+  Answer,
+  CancelSignal,
+  ConfirmPrompt,
+  PathPrompt,
+  Prompter,
+  SelectChoice,
+  SelectPrompt,
+  TextPrompt,
+  WizardDeps,
+  WizardRunContext,
+} from "./wizard.js";

@@ -2,12 +2,19 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { main } from "../src/cli.js";
 import { cleanupTemps, fakeIo, tempDir, write } from "./harness.js";
+import type { MainDeps } from "../src/cli.js";
+import type { Prompter } from "../src/wizard.js";
 
 after(cleanupTemps);
 
-async function run(argv: string[], dir: string, tty = false): Promise<{ code: number; out: string; err: string }> {
+async function run(
+  argv: string[],
+  dir: string,
+  tty = false,
+  deps: MainDeps = {},
+): Promise<{ code: number; out: string; err: string }> {
   const io = fakeIo({ cwd: dir, tty });
-  const code = await main(argv, io.io);
+  const code = await main(argv, io.io, deps);
   return { code, out: io.stdout(), err: io.stderr() };
 }
 
@@ -72,13 +79,28 @@ test("non-TTY replace without a pair exits 2 listing exactly --from and --to", a
   assert.match(err, /--to/);
 });
 
-test("a TTY replace without a pair is not a missing-flags error (a wizard would fill the gap)", async () => {
+test("a TTY replace without a pair is filled by the wizard", async () => {
   const dir = tempDir();
   write(dir, "pocket-comb.config.mjs", BASIC_CONFIG);
-  const { code, err } = await run(["replace"], dir, true);
-  assert.equal(code, 2, "ticket 13's wizard fills the gap; until then it is an operational error");
-  assert.doesNotMatch(err, /missing required/);
-  assert.match(err, /--from/);
+  const texts = ["old/rule", "new/rule"];
+  const confirms = [true];
+  const prompter: Prompter = {
+    intro() {},
+    outro() {},
+    cancel() {},
+    select: async () => "abort",
+    text: async () => texts.shift()!,
+    confirm: async () => confirms.shift()!,
+    path: async () => dir,
+  };
+  const { code, err } = await run(
+    ["replace", "--config", "pocket-comb.config.mjs", "--target", ".", "--no-report"],
+    dir,
+    true,
+    { prompter },
+  );
+  assert.equal(code, 0, "the wizard fills the pair and runs replace");
+  assert.doesNotMatch(err, /not implemented/);
 });
 
 test("a missing config exits 2 with a message naming --config", async () => {
