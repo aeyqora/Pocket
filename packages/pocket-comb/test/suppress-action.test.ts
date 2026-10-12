@@ -192,7 +192,6 @@ test("verbs without a command exit 2 with a 'not implemented yet' operational me
     ["fix"],
     ["replace", "--from", "a", "--to", "b"],
     ["cleanup"],
-    ["inventory"],
   ];
 
   for (const invocation of invocations) {

@@ -18,5 +18,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every directive shape, a separate `test:perf` timing suite (warmup + 5 runs,
   medians per stage), and a platform-keyed committed baseline with a ×1.15 gate
   and `--update-baseline` re-pinning.
+- `inventory`: the read-only census (spec §6.6) — a full-file scan counting every
+  suppression directive across all four forms, per `(form, rule)` and per file
+  (bare per form), with stable ordering for clean diffs over time. No lint pass;
+  renders in all three report formats.
 
 [Unreleased]: https://github.com/aeyqora/Pocket/commits/main/packages/pocket-comb

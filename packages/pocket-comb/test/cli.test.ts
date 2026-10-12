@@ -95,10 +95,10 @@ test("an unloadable config exits 2", async () => {
   assert.match(err, /pocket-comb\.config\.mjs/);
 });
 
-test("inventory is not wired yet: exit 2 with an operational message", async () => {
+test("inventory is wired: a census exits 0", async () => {
   const dir = tempDir();
   write(dir, "pocket-comb.config.mjs", BASIC_CONFIG);
   const { code, err } = await run(["inventory"], dir);
-  assert.equal(code, 2);
-  assert.match(err, /not implemented yet/);
+  assert.equal(code, 0);
+  assert.equal(err, "");
 });

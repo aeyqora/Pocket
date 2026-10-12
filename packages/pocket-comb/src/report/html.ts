@@ -105,7 +105,10 @@ function runHtml(report: RunReport): string {
 }
 
 function censusHtml(report: CensusReport): string {
-  const directiveCount = report.totals.reduce((sum, total) => sum + total.count, 0);
+  // `byFile` counts directives (one per disable directive); `totals` counts rule
+  // incidences (a multi-rule directive contributes one per rule). The headline
+  // "directives" figure must use the directive grain.
+  const directiveCount = report.byFile.reduce((sum, entry) => sum + entry.count, 0);
   const totals = table(
     ["Form", "Rule", "Count"],
     report.totals.map((total) => [total.form, total.rule ?? "(bare)", String(total.count)]),

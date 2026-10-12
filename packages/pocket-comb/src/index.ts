@@ -64,6 +64,8 @@ export {
   directiveName,
 } from "./scan.js";
 export type { ScannedDirective } from "./scan.js";
+export { censusEntries, censusFiles, censusFileScan } from "./census.js";
+export type { CensusEntry, CensusFileScan, CensusInput, CensusResult } from "./census.js";
 export {
   buildRunReport,
   orderEdits,
@@ -119,13 +121,16 @@ export type {
 export {
   createSpinner,
   formatCompletion,
+  formatCensusSummary,
   formatImpactSummary,
   summarizeImpact,
   summarizeRun,
   writeCompletion,
+  writeCensusSummary,
   writeImpactSummary,
 } from "./ui.js";
 export type {
+  CensusSummary,
   CompletionSummary,
   ImpactRuleCount,
   ImpactSummary,
