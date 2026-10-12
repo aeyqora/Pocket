@@ -19,6 +19,61 @@ interface ReportDescriptor {
   loc?: ReportLocation;
   fix?: Rule.ReportFixer | null;
   suggest?: Rule.SuggestionReportDescriptor[] | null;
+  suggestionDesc?: string;
+  suggestionMessageId?: string;
+  suggestionData?: Record<string, unknown>;
+}
+
+/** Generic description for a fix that becomes a suggestion with no authored one. */
+const DEFAULT_SUGGESTION_DESC = "Apply the tailored fix.";
+
+/**
+ * Turn the report's authored `fix` into a single editor suggestion, carrying
+ * the descriptor's `suggestion*` fields as its message. Any `suggest` array the
+ * hook already returned is kept and the converted fix is appended, so no
+ * authored suggestion is ever dropped.
+ */
+function fixAsSuggestion(descriptor: ReportDescriptor, fix: Rule.ReportFixer): void {
+  const { suggestionDesc, suggestionMessageId, suggestionData } = descriptor;
+  // `data` is typed loosely on the tailoring surface and narrowed here, same as
+  // the report descriptor itself (`TailoredReport.data` is `Record<string, unknown>`).
+  const suggestion = (
+    suggestionMessageId
+      ? { messageId: suggestionMessageId, fix, ...(suggestionData ? { data: suggestionData } : {}) }
+      : { desc: suggestionDesc ?? DEFAULT_SUGGESTION_DESC, fix }
+  ) as Rule.SuggestionReportDescriptor;
+
+  descriptor.suggest = descriptor.suggest ? [...descriptor.suggest, suggestion] : [suggestion];
+  delete descriptor.fix;
+}
+
+/**
+ * Route an *authored* fix according to the tailoring's `autofix` declaration
+ * (ADR-0003). `autofix: true` leaves it a real fix (the composed meta carries
+ * `fixable`); otherwise it becomes a suggestion and `--fix` does not apply it.
+ *
+ * Only a fix the hook itself returned is routed. A fix merely inherited from
+ * the upstream report (the hook reshaped the message and left `fix` alone)
+ * passes through untouched, so a message-only tailoring never silently turns
+ * off an upstream autofix. The `suggestion*` helper fields never reach ESLint
+ * as report keys.
+ */
+function routeReportFix(
+  descriptor: ReportDescriptor,
+  authoredFix: boolean,
+  autofix: boolean,
+): ReportDescriptor {
+  if (authoredFix && descriptor.fix && !autofix) {
+    fixAsSuggestion(descriptor, descriptor.fix);
+  }
+
+  // These helper fields are not ESLint report keys; `fixAsSuggestion` may have
+  // consumed them, so strip whatever remains before the descriptor is reported.
+  delete descriptor.suggestionDesc;
+  delete descriptor.suggestionMessageId;
+  delete descriptor.suggestionData;
+
+  return descriptor;
 }
 
 /**
@@ -93,14 +148,28 @@ export function composeRule(
   definition: TailoringDefinition,
 ): TailoredRuleModule {
   const upstreamMeta = upstream.meta ?? {};
+  const autofix = definition.autofix === true;
   const messages: Record<string, string> = {
     ...(upstreamMeta.messages ?? {}),
     ...(definition.meta?.messages ?? {}),
   };
 
+  // Injecting a fix changes what ESLint's report-time guards require (ESLint
+  // reads the *composed* meta, not upstream's):
+  // - `fixable` only when the author opted into `--fix`; reuse upstream's fix
+  //   type so a whitespace rule stays whitespace-fixable.
+  // - `hasSuggestions` whenever an authored fix can become a suggestion, i.e.
+  //   unless `autofix: true` (upstream's own suggestions are always kept).
+  // Over-declaring is harmless: a rule that ends up emitting no fix/suggestion
+  // is never rejected for a capability it did not use.
+  const fixable = autofix ? (upstreamMeta.fixable ?? "code") : upstreamMeta.fixable;
+  const hasSuggestions = autofix ? upstreamMeta.hasSuggestions : true;
+
   const meta: Rule.RuleMetaData = {
     ...upstreamMeta,
     ...(definition.meta ?? {}),
+    ...(fixable === undefined ? {} : { fixable }),
+    ...(hasSuggestions === undefined ? {} : { hasSuggestions }),
     messages,
     schema: upstreamMeta.schema,
     defaultOptions: upstreamMeta.defaultOptions,
@@ -142,7 +211,10 @@ export function composeRule(
             originalReport(descriptor as Rule.ReportDescriptor);
             return;
           }
-          originalReport(mergeReport(descriptor, next) as Rule.ReportDescriptor);
+          originalReport(
+            routeReportFix(mergeReport(descriptor, next), next.fix !== undefined, autofix) as
+              Rule.ReportDescriptor,
+          );
         },
       },
     }) as Rule.RuleContext;
