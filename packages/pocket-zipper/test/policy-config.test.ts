@@ -606,5 +606,11 @@ describe("policy config through the CLI fixture seam", () => {
     assert.equal(res.status, 0);
     assert.deepEqual(res.record?.errors, []);
     assert.match(res.stdout, /warning: .*matches no existing path/);
+    // The policy is parsed twice (the enabled-gate read, then the full read);
+    // the warning must be reported once, not once per parse.
+    const warningLines = res.stdout
+      .split("\n")
+      .filter((line) => line.includes("matches no existing path"));
+    assert.equal(warningLines.length, 1);
   });
 });

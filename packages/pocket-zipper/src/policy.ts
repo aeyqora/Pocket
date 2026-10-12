@@ -153,6 +153,19 @@ function emptyView(): PolicyView {
   };
 }
 
+/**
+ * A policy list key as a tolerant view: a list of non-empty strings, absent, or
+ * invalid. Shared by `governedRules` and the two path keys, so the one shape has
+ * one spelling.
+ */
+function parseStringList(raw: unknown): { list: string[] | null; valid: boolean } {
+  if (raw === undefined || raw === null) return { list: null, valid: true };
+  if (!Array.isArray(raw) || raw.some((r) => typeof r !== "string" || r.trim().length === 0)) {
+    return { list: null, valid: false };
+  }
+  return { list: raw as string[], valid: true };
+}
+
 export function viewPolicy(raw: string | null): PolicyView {
   const base = emptyView();
   if (raw === null || raw.trim().length === 0) return base;
@@ -171,47 +184,17 @@ export function viewPolicy(raw: string | null): PolicyView {
   const enabledValid = enabledRaw === undefined || typeof enabledRaw === "boolean";
   const enabled = typeof enabledRaw === "boolean" ? enabledRaw : true;
 
-  const rulesRaw = obj["governedRules"];
-  let governedRules: string[] | null = null;
-  let governedRulesValid = true;
-  if (rulesRaw !== undefined && rulesRaw !== null) {
-    if (
-      !Array.isArray(rulesRaw) ||
-      rulesRaw.some((r) => typeof r !== "string" || r.trim().length === 0)
-    ) {
-      governedRulesValid = false;
-    } else {
-      governedRules = rulesRaw as string[];
-    }
-  }
+  const rulesView = parseStringList(obj["governedRules"]);
+  const governedRules = rulesView.list;
+  const governedRulesValid = rulesView.valid;
 
-  const governedPathsRaw = obj["governedPaths"];
-  let governedPaths: string[] | null = null;
-  let governedPathsValid = true;
-  if (governedPathsRaw !== undefined && governedPathsRaw !== null) {
-    if (
-      !Array.isArray(governedPathsRaw) ||
-      governedPathsRaw.some((p) => typeof p !== "string" || p.trim().length === 0)
-    ) {
-      governedPathsValid = false;
-    } else {
-      governedPaths = governedPathsRaw as string[];
-    }
-  }
+  const governedPathsView = parseStringList(obj["governedPaths"]);
+  const governedPaths = governedPathsView.list;
+  const governedPathsValid = governedPathsView.valid;
 
-  const ungovernedPathsRaw = obj["ungovernedPaths"];
-  let ungovernedPaths: string[] | null = null;
-  let ungovernedPathsValid = true;
-  if (ungovernedPathsRaw !== undefined && ungovernedPathsRaw !== null) {
-    if (
-      !Array.isArray(ungovernedPathsRaw) ||
-      ungovernedPathsRaw.some((p) => typeof p !== "string" || p.trim().length === 0)
-    ) {
-      ungovernedPathsValid = false;
-    } else {
-      ungovernedPaths = ungovernedPathsRaw as string[];
-    }
-  }
+  const ungovernedPathsView = parseStringList(obj["ungovernedPaths"]);
+  const ungovernedPaths = ungovernedPathsView.list;
+  const ungovernedPathsValid = ungovernedPathsView.valid;
 
   const floorsRaw = obj["minSeverities"];
   let minSeverities: Record<string, SeverityBand> | null = null;

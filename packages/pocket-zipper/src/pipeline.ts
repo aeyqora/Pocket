@@ -130,7 +130,11 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
     // closed rather than lying silent until the flip.
     const pathInventory = git.trackedPaths(trees.baselineCommit);
     const baselinePolicyRaw = git.fileAt(trees.baselineCommit, PROTECTED_CONFIG);
-    const initialPolicy = parsePolicy(baselinePolicyRaw, new Set(), pathInventory, warnings);
+    // The initial parse only answers "enabled?"; the full parse below answers
+    // the evaluation. They share the file but not the warning sink — otherwise
+    // a wildcard no-match would be reported once per parse, twice on the report.
+    const initialWarnings: string[] = [];
+    const initialPolicy = parsePolicy(baselinePolicyRaw, new Set(), pathInventory, initialWarnings);
     if (!initialPolicy.enabled) {
       return {
         record: excludedRecord({
@@ -144,7 +148,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         suggestedExpiry: undefined,
         maxExpiry: initialPolicy.exceptions.maxExpiry,
         unused: [],
-        warnings,
+        warnings: initialWarnings,
       };
     }
 
@@ -218,17 +222,17 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         changeMap,
         baselineContent: (path) => git.fileAt(trees.baselineCommit, path),
         headContent: (path) => readHeadContent(git, trees, options, headDir, path),
-        governedPath: (path) => isGovernedPath(policy, path),
+        isGovernedPath: (path) => isGovernedPath(policy, path),
       });
 
       // The governed path set, computed once: both the reconciliation's path
       // filter and the policy track's reach judgment intersect against it.
-      const governedPathSetValue = governedPathSet(policy, pathInventory);
+      const governedPaths = governedPathSet(policy, pathInventory);
 
       const { head, removed: baseline, governedHead, governedBaseline } = reconcileGoverned({
         policy,
         analysis,
-        governedPaths: governedPathSetValue,
+        governedPaths,
       });
       // Severity weakening has a different baseline set from reconciliation:
       // config declarations govern a rule even when no changed file matches
@@ -264,7 +268,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         baselinePolicy: policy,
         baselineLevels: analysis.baselineLevels,
         headLevels: analysis.headLevels,
-        governedPaths: governedPathSetValue,
+        governedPaths,
       });
       // Floors are baseline policy, but unlike the protected-file half of the
       // policy delta they always inspect both ESLint config trees. This keeps a
@@ -273,7 +277,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         minSeverities: policy.minSeverities,
         baselineLevels: analysis.baselineLevels,
         headLevels: analysis.headLevels,
-        governedPaths: governedPathSetValue,
+        governedPaths,
       });
       const stagedFloors =
         options.mode === "pre-commit" ? viewPolicy(headConfigRaw).minSeverities : null;
@@ -635,7 +639,7 @@ interface AnalyzeInput {
    * tomb judgment reads never mistakes an ungoverned file for a dead twin's or
    * a newborn statement's home.
    */
-  governedPath: (path: string) => boolean;
+  isGovernedPath: (path: string) => boolean;
 }
 
 export interface Analysis {
@@ -669,7 +673,7 @@ export async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
     changeMap,
     baselineContent,
     headContent,
-    governedPath,
+    isGovernedPath,
   } = input;
 
   const baselineSuppressions: LogicalSuppression[] = [];
@@ -740,8 +744,8 @@ export async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
     headLevels,
     lineDiffs,
     renames: changeMap.renames,
-    baselineIndex: buildLineIndex(baselineDir, governedPath),
-    headIndex: buildLineIndex(headDir, governedPath),
+    baselineIndex: buildLineIndex(baselineDir, isGovernedPath),
+    headIndex: buildLineIndex(headDir, isGovernedPath),
   };
 }
 
@@ -793,9 +797,9 @@ function isSkippedPath(path: string): boolean {
   return SKIP_PREFIXES.some((p) => path.startsWith(p));
 }
 
-function buildLineIndex(dir: string, governedPath: (path: string) => boolean): Set<string> {
+function buildLineIndex(dir: string, isGovernedPath: (path: string) => boolean): Set<string> {
   const index = new Set<string>();
-  walk(dir, dir, index, governedPath);
+  walk(dir, dir, index, isGovernedPath);
   return index;
 }
 
@@ -803,7 +807,7 @@ function walk(
   root: string,
   dir: string,
   index: Set<string>,
-  governedPath: (path: string) => boolean,
+  isGovernedPath: (path: string) => boolean,
 ): void {
   let entries: string[];
   try {
@@ -821,14 +825,14 @@ function walk(
       continue;
     }
     if (st.isDirectory()) {
-      walk(root, full, index, governedPath);
+      walk(root, full, index, isGovernedPath);
     } else if (st.isFile() && st.size < 2 * 1024 * 1024) {
       const rel = relative(root, full);
       if (isSkippedPath(rel)) continue;
       // The tomb walk skips ungoverned paths: an ungoverned file is never the
       // home of a dead twin or a newborn statement, so its lines must not sit
       // in the index a tomb judgment reads.
-      if (!governedPath(rel)) continue;
+      if (!isGovernedPath(rel)) continue;
       let content: string;
       try {
         content = readFileSync(full, "utf8");

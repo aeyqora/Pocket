@@ -409,7 +409,7 @@ async function readDebt(
     changeMap: git.worktreeChangeMap(),
     baselineContent: (path) => git.fileAt(baselineCommit, path),
     headContent: (path) => readWorktreeFile(git.root, path),
-    governedPath: (path) => isGovernedPath(policy, path),
+    isGovernedPath: (path) => isGovernedPath(policy, path),
   });
   const { head } = reconcileGoverned({
     policy,

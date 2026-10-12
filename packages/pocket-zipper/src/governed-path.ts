@@ -76,10 +76,15 @@ export function isGovernedSuppression(
 
 /** The parsed, sorted governed-path list, or null when the key is absent. */
 export function sortedGovernedPaths(policy: Policy): string[] | null {
-  return policy.governedPaths === null ? null : [...policy.governedPaths].sort();
+  return sortedPathList(policy.governedPaths);
 }
 
 /** The parsed, sorted subtractor list, or null when the key is absent. */
 export function sortedUngovernedPaths(policy: Policy): string[] | null {
-  return policy.ungovernedPaths === null ? null : [...policy.ungovernedPaths].sort();
+  return sortedPathList(policy.ungovernedPaths);
+}
+
+/** A path list sorted for the record's summary, or null when the list is null. */
+function sortedPathList(list: string[] | null): string[] | null {
+  return list === null ? null : [...list].sort();
 }

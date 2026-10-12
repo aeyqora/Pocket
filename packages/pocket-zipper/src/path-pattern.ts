@@ -75,10 +75,10 @@ export function globToRegExp(pattern: string): string {
 export function foreignSyntax(pattern: string): string | null {
   if (pattern.startsWith("!")) return "negation ('!')";
   if (pattern.includes("{") || pattern.includes("}")) {
-    return "brace alternation ('{a,b}')";
+    return "brace alternation ('{...}')";
   }
   if (pattern.includes("[") || pattern.includes("]")) {
-    return "character class ('[abc]')";
+    return "character class ('[...]')";
   }
   return null;
 }

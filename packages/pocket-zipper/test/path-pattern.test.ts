@@ -75,13 +75,13 @@ describe("path-pattern foreign syntax", () => {
   });
 
   it("flags brace alternation", () => {
-    assert.equal(foreignSyntax("*.{js,ts}"), "brace alternation ('{a,b}')");
-    assert.equal(foreignSyntax("src/{a,b}.js"), "brace alternation ('{a,b}')");
+    assert.equal(foreignSyntax("*.{js,ts}"), "brace alternation ('{...}')");
+    assert.equal(foreignSyntax("src/{a,b}.js"), "brace alternation ('{...}')");
   });
 
   it("flags character classes", () => {
-    assert.equal(foreignSyntax("[abc].js"), "character class ('[abc]')");
-    assert.equal(foreignSyntax("src/[a-z].js"), "character class ('[abc]')");
+    assert.equal(foreignSyntax("[abc].js"), "character class ('[...]')");
+    assert.equal(foreignSyntax("src/[a-z].js"), "character class ('[...]')");
   });
 
   it("accepts the documented subset", () => {
