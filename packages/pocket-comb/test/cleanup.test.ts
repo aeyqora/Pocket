@@ -39,7 +39,6 @@ function cleanup(
     filePath: "/repo/a.js",
     text,
     messages,
-    apply: false,
   });
 }
 
@@ -129,7 +128,6 @@ test("a bare directive is deleted whole when ESLint flags the whole comment", ()
       file: "/repo/a.js",
       line: 2,
       form: "file-level",
-      reason: "bare",
       text: "/* eslint-disable */",
     },
   ]);
@@ -177,9 +175,28 @@ test("a message pointing at no directive is ignored (defensive)", () => {
   assert.deepEqual(result.edits, []);
 });
 
-test("a non-config unused enable is left untouched (config-scoped)", () => {
+test("an orphan unused enable is removed whole, even when its rule is outside the config", () => {
+  // No matching disable: ESLint flags it unused and there is nothing to
+  // reconcile, so config-scoping does not apply (spec §6.5).
   const result = cleanup("/* eslint-enable no-alert */\n", ["no-console"], [enable("'no-alert'")]);
-  assert.equal(result.output, "/* eslint-enable no-alert */\n");
+  assert.equal(result.output, "");
+  assert.deepEqual(
+    result.edits.map((edit) => [edit.line, edit.rule, edit.editType, edit.form]),
+    [[1, "no-alert", "prune", "block"]],
+  );
+});
+
+test("a still-paired enable stays config-scoped: a non-config unmatched rule is left", () => {
+  // The enable closes the no-console block, so it is paired; ESLint flags only
+  // its unmatched no-alert rule, which the config does not own, so it stays.
+  const text = [
+    "/* eslint-disable no-console */",
+    "code();",
+    "/* eslint-enable no-console, no-alert */",
+    "",
+  ].join("\n");
+  const result = cleanup(text, ["no-console"], [enable("'no-alert'", 3)]);
+  assert.equal(result.output, text);
   assert.deepEqual(result.edits, []);
 });
 

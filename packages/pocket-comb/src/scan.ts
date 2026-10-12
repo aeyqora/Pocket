@@ -89,19 +89,21 @@ export interface ScannedDirective {
 
 // Whole-line comment directives: the line is (indent +) a comment and nothing
 // else. `eslint-disable(?!-)` excludes the `-next-line`/`-line` suffixes.
-const WHOLE_NEXT_LINE_RE =
+// `WHOLE_NEXT_LINE_RE` is also the suppress lazy scan's guard matcher, so it is
+// exported: one grammar definition for both scans (engine.ts imports it).
+export const WHOLE_NEXT_LINE_RE =
   /^(\s*)(\/\/|\/\*)\s*eslint-disable-(next-line|line)\b\s*(.*?)\s*(?:\*\/)?\s*$/;
 const WHOLE_DISABLE_RE = /^(\s*)(\/\/|\/\*)\s*eslint-disable(?!-)\b\s*(.*?)\s*(?:\*\/)?\s*$/;
 const WHOLE_ENABLE_RE = /^(\s*)(\/\/|\/\*)\s*eslint-enable\b\s*(.*?)\s*(?:\*\/)?\s*$/;
 
 // Suffix directives: a comment riding at the end of a code line.
-const SUFFIX_LINE_RE = /^(\s*.*\S)\s+\/\/\s*eslint-disable-line\b\s*(.*)$/;
+export const SUFFIX_LINE_RE = /^(\s*.*\S)\s+\/\/\s*eslint-disable-line\b\s*(.*)$/;
 const SUFFIX_DISABLE_RE =
   /^(\s*.*\S)\s+(\/\/|\/\*)\s*eslint-disable(?!-)\b\s*(.*?)\s*(?:\*\/)?\s*$/;
 const SUFFIX_ENABLE_RE = /^(\s*.*\S)\s+(\/\/|\/\*)\s*eslint-enable\b\s*(.*?)\s*(?:\*\/)?\s*$/;
 
 /** Strip one trailing CR (CRLF files keep the CR on the stored line). */
-function stripCr(line: string): { probe: string; cr: boolean } {
+export function stripCr(line: string): { probe: string; cr: boolean } {
   return line.endsWith("\r") ? { probe: line.slice(0, -1), cr: true } : { probe: line, cr: false };
 }
 

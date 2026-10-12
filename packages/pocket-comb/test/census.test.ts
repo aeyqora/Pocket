@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { censusEntries, censusFileScan, censusFiles } from "../src/census.js";
+import { censusFileScan, censusFiles } from "../src/census.js";
 
 /**
  * The census unit seam (spec §6.6): pure counting over a file's lines. It counts
@@ -8,8 +8,8 @@ import { censusEntries, censusFileScan, censusFiles } from "../src/census.js";
  * suppression — across all four forms, per rule, with bare directives counted
  * once per form (`rule: null`).
  */
-test("censusEntries counts every disable directive across all four forms; bare per form; enables excluded", () => {
-  const entries = censusEntries([
+test("censusFileScan.entries counts every disable directive across all four forms; bare per form; enables excluded", () => {
+  const entries = censusFileScan([
     "/* eslint-disable no-console, no-unused-vars */",
     "const a = 1;",
     "code(); // eslint-disable-line no-console",
@@ -19,7 +19,7 @@ test("censusEntries counts every disable directive across all four forms; bare p
     "/* eslint-disable no-alert */",
     "// eslint-disable",
     "",
-  ]);
+  ]).entries;
 
   assert.deepEqual(entries, [
     { form: "block", rule: "no-console" },

@@ -10,7 +10,7 @@ import {
   select as clackSelect,
   text as clackText,
 } from "@clack/prompts";
-import { autoDetectConfig } from "./config.js";
+import { autoDetectConfig, configOptionsFor, resolveTarget } from "./config.js";
 import { defaultReportPath } from "./report/index.js";
 import { ACTIONS, REPORT_FORMATS } from "./types.js";
 import type { ParsedInvocation } from "./args.js";
@@ -188,10 +188,6 @@ function nonEmpty(value: string): string | undefined {
   return value.trim() === "" ? "a value is required" : undefined;
 }
 
-function resolveTargetRoot(cwd: string, target: string): string {
-  return isAbsolute(target) ? target : resolve(cwd, target);
-}
-
 /**
  * The interactive session (spec §5): fill only the gaps flags and settings leave,
  * run the chosen action, then offer apply/restart/abort after a dry run. Entered
@@ -251,7 +247,7 @@ export async function runWizard(deps: WizardDeps): Promise<number> {
     // Load once for the settings that decide the remaining gaps. Flags were
     // already merged in by the caller's `parsed`; `loadConfig` applies
     // flag > settings precedence.
-    const loaded = await deps.loadConfig(configOptions(base, configFlag, cwd));
+    const loaded = await deps.loadConfig(configOptionsFor(base, cwd, configFlag));
 
     // 3. target: prompted only when neither `--target` nor `settings.target`
     //    answers it. `directory: true`, pre-filled from the resolved target/cwd.
@@ -345,7 +341,7 @@ export async function runWizard(deps: WizardDeps): Promise<number> {
       ...loaded,
       targetRoot:
         targetFlag !== null && targetFlag !== base.target
-          ? resolveTargetRoot(cwd, targetFlag)
+          ? resolveTarget(targetFlag, loaded.settings, loaded.configPath, cwd)
           : loaded.targetRoot,
       ...(wizardPair !== undefined ? { replace: wizardPair } : {}),
     };
@@ -371,24 +367,6 @@ export async function runWizard(deps: WizardDeps): Promise<number> {
     if (next === "abort") return finish(code);
     // restart: loop back to the top with the original invocation.
   }
-}
-
-function configOptions(
-  parsed: ParsedInvocation,
-  configFlag: string,
-  cwd: string,
-): LoadConfigOptions {
-  return {
-    configFlag,
-    ...(parsed.target !== null ? { targetFlag: parsed.target } : {}),
-    ...(parsed.from !== null && parsed.to !== null
-      ? { replaceFlag: { from: parsed.from, to: parsed.to } }
-      : {}),
-    ...(parsed.format !== null && parsed.out !== null
-      ? { reportFlag: { format: parsed.format, out: parsed.out } }
-      : {}),
-    cwd,
-  };
 }
 
 async function validateConfig(

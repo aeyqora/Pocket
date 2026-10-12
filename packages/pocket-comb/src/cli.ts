@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs, usage } from "./args.js";
 import { runAction } from "./actions/index.js";
-import { loadConfig } from "./config.js";
+import { configOptionsFor, loadConfig } from "./config.js";
 import { isOperationalError } from "./errors.js";
 import { ACTIONS } from "./types.js";
 import { VERSION } from "./version.js";
@@ -124,17 +124,7 @@ export async function main(
 
     if (io.tty) return await runTtyWizard();
 
-    const config = await loadConfig({
-      ...(parsed.config !== null ? { configFlag: parsed.config } : {}),
-      ...(parsed.target !== null ? { targetFlag: parsed.target } : {}),
-      ...(parsed.from !== null && parsed.to !== null
-        ? { replaceFlag: { from: parsed.from, to: parsed.to } }
-        : {}),
-      ...(parsed.format !== null && parsed.out !== null
-        ? { reportFlag: { format: parsed.format, out: parsed.out } }
-        : {}),
-      cwd: io.cwd,
-    });
+    const config = await loadConfig(configOptionsFor(parsed, io.cwd));
 
     const missing = missingRequiredFlags(parsed, config, io.tty);
     if (missing.length > 0) {

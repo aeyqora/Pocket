@@ -10,7 +10,6 @@ function replace(text: string, from: string, to: string): ReturnType<typeof runA
     filePath: "/repo/a.js",
     text,
     messages: [],
-    apply: false,
   });
 }
 

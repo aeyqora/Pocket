@@ -62,7 +62,7 @@ non-interactive run uses flags only and never prompts a pipe.
 | `remove` | Strip the config's rules from every directive in the target. |
 | `replace` | Rename rule tokens across every directive. `--from <rule>` / `--to <rule>`; a `--from` ending in `/` re-points every rule under that prefix. |
 | `cleanup` | Prune unused directives (config-scoped). |
-| `inventory` | The read-only census: count every directive, by form, rule, and file. No linting. |
+| `inventory` | The read-only census: count every **disable** directive, by form, rule, and file. No linting. |
 
 ### Exit codes
 
@@ -185,6 +185,10 @@ instead. The piping shape for a trend store:
 npx pocket-comb inventory --format csv --out - >> suppressions.csv
 ```
 
+The census counts **disable** directives only — the four suppression forms
+(`next-line`, `line`, `block`, `file-level`). An `eslint-enable` is a block closer, not a
+suppression, so it is excluded from the census totals and per-file counts.
+
 ## Requirements
 
 - **Node.js** 20.12 or newer.
@@ -199,6 +203,10 @@ npm run build        # tsc -> dist
 npm run typecheck    # tsc --noEmit
 npm test             # fast correctness suite (build + node:test)
 ```
+
+`npm test` runs `test/*.test.ts` (one level) **deliberately**: `test/perf/**` is the
+perf-harness suite, kept out of the fast correctness loop and run by
+`npm run test:perf:harness`.
 
 ### Pack smoke test
 
@@ -223,4 +231,4 @@ npm run test:perf -- --update-baseline   # deliberately re-pin this platform
 Run it before merging feature work, on an otherwise idle machine. It is deliberately
 excluded from `npm test` (timing flake does not belong in the correctness loop). See
 [`perf/README.md`](perf/README.md) for the corpus, the methodology, the platform-keyed
-baseline, and the gate floor.
+baseline, and the per-stage gate.

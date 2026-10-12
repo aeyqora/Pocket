@@ -4,6 +4,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ConfigError } from "./errors.js";
 import { REPORT_FORMATS, type ReportFormat } from "./types.js";
+import type { ParsedInvocation } from "./args.js";
 
 /** The `replace` action's rename pair. */
 export interface ReplacePair {
@@ -24,8 +25,7 @@ export interface PocketCombSettings {
   report?: ReportSetting;
 }
 
-/**
- * The action config, resolved. Paths are absolute; `configHash` is the sha256 of
+/** The action config, resolved. Paths are absolute; `configHash` is the sha256 of
  * the config file's raw bytes (carried into every report's run metadata).
  */
 export interface LoadedConfig {
@@ -41,8 +41,6 @@ export interface LoadedConfig {
   rules: string[];
   /** The merged `settings["pocket-comb"]` block, exactly as configured. */
   settings: PocketCombSettings;
-  /** The config module's default export, for later stages that need it. */
-  rawConfig: unknown;
 }
 
 export interface LoadConfigOptions {
@@ -53,6 +51,29 @@ export interface LoadConfigOptions {
   /** The `--format`/`--out` pair, when the caller carries both. */
   reportFlag?: ReportSetting;
   cwd: string;
+}
+
+/**
+ * Build the `loadConfig` options from a parsed invocation, the cwd, and an
+ * optional resolved config flag. `cli.ts` and the wizard share this so the
+ * flag-to-options mapping (and its precedence) lives in exactly one place.
+ */
+export function configOptionsFor(
+  parsed: ParsedInvocation,
+  cwd: string,
+  configFlag: string | null = parsed.config,
+): LoadConfigOptions {
+  return {
+    ...(configFlag !== null ? { configFlag } : {}),
+    ...(parsed.target !== null ? { targetFlag: parsed.target } : {}),
+    ...(parsed.from !== null && parsed.to !== null
+      ? { replaceFlag: { from: parsed.from, to: parsed.to } }
+      : {}),
+    ...(parsed.format !== null && parsed.out !== null
+      ? { reportFlag: { format: parsed.format, out: parsed.out } }
+      : {}),
+    cwd,
+  };
 }
 
 const AUTO_DETECT_NAMES = [
@@ -105,7 +126,6 @@ export async function loadConfig(options: LoadConfigOptions): Promise<LoadedConf
     report: options.reportFlag ?? settings.report,
     rules,
     settings,
-    rawConfig,
   };
 }
 
@@ -247,7 +267,7 @@ function validateSettings(merged: Record<string, unknown>): PocketCombSettings {
   return settings;
 }
 
-function resolveTarget(
+export function resolveTarget(
   targetFlag: string | undefined,
   settings: PocketCombSettings,
   configPath: string,

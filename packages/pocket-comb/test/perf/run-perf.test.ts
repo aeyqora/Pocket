@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import {
   CORPUS_CONFIG_PATH,
+  STRESS_FILES_ENV,
   compareScale,
   evaluate,
   loadBaseline,
@@ -10,18 +11,20 @@ import {
   platformId,
   platformKey,
   runPerfCli,
+  scaleCounts,
   updateBaseline,
   type BaselineFile,
   type PerfMeasurement,
   type PlatformKey,
   type ScaleMeasurement,
 } from "../../perf/run-perf.js";
+import { DEFAULT_FILE_COUNT, STRESS_FILE_COUNT } from "../../perf/generate.js";
 import { cleanupTemps, tempDir } from "../harness.js";
 
 after(cleanupTemps);
 
-function stage(stage_: string, medianMs: number) {
-  return { stage: stage_, runsMs: [medianMs], medianMs, minMs: medianMs, maxMs: medianMs };
+function stage(stage_: string, medianMs: number, minMs = medianMs) {
+  return { stage: stage_, runsMs: [medianMs], medianMs, minMs, maxMs: medianMs };
 }
 
 function scale(scale_: string, files: number, medians: Record<string, number>): ScaleMeasurement {
@@ -46,7 +49,7 @@ function baselineFor(source: PerfMeasurement): BaselineFile {
   };
   for (const s of source.scales) {
     const stages: Record<string, number> = {};
-    for (const st of s.stages) stages[st.stage] = st.medianMs;
+    for (const st of s.stages) stages[st.stage] = st.minMs;
     entry.scales[s.scale] = { files: s.files, warmup: s.warmup, runs: s.runs, stages };
   }
   return { schema: 1, baselines: { [platformId(source.platform)]: entry } };
@@ -106,15 +109,40 @@ test("a missing platform baseline is reported, not treated as a regression", () 
   assert.equal(verdict.failures.length, 0);
 });
 
-test("a sub-10ms baseline is reported but not gated", () => {
+test("a sub-10ms stage is still gated: it fails when it regresses past 1.15", () => {
   const baseline = baselineFor(measurement([scale("default", 10, { discover: 5, lint: 1000 })]));
   const measured = measurement([scale("default", 10, { discover: 50, lint: 1000 })]);
   const entry = baseline.baselines[platformId(measured.platform)]!;
   const rows = compareScale(measured.scales[0]!, entry.scales.default, 1.15);
-  assert.equal(rows[0]!.gated, false, "a 5 ms baseline is below the gate floor");
-  assert.equal(rows[0]!.ok, true);
-  assert.equal(rows[1]!.gated, true, "a 1000 ms baseline is gated");
-  assert.equal(evaluate(measured, baseline, 1.15).ok, true, "tiny stages never fail the suite");
+  assert.equal(rows[0]!.ok, false, "a 5 ms baseline is gated like any other stage");
+  assert.ok(rows[0]!.ratio > 1.15);
+  assert.equal(rows[1]!.ok, true, "an unchanged 1000 ms stage passes");
+  assert.equal(evaluate(measured, baseline, 1.15).ok, false, "no stage is exempt");
+});
+
+test("the gate compares the minimum across runs: a background-load median spike does not fail", () => {
+  // Baseline min 1.5 ms; a later process whose median is dragged up by background
+  // load but whose minimum is unchanged is not a regression.
+  const baseline = baselineFor(measurement([{ scale: "default", files: 10, warmup: 1, runs: 5, stages: [stage("scan", 1.5)] }]));
+  const spiky = measurement([
+    {
+      scale: "default",
+      files: 10,
+      warmup: 1,
+      runs: 5,
+      stages: [{ stage: "scan", runsMs: [1.5, 1.6, 3.9, 4.2, 1.5], medianMs: 3.9, minMs: 1.5, maxMs: 4.2 }],
+    },
+  ]);
+  const rows = compareScale(spiky.scales[0]!, baseline.baselines[platformId(spiky.platform)]!.scales.default, 1.15);
+  assert.equal(rows[0]!.medianMs, 3.9, "the median is still reported");
+  assert.equal(rows[0]!.gatedMs, 1.5, "the gate reads the minimum");
+  assert.equal(rows[0]!.ok, true, "a load spike that leaves the minimum alone is not a regression");
+
+  // A genuine regression raises the minimum too, and trips the gate.
+  const regressed = measurement([
+    { scale: "default", files: 10, warmup: 1, runs: 5, stages: [stage("scan", 3, 2)] },
+  ]);
+  assert.equal(evaluate(regressed, baseline, 1.15).ok, false, "a raised minimum fails");
 });
 
 test("baseline round-trips through updateBaseline / loadBaseline, keyed by platform", () => {
@@ -237,4 +265,38 @@ test("platformKey reports os, CPU model, and Node version", () => {
   assert.ok(key.cpuModel.length > 0);
   assert.match(key.node, /^v\d+\./);
   assert.equal(platformId(key), `${key.os}|${key.cpuModel}|${key.node}`);
+});
+
+test("the harness measures the report stage and every action's strategy without re-linting", async () => {
+  const dir = tempDir("pc-perf-actions-");
+  const measured = await measureScale({
+    scale: "tiny",
+    files: 60,
+    seed: 7,
+    corpusDir: join(dir, "corpus"),
+    configPath: CORPUS_CONFIG_PATH,
+    warmup: 1,
+    runs: 2,
+  });
+  const names = measured.stages.map((stage) => stage.stage);
+  assert.ok(names.includes("report"), "the report stage is measured (spec §11)");
+  for (const action of ["suppress", "remove", "replace", "cleanup", "inventory"]) {
+    assert.ok(names.includes(`action:${action}`), `action:${action} is measured`);
+  }
+  const remove = measured.stages.find((stage) => stage.stage === "action:remove")!;
+  assert.ok(remove.perFileUs !== undefined, "the scan-based actions report µs/file");
+});
+
+test("the stress scale's size is env-configurable (spec §11)", () => {
+  const previous = process.env[STRESS_FILES_ENV];
+  try {
+    process.env[STRESS_FILES_ENV] = "1234";
+    assert.equal(scaleCounts().stress, 1234);
+    assert.equal(scaleCounts().default, DEFAULT_FILE_COUNT, "the default scale is untouched");
+    delete process.env[STRESS_FILES_ENV];
+    assert.equal(scaleCounts().stress, STRESS_FILE_COUNT);
+  } finally {
+    if (previous === undefined) delete process.env[STRESS_FILES_ENV];
+    else process.env[STRESS_FILES_ENV] = previous;
+  }
 });

@@ -79,18 +79,26 @@ export interface BatchOutcome {
 
 /**
  * A directive an action recognised but deliberately left untouched (spec §6.3,
- * §6.5). Carried from the engine through the pool so the command can report it.
+ * §6.5, §6.1). Carried from the engine through the pool so the command can
+ * report it. A bare guard names no rules, so remove/cleanup cannot scope it and
+ * suppress will not rewrite it (rewriting bare→explicit would break other
+ * suppressions).
  */
 export interface NotActionableDirective {
   file: string;
   /** 1-based line the directive sits on. */
   line: number;
   form: DirectiveForm;
-  /** Why it was skipped. */
-  reason: "bare";
   /** The directive line's text, without a trailing CR. */
   text: string;
 }
+
+/**
+ * The ledger's rule token for a bare-directive deletion (cleanup, spec §6.5):
+ * a bare comment names no rule, so there is no honest rule name to record. The
+ * marker keeps the `(edit, rule)` grain exact without inventing a rule name.
+ */
+export const BARE_RULE = "*";
 
 /** Re-exported ESLint message shape, so `types.ts` stays the shared vocabulary. */
 export type LintMessage = import("eslint").Linter.LintMessage;

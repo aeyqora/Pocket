@@ -50,7 +50,7 @@
     "test": "npm run build && node --import tsx --test \"test/*.test.ts\"",
     "test:one": "node --import tsx --test",
     "test:pack": "npm run build && node --import tsx test/pack-smoke.ts",
-    "test:perf": "node --import tsx perf/run-perf.ts",
+    "test:perf": "node --expose-gc --import tsx perf/run-perf.ts",
     "test:perf:harness": "node --import tsx --test \"test/perf/**/*.test.ts\"",
     "perf:generate": "node --import tsx perf/generate.ts",
     "prepublishOnly": "npm run build"
