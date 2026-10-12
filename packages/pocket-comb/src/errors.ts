@@ -18,6 +18,14 @@ export class UsageError extends OperationalError {}
 /** The action config could not be found, read, parsed, or loaded. */
 export class ConfigError extends OperationalError {}
 
+/**
+ * A verb whose command is not wired yet. The CLI surface accepts all six actions
+ * (spec §4) from ticket 01; the commands land action-by-action, so an
+ * unimplemented verb is a precise operational error (exit 2), never a crash and
+ * never a silent no-op.
+ */
+export class NotImplementedError extends OperationalError {}
+
 export function isOperationalError(value: unknown): value is OperationalError {
   return value instanceof OperationalError;
 }

@@ -1,4 +1,4 @@
-import type { EditRecord } from "./types.js";
+import { EDIT_TYPES, type EditRecord, type EditType } from "./types.js";
 
 /** What the spinner renders: the stage name plus a done/total count. */
 export interface Progress {
@@ -110,4 +110,99 @@ export function writeCompletion(
   summary: CompletionSummary,
 ): void {
   output.write(`${formatCompletion(summary)}\n`);
+}
+
+/** One `by type` entry: an edit kind and how many ledger records it produced. */
+export interface ImpactTypeCount {
+  editType: EditType;
+  count: number;
+}
+
+/** One `by rule` entry: a rule and how many ledger records name it. */
+export interface ImpactRuleCount {
+  rule: string;
+  count: number;
+}
+
+/**
+ * The dry-run/apply impact answer (spec §13): files would-change, edits by type
+ * and rule. Grain matches the ledger — one count per `(edit, rule)` record — so
+ * the numbers agree with the completion line and the report's rollups.
+ */
+export interface ImpactSummary {
+  filesTouched: number;
+  edits: number;
+  inserted: number;
+  prepended: number;
+  byType: ImpactTypeCount[];
+  byRule: ImpactRuleCount[];
+}
+
+/** Roll per-file outcomes into the impact summary, stable ordering throughout. */
+export function summarizeImpact(
+  outcomes: ReadonlyArray<{ changed: boolean; edits: readonly EditRecord[] }>,
+): ImpactSummary {
+  let filesTouched = 0;
+  let edits = 0;
+  let inserted = 0;
+  let prepended = 0;
+  const typeCounts = new Map<EditType, number>();
+  const ruleCounts = new Map<string, number>();
+
+  for (const outcome of outcomes) {
+    if (outcome.changed) filesTouched += 1;
+    for (const edit of outcome.edits) {
+      edits += 1;
+      if (edit.editType === "insert") inserted += 1;
+      else if (edit.editType === "prepend") prepended += 1;
+      typeCounts.set(edit.editType, (typeCounts.get(edit.editType) ?? 0) + 1);
+      ruleCounts.set(edit.rule, (ruleCounts.get(edit.rule) ?? 0) + 1);
+    }
+  }
+
+  return {
+    filesTouched,
+    edits,
+    inserted,
+    prepended,
+    byType: EDIT_TYPES.filter((type) => typeCounts.has(type)).map((type) => ({
+      editType: type,
+      count: typeCounts.get(type)!,
+    })),
+    byRule: [...ruleCounts.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([rule, count]) => ({ rule, count })),
+  };
+}
+
+/**
+ * The impact summary, printed before any report (spec §13). Three lines: the
+ * headline counts, then edits by type and by rule. A dry run says `would
+ * change`; an apply run says `changed`.
+ */
+export function formatImpactSummary(summary: ImpactSummary, dryRun: boolean): string {
+  const verb = dryRun ? "would change" : "changed";
+  const byType =
+    summary.byType.length === 0
+      ? "none"
+      : summary.byType.map((entry) => `${entry.editType} ${entry.count}`).join(", ");
+  const byRule =
+    summary.byRule.length === 0
+      ? "none"
+      : summary.byRule.map((entry) => `${entry.rule} ${entry.count}`).join(", ");
+  return (
+    `Impact: ${summary.filesTouched} files ${verb}, ${summary.edits} edits ` +
+    `(${summary.inserted} inserted, ${summary.prepended} prepended)\n` +
+    `  by type: ${byType}\n` +
+    `  by rule: ${byRule}`
+  );
+}
+
+/** Print the impact summary, newline-terminated. */
+export function writeImpactSummary(
+  output: NodeJS.WritableStream,
+  summary: ImpactSummary,
+  dryRun: boolean,
+): void {
+  output.write(`${formatImpactSummary(summary, dryRun)}\n`);
 }

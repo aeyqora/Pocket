@@ -25,6 +25,7 @@ test("the built bin exits 2 on an unknown verb", () => {
 test("the built bin runs an action against an auto-detected config", () => {
   const dir = tempDir();
   write(dir, "pocket-comb.config.mjs", `export default [{ rules: {} }];\n`);
-  const result = runBin(["inventory"], { cwd: dir });
+  const result = runBin(["suppress"], { cwd: dir });
   assert.equal(result.status, 0);
+  assert.match(result.stdout, /^Impact: 0 files would change, 0 edits/);
 });
