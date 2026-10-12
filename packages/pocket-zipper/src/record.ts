@@ -20,7 +20,7 @@ import { DEFAULT_POLICY } from "./policy.js";
 import { sortedGovernedPaths, sortedUngovernedPaths } from "./governed-path.js";
 
 export const TOOL_NAME = "pocket-zipper";
-export const TOOL_VERSION = "0.4.0";
+export const TOOL_VERSION = "0.5.0";
 export const SCHEMA_VERSION = 4 as const;
 
 export interface Summary {

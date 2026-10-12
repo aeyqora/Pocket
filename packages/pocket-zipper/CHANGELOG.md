@@ -10,6 +10,62 @@ for anything parsing that JSON, and is called out under its own heading.
 
 This changelog starts at 0.2.0. Releases before that predate it.
 
+## [0.5.0] — 2026-10-12
+
+### Breaking: record schema 3 → 4
+
+`check --json` now writes `schemaVersion: 4`, which adds the governed-path lists to the
+summary:
+
+```jsonc
+{
+  "schemaVersion": 4,
+  "summary": {
+    "governedPaths": ["packages/", "src/"],      // new: the parsed, sorted path allowlist
+    "ungovernedPaths": ["packages/legacy/"]      // new: the parsed, sorted path subtractor
+  }
+}
+```
+
+**Why.** The governed-path pair publishes the effective path scope the same way
+`governedRules` publishes the rule scope, so a consumer reading the record can tell which
+paths a run governed. Both fields are `null` when the key is absent, and sorted when
+present, mirroring the `allowlist` summary field.
+
+**Migrating.** Reading `schemaVersion: 3` output, nothing breaks. Reading v4:
+
+- `summary.governedPaths` / `summary.ungovernedPaths` are **additive**: `null` when the key
+  is absent, the sorted list otherwise. Existing fields keep their names, meanings, and
+  types, so a v4 consumer is a superset of a v3 one.
+- If you branch on `schemaVersion`, accept `4` alongside `3`, `2`, and `1`. Older readers
+  reject a newer record rather than misreading it, since the version is explicit.
+
+### Added
+
+- **Governed-path scope** — two flat policy keys, `governedPaths` (an allowlist) and
+  `ungovernedPaths` (a subtractor), declare which repository paths the gate runs on. Absent,
+  every tracked path is governed (today's behavior, unchanged); present, the governed set is
+  `(governedPaths ?? every tracked path) − ungovernedPaths`, exclusion winning. The dialect
+  is the CODEOWNERS subset — `*` within a segment, `**` across it, any `/` root-anchoring, a
+  slashless entry matching that basename at any depth, a trailing `/` claiming a directory —
+  with no negation, braces, or character classes; out-of-dialect syntax is `CONFIG_ERROR`.
+- **Inventory-level scope.** A suppression in an ungoverned path is not a logical suppression
+  on either side of the comparison, so one moved ungoverned→governed in a single change reads
+  **new debt**, a removal in an ungoverned path produces no `removed` disposition, and the
+  whole-tree tomb walk skips ungoverned paths.
+- **Policy-track reach scoping.** A config-off, severity weakening, or severity-floor event
+  is visible when its ESLint config block's declared reach (`files`/`ignores`) intersects the
+  governed paths — never decided by the config file's own path, which would ungovern every
+  config-off the moment an allowlist named a package directory.
+- **Scope-orphaned records go spent.** `validate` reports a record whose file left the
+  governed set as spent, with a delete-ready pointer saying why ("outside the governed set"),
+  never a gate failure. The authoring wizard refuses to offer a record for an ungoverned
+  file. Re-governing a path does not revive its records — its suppressions are existing debt
+  through the one-merge lag.
+- **Fail-closed path validation.** A wildcard-free entry matching no existing path is a
+  `CONFIG_ERROR` (with a trailing-slash suggestion when the entry names a directory); a
+  wildcard matching nothing warns; both keys are validated even while the gate is disabled.
+
 ## [0.4.0] — 2026-10-01
 
 ### Breaking: record schema 2 → 3
@@ -195,6 +251,7 @@ No CLI flag, exit code, or gate verdict changed. `check`, `validate`, and
   severity drop to `warn` never hides debt.
 - Strengthenings record nothing.
 
+[0.5.0]: https://github.com/aeyqora/Pocket/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/aeyqora/Pocket/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/aeyqora/Pocket/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/aeyqora/Pocket/compare/v0.1.0...v0.2.0
