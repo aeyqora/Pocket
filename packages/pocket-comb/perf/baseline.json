@@ -13,18 +13,18 @@
           "warmup": 10,
           "runs": 15,
           "stages": {
-            "action:cleanup": 3.127,
-            "action:inventory": 1.951,
-            "action:remove": 2.92,
-            "action:replace": 2.828,
-            "action:suppress": 3.544,
-            "apply": 1.686,
-            "discover": 5.426,
-            "lint": 646.323,
-            "plan": 0.357,
-            "report": 10.353,
-            "scan": 2.128,
-            "scan-full": 1.986
+            "action:cleanup": 2.979,
+            "action:inventory": 1.964,
+            "action:remove": 2.815,
+            "action:replace": 2.769,
+            "action:suppress": 3.696,
+            "apply": 1.664,
+            "discover": 5.174,
+            "lint": 553.856,
+            "plan": 0.363,
+            "report": 11.188,
+            "scan": 2.179,
+            "scan-full": 1.968
           }
         },
         "stress": {
@@ -32,18 +32,18 @@
           "warmup": 10,
           "runs": 15,
           "stages": {
-            "action:cleanup": 32.372,
-            "action:inventory": 19.432,
-            "action:remove": 29.811,
-            "action:replace": 27.001,
-            "action:suppress": 37.415,
-            "apply": 18.965,
-            "discover": 53.731,
-            "lint": 2478.15,
-            "plan": 6.743,
-            "report": 118.361,
-            "scan": 28.731,
-            "scan-full": 19.097
+            "action:cleanup": 31.234,
+            "action:inventory": 18.96,
+            "action:remove": 28.639,
+            "action:replace": 25.618,
+            "action:suppress": 36.415,
+            "apply": 18.312,
+            "discover": 52.632,
+            "lint": 1933.886,
+            "plan": 6.369,
+            "report": 113.103,
+            "scan": 27.87,
+            "scan-full": 18.834
           }
         }
       }
