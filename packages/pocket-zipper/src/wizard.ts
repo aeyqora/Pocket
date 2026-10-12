@@ -8,6 +8,7 @@ import { EslintSession } from "./eslint.js";
 import { configPluginRuleNames } from "./recognize.js";
 import { analyzeTrees, reconcileGoverned } from "./pipeline.js";
 import { flaggedDebt, isNewDebt } from "./exception-match.js";
+import { isGovernedPath } from "./governed-path.js";
 import {
   daysBetween,
   describeDuration,
@@ -408,6 +409,7 @@ async function readDebt(
     changeMap: git.worktreeChangeMap(),
     baselineContent: (path) => git.fileAt(baselineCommit, path),
     headContent: (path) => readWorktreeFile(git.root, path),
+    governedPath: (path) => isGovernedPath(policy, path),
   });
   const { head } = reconcileGoverned({ policy, analysis });
   const coverage = coverExceptions({ head, records, now });

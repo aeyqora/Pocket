@@ -51,7 +51,7 @@ import {
   type LineDiff,
 } from "./continuity.js";
 import { reconcile } from "./reconcile.js";
-import { isGovernedSuppression } from "./governed-path.js";
+import { isGovernedPath, isGovernedSuppression } from "./governed-path.js";
 import { PocketZipperError, gitError } from "./errors.js";
 import type {
   DurationLiteral,
@@ -218,6 +218,7 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
         changeMap,
         baselineContent: (path) => git.fileAt(trees.baselineCommit, path),
         headContent: (path) => readHeadContent(git, trees, options, headDir, path),
+        governedPath: (path) => isGovernedPath(policy, path),
       });
 
       const { head, removed: baseline, governedHead, governedBaseline } = reconcileGoverned({
@@ -615,6 +616,13 @@ interface AnalyzeInput {
    * does not carry the path.
    */
   headContent: (path: string) => string | null;
+  /**
+   * Whether a repository-relative path is governed, on the path axis. Drives
+   * the whole-tree tomb walk's skip of ungoverned paths, so the content index a
+   * tomb judgment reads never mistakes an ungoverned file for a dead twin's or
+   * a newborn statement's home.
+   */
+  governedPath: (path: string) => boolean;
 }
 
 export interface Analysis {
@@ -648,6 +656,7 @@ export async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
     changeMap,
     baselineContent,
     headContent,
+    governedPath,
   } = input;
 
   const baselineSuppressions: LogicalSuppression[] = [];
@@ -718,8 +727,8 @@ export async function analyzeTrees(input: AnalyzeInput): Promise<Analysis> {
     headLevels,
     lineDiffs,
     renames: changeMap.renames,
-    baselineIndex: buildLineIndex(baselineDir),
-    headIndex: buildLineIndex(headDir),
+    baselineIndex: buildLineIndex(baselineDir, governedPath),
+    headIndex: buildLineIndex(headDir, governedPath),
   };
 }
 
@@ -771,13 +780,18 @@ function isSkippedPath(path: string): boolean {
   return SKIP_PREFIXES.some((p) => path.startsWith(p));
 }
 
-function buildLineIndex(dir: string): Set<string> {
+function buildLineIndex(dir: string, governedPath: (path: string) => boolean): Set<string> {
   const index = new Set<string>();
-  walk(dir, dir, index);
+  walk(dir, dir, index, governedPath);
   return index;
 }
 
-function walk(root: string, dir: string, index: Set<string>): void {
+function walk(
+  root: string,
+  dir: string,
+  index: Set<string>,
+  governedPath: (path: string) => boolean,
+): void {
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -794,10 +808,14 @@ function walk(root: string, dir: string, index: Set<string>): void {
       continue;
     }
     if (st.isDirectory()) {
-      walk(root, full, index);
+      walk(root, full, index, governedPath);
     } else if (st.isFile() && st.size < 2 * 1024 * 1024) {
       const rel = relative(root, full);
       if (isSkippedPath(rel)) continue;
+      // The tomb walk skips ungoverned paths: an ungoverned file is never the
+      // home of a dead twin or a newborn statement, so its lines must not sit
+      // in the index a tomb judgment reads.
+      if (!governedPath(rel)) continue;
       let content: string;
       try {
         content = readFileSync(full, "utf8");
