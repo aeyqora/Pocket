@@ -34,9 +34,9 @@ export async function runSuppress(context: ActionContext): Promise<number> {
     throw new OperationalError(`no files matched under ${config.targetRoot}`);
   }
 
-  // The suppress strategy's params (spec §6.1). `reuseBlocks`/`fixFirst` are
-  // declared seams owned by ticket 08; passing them through keeps the wire shape
-  // stable, and the engine ignores what it does not yet implement.
+  // The suppress strategy's params (spec §6.1). `reuseBlocks` is read by the
+  // engine; `fixFirst` is a pool-level phase (fix → re-lint → suppress) and is
+  // passed to `runPool` below, but the wire shape keeps the declared field.
   const params: SuppressParams = {};
   if (parsed.reason !== null) params.reason = parsed.reason;
   if (parsed.reuseBlocks) params.reuseBlocks = true;
@@ -50,6 +50,7 @@ export async function runSuppress(context: ActionContext): Promise<number> {
     action: "suppress",
     params: params as unknown as JsonValue,
     mode,
+    ...(parsed.fixFirst ? { fixFirst: true } : {}),
     ...(parsed.workers !== null ? { workers: parsed.workers } : {}),
     ...(parsed.batchSize !== null ? { batchSize: parsed.batchSize } : {}),
     serial: parsed.serial,

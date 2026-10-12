@@ -37,10 +37,13 @@ export {
   scanSuppressFile,
   planSuppressEdits,
   applySuppressEdits,
+  findEnclosingBlockGuard,
   splitRuleList,
   ledgerRecordsForEdit,
   LINE_SUFFIX_DIRECTIVE_RE,
   NEXT_LINE_DIRECTIVE_RE,
+  BLOCK_DIRECTIVE_RE,
+  ENABLE_DIRECTIVE_RE,
 } from "./engine.js";
 export type {
   RunActionForFileOptions,
@@ -55,6 +58,7 @@ export type {
   PlannedEdit,
   LineGuard,
   NextLineGuard,
+  BlockGuard,
   RuleList,
 } from "./engine.js";
 export {

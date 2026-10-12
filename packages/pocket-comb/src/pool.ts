@@ -42,6 +42,11 @@ export interface RunPoolOptions {
   batchSize?: number;
   /** No pool: one in-process instance, on the main thread. Defaults to false. */
   serial?: boolean;
+  /**
+   * Ticket 08, `suppress --fix-first`: each worker (or the serial run) builds a
+   * second, fix-enabled instance and the batch fixes before it suppresses.
+   */
+  fixFirst?: boolean;
   onProgress?: (progress: Progress) => void;
   /**
    * Diagnostic/test seam: observed once per spawned worker thread. Production
@@ -125,11 +130,17 @@ export async function runPool(options: RunPoolOptions): Promise<RunPoolResult> {
 }
 
 async function runSerial(options: NormalizedPoolOptions): Promise<RunPoolResult> {
-  const { files, batchSize, configPath, cwd, action, params, mode } = options;
+  const { files, batchSize, configPath, cwd, action, params, mode, fixFirst } = options;
   const stage = mode === "apply" ? "apply" : "lint";
   options.onProgress?.({ stage: "boot", done: 0, total: files.length });
 
-  const eslint = createIsolatedESLint({ configPath, cwd });
+  const eslint = createIsolatedESLint({
+    configPath,
+    cwd,
+    ...(action === "fix" ? { fix: true } : {}),
+  });
+  const fixEslint =
+    fixFirst === true ? createIsolatedESLint({ configPath, cwd, fix: true }) : undefined;
   const outcomes: BatchOutcome[] = [];
   const dropped: DroppedFile[] = [];
   const fatal: FatalFile[] = [];
@@ -138,7 +149,13 @@ async function runSerial(options: NormalizedPoolOptions): Promise<RunPoolResult>
 
   for (let i = 0; i < files.length; i += batchSize) {
     const batch = files.slice(i, i + batchSize);
-    const result = await runBatch(eslint, batch, { action, params, mode });
+    const result = await runBatch(eslint, batch, {
+      action,
+      params,
+      mode,
+      ...(fixFirst === true ? { fixFirst: true } : {}),
+      ...(fixEslint === undefined ? {} : { fixEslint }),
+    });
     outcomes.push(...result.outcomes);
     dropped.push(...result.dropped);
     fatal.push(...result.fatal);
@@ -160,7 +177,7 @@ async function runSerial(options: NormalizedPoolOptions): Promise<RunPoolResult>
 }
 
 async function runParallel(options: NormalizedPoolOptions): Promise<RunPoolResult> {
-  const { files, configPath, cwd, action, params, mode } = options;
+  const { files, configPath, cwd, action, params, mode, fixFirst } = options;
   const total = files.length;
   const workers = options.workers;
   const batchSize = options.batchSize;
@@ -208,6 +225,7 @@ async function runParallel(options: NormalizedPoolOptions): Promise<RunPoolResul
     let recoveredFiles = 0;
     let outstanding = plans.length;
     let recoveryEslint: ESLint | null = null;
+    let recoveryFixEslint: ESLint | null = null;
     let settled = false;
     let failure: unknown = null;
 
@@ -270,8 +288,22 @@ async function runParallel(options: NormalizedPoolOptions): Promise<RunPoolResul
       for (const id of ids) {
         if (settled) return;
         const plan = planById.get(id)!;
-        const eslint = (recoveryEslint ??= createIsolatedESLint({ configPath, cwd }));
-        const result = await runBatch(eslint, plan.files, { action, params, mode });
+        const eslint = (recoveryEslint ??= createIsolatedESLint({
+          configPath,
+          cwd,
+          ...(action === "fix" ? { fix: true } : {}),
+        }));
+        const fixEslint =
+          fixFirst === true
+            ? (recoveryFixEslint ??= createIsolatedESLint({ configPath, cwd, fix: true }))
+            : undefined;
+        const result = await runBatch(eslint, plan.files, {
+          action,
+          params,
+          mode,
+          ...(fixFirst === true ? { fixFirst: true } : {}),
+          ...(fixEslint === undefined ? {} : { fixEslint }),
+        });
         pending[workerId]!.delete(id);
         recoveredFiles += plan.files.length;
         record(plan, result, false);
@@ -340,6 +372,7 @@ async function runParallel(options: NormalizedPoolOptions): Promise<RunPoolResul
         action,
         params,
         mode,
+        ...(fixFirst === true ? { fixFirst: true } : {}),
         ...(warmup === undefined ? {} : { warmupFile: warmup }),
       };
       let thread: Worker;
