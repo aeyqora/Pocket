@@ -4,7 +4,7 @@ import { Linter } from "eslint";
 import { defineConfig } from "eslint/config";
 import { defineTailoredRule, tailor, TAILORING } from "../src/index.js";
 import type { UpstreamPlugin } from "../src/index.js";
-import { fixableRule, flagRule, literalRule, lintWith } from "./fixtures.js";
+import { fixableRule, flagRule, literalRule, lintWith, selfRegisteringPlugin } from "./fixtures.js";
 
 /**
  * A synthetic upstream plugin that carries a named config embedding the plugin
@@ -12,39 +12,36 @@ import { fixableRule, flagRule, literalRule, lintWith } from "./fixtures.js";
  * here is a published plugin; the fixtures exist only to exercise `tailor()`.
  */
 function makeUpstream(): UpstreamPlugin {
-  const upstream: UpstreamPlugin = {
-    meta: { name: "fixture-plugin", version: "1.0.0", namespace: "fixture" },
-    rules: {
+  return selfRegisteringPlugin(
+    { name: "fixture-plugin", version: "1.0.0", namespace: "fixture" },
+    {
       "flag-identifier": flagRule,
       "literal-message": literalRule,
       "fixable-identifier": fixableRule,
     },
-    configs: {},
-  };
-
-  // An array config whose rules are namespaced under the plugin's own namespace,
-  // and which registers the plugin object itself (the "Cannot redefine plugin"
-  // trap ADR-0002 avoids).
-  upstream.configs!["flat/recommended"] = [
-    {
-      plugins: { fixture: upstream },
-      rules: {
-        "fixture/flag-identifier": "error",
-        "fixture/literal-message": "error",
+    (plugin) => ({
+      // An array config whose rules are namespaced under the plugin's own
+      // namespace, and which registers the plugin object itself (the "Cannot
+      // redefine plugin" trap ADR-0002 avoids).
+      "flat/recommended": [
+        {
+          plugins: { fixture: plugin },
+          rules: {
+            "fixture/flag-identifier": "error",
+            "fixture/literal-message": "error",
+          },
+        },
+      ],
+      // The same shape as a single (non-array) config object.
+      "flat/all": {
+        plugins: { fixture: plugin },
+        rules: { "fixture/fixable-identifier": "error" },
       },
-    },
-  ];
-
-  // The same shape as a single (non-array) config object.
-  upstream.configs!["flat/all"] = {
-    plugins: { fixture: upstream },
-    rules: { "fixture/fixable-identifier": "error" },
-  };
-
-  return upstream;
+    }),
+  );
 }
 
-/** A tailoring module that targets the synthetic `flag-identifier` rule by name. */
+/** A tailored rule module that targets the synthetic `flag-identifier` rule by name. */
 const flagTailoring = defineTailoredRule({
   tailors: "flag-identifier",
   meta: { messages: { custom: "Tailored: do not use {{name}} ({{word}})" } },

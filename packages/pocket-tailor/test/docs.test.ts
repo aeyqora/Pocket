@@ -13,6 +13,7 @@ import {
   TAILORING,
   type UpstreamPlugin,
 } from "../src/index.js";
+import { selfRegisteringPlugin } from "./fixtures.js";
 
 // A guard for the README. Ticket 04 is a docs ticket, so the drift test lives
 // with the docs: every public name and every quickstart/worked-example shape the
@@ -89,23 +90,22 @@ const noLegacyRule: Rule.RuleModule = {
  * config embedding the plugin object itself, exactly like a real plugin.
  */
 function makeThing(): UpstreamPlugin {
-  const plugin: UpstreamPlugin = {
-    meta: { name: "eslint-plugin-thing", version: "1.0.0", namespace: "thing" },
-    rules: {
+  return selfRegisteringPlugin(
+    { name: "eslint-plugin-thing", version: "1.0.0", namespace: "thing" },
+    {
       "no-widget": noWidgetRule,
       "prefer-panel": preferPanelRule,
       "no-legacy": noLegacyRule,
     },
-  };
-  plugin.configs = {
-    "flat/recommended": [
-      {
-        plugins: { thing: plugin },
-        rules: { "thing/no-widget": "error", "thing/prefer-panel": "error" },
-      },
-    ],
-  };
-  return plugin;
+    (plugin) => ({
+      "flat/recommended": [
+        {
+          plugins: { thing: plugin },
+          rules: { "thing/no-widget": "error", "thing/prefer-panel": "error" },
+        },
+      ],
+    }),
+  );
 }
 
 // --- The two tailored rule modules the README shows -------------------------
@@ -163,7 +163,7 @@ test("the README keeps the required section headings", () => {
   for (const heading of [
     "# Pocket Tailor",
     "## Install",
-    "## Quickstart",
+    "## Quick start",
     "## Worked adoption example",
     "## Migration guide",
     "## Testing tailored rules",
@@ -187,7 +187,7 @@ test("the README uses only the generic eslint-plugin-thing example", () => {
   assert.match(readme, /eslint-plugin-thing/);
 });
 
-// --- (b) Quickstart behavior -------------------------------------------------
+// --- (b) Quick start behavior -------------------------------------------------
 
 test("quickstart: tailor() wraps the plugin and the recommended config serves the tailored rule", () => {
   const thing = makeThing();

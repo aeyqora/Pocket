@@ -272,3 +272,18 @@ test("detection exposes a bare loc the upstream rule reported", () => {
   assert.deepEqual(loc, { line: 1, column: 0 });
   assert.equal(node, undefined);
 });
+
+test("a hook returning both loc and node keeps loc (ESLint prefers loc over node)", () => {
+  const composed = defineTailoredRule({
+    tailors: flagRule,
+    report: (detection) =>
+      detection.messageId === "flagged"
+        ? // The node points at `flag` (line 1, column 1); the loc points elsewhere.
+          { node: detection.node, loc: { line: 1, column: 10 } }
+        : undefined,
+  });
+
+  const [message] = lintWith(composed, "flag;\n");
+  assert.equal(message!.line, 1);
+  assert.equal(message!.column, 11);
+});

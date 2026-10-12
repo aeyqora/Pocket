@@ -23,11 +23,21 @@ test("an authored fix on a non-fixable upstream rule becomes a suggestion", () =
   assert.equal(message!.suggestions![0]!.desc, "Apply the tailored fix.");
 });
 
-test("meta.hasSuggestions is synthesized for an opinionated fix; meta.fixable stays unset", () => {
+test("suggestion mode declares meta.hasSuggestions as a capability; meta.fixable stays unset", () => {
+  // ESLint requires `hasSuggestions` statically on `meta`, before any report
+  // exists, so the composed rule declares the capability of suggestion mode
+  // (`autofix` not opted in) rather than the presence of a fix in one report.
   const composed = defineTailoredRule({ tailors: flagRule });
 
   assert.equal(composed.meta!.fixable, undefined);
   assert.equal(composed.meta!.hasSuggestions, true);
+});
+
+test("autofix mode declares meta.fixable and leaves hasSuggestions to upstream", () => {
+  const composed = defineTailoredRule({ tailors: flagRule, autofix: true });
+
+  assert.equal(composed.meta!.fixable, "code");
+  assert.equal(composed.meta!.hasSuggestions, undefined);
 });
 
 test("an upstream meta.hasSuggestions is preserved on the composed rule", () => {
@@ -248,13 +258,54 @@ test("a malformed fix range fails loudly rather than corrupting output", () => {
   assert.throws(() => lintWith(rule, "flag;\n"), /Fix has invalid range/);
 });
 
-// What ESLint catches, and what it does not (observed on eslint 10.12.0):
+test("an out-of-range authored fix fails loudly rather than being silently clamped", () => {
+  const rule = defineTailoredRule({
+    tailors: flagRule,
+    autofix: true,
+    report: (detection) =>
+      detection.messageId === "flagged"
+        ? { fix: (fixer) => fixer.replaceTextRange([0, 9999], "X") }
+        : undefined,
+  });
+
+  assert.throws(() => lintWith(rule, "flag;\n"), /outside the source range/);
+  assert.throws(() => fixWith(rule, "flag;\n"), /outside the source range/);
+});
+
+test("an out-of-range authored fix in suggestion mode fails loudly too", () => {
+  const rule = defineTailoredRule({
+    tailors: flagRule,
+    report: (detection) =>
+      detection.messageId === "flagged"
+        ? { fix: (fixer) => fixer.replaceTextRange([2, 9999], "X") }
+        : undefined,
+  });
+
+  assert.throws(() => lintWith(rule, "flag;\n"), /outside the source range/);
+});
+
+test("an in-range authored fix still applies exactly", () => {
+  const rule = defineTailoredRule({
+    tailors: flagRule,
+    autofix: true,
+    report: (detection) =>
+      detection.messageId === "flagged"
+        ? { fix: (fixer) => fixer.replaceTextRange([0, 4], "fixed") }
+        : undefined,
+  });
+
+  assert.deepEqual(lintWith(rule, "flag;\n")[0]!.fix, { range: [0, 4], text: "fixed" });
+  assert.equal(fixWith(rule, "flag;\n").output, "fixed;\n");
+});
+
+// What ESLint catches, and what pocket-tailor adds (observed on eslint 10.12.0):
 // - Overlapping fixes in one report throw `Fix objects must not be overlapped
 //   in a report.` from `mergeFixes` at verify time (asserted above).
 // - A fix whose `range` is not two numbers throws `Fix has invalid range: ...`
 //   from `assertValidFix` at verify time (asserted above).
-// - A numeric but out-of-bounds range is NOT validated: `SourceCodeFixer`
-//   clamps it, e.g. `replaceTextRange([0, 9999], "X")` on `"flag;\n"` yields
-//   `"X"`. pocket-tailor deliberately does not re-validate ranges — it relies
-//   on ESLint's checks and forwards the authored fixer verbatim — so staying in
-//   range remains the author's responsibility.
+// - A numeric but out-of-bounds range is NOT validated by ESLint:
+//   `SourceCodeFixer` clamps it, e.g. `replaceTextRange([0, 9999], "X")` on
+//   `"flag;\n"` yields `"X"`. pocket-tailor wraps every authored fix and
+//   rejects one whose range falls outside `[0, sourceText.length]`, so an
+//   out-of-range tailored fix fails the suite instead of corrupting output.
+//   Fixes merely inherited from upstream are forwarded untouched.

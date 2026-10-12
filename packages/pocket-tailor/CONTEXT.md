@@ -11,7 +11,7 @@ The original plugin (and its rules) that gets wrapped. Detection always belongs 
 _Avoid_: source plugin, base plugin, base rule
 
 **Tailored rule**:
-An upstream rule whose reports are reshaped by a tailoring module; it keeps the upstream rule ID.
+An upstream rule whose reports are reshaped by a tailored rule module; it keeps the upstream rule ID.
 _Avoid_: wrapped rule, overlay, shadow rule
 
 **Tailoring**:

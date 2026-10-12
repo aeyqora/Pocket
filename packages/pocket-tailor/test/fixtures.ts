@@ -1,4 +1,21 @@
 import { Linter, type Rule } from "eslint";
+import type { UpstreamPlugin } from "../src/index.js";
+
+/**
+ * Build a synthetic upstream plugin that self-registers: `buildConfigs` is
+ * called with the plugin object itself, so a named config can embed
+ * `plugins: { ns: plugin }` exactly as a real plugin's recommended config does.
+ * Nothing built here is a published plugin.
+ */
+export function selfRegisteringPlugin(
+  meta: NonNullable<UpstreamPlugin["meta"]>,
+  rules: Record<string, Rule.RuleModule>,
+  buildConfigs: (plugin: UpstreamPlugin) => Record<string, unknown>,
+): UpstreamPlugin {
+  const plugin: UpstreamPlugin = { meta, rules };
+  plugin.configs = buildConfigs(plugin);
+  return plugin;
+}
 
 /** Options accepted by {@link flagRule}. */
 export interface FlagOptions {
