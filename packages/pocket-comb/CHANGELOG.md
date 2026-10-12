@@ -14,5 +14,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Action-config loader: flat config plus `settings["pocket-comb"]`, label
   precedence (flag > settings > default), path-resolution rules, and the config
   sha256 for reports.
+- Perf harness (spec §11): a committed deterministic corpus generator packing
+  every directive shape, a separate `test:perf` timing suite (warmup + 5 runs,
+  medians per stage), and a platform-keyed committed baseline with a ×1.15 gate
+  and `--update-baseline` re-pinning.
 
 [Unreleased]: https://github.com/aeyqora/Pocket/commits/main/packages/pocket-comb
