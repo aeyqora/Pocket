@@ -37,6 +37,7 @@ export {
   scanSuppressFile,
   planSuppressEdits,
   applySuppressEdits,
+  findEnclosingBlockGuard,
   splitRuleList,
   ledgerRecordsForEdit,
   LINE_SUFFIX_DIRECTIVE_RE,
@@ -55,6 +56,7 @@ export type {
   PlannedEdit,
   LineGuard,
   NextLineGuard,
+  BlockGuard,
   RuleList,
   RemoveParams,
 } from "./engine.js";

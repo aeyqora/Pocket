@@ -68,17 +68,22 @@ export interface CompletionSummary {
   edits: number;
   inserted: number;
   prepended: number;
+  /** Autofix edits (`fix` action / `--fix-first`); the slot appears only when > 0. */
+  fixed?: number;
   elapsedMs: number;
 }
 
 /**
  * The completion confirmation, exact shape from spec §4:
  * `Done: 37 files touched, 214 edits (152 inserted, 62 prepended) — 8.4s`.
+ * Autofix runs add a `, N fixed` slot so the fix phase is visible.
  */
 export function formatCompletion(summary: CompletionSummary): string {
+  const fixed = summary.fixed ?? 0;
+  const fixSlot = fixed > 0 ? `, ${fixed} fixed` : "";
   return (
     `Done: ${summary.filesTouched} files touched, ${summary.edits} edits ` +
-    `(${summary.inserted} inserted, ${summary.prepended} prepended) — ` +
+    `(${summary.inserted} inserted, ${summary.prepended} prepended${fixSlot}) — ` +
     `${(summary.elapsedMs / 1000).toFixed(1)}s`
   );
 }
@@ -92,6 +97,7 @@ export function summarizeRun(
   let edits = 0;
   let inserted = 0;
   let prepended = 0;
+  let fixed = 0;
 
   for (const outcome of outcomes) {
     if (outcome.changed) filesTouched += 1;
@@ -99,10 +105,11 @@ export function summarizeRun(
     for (const edit of outcome.edits) {
       if (edit.editType === "insert") inserted += 1;
       else if (edit.editType === "prepend") prepended += 1;
+      else if (edit.editType === "fix") fixed += 1;
     }
   }
 
-  return { filesTouched, edits, inserted, prepended, elapsedMs };
+  return { filesTouched, edits, inserted, prepended, fixed, elapsedMs };
 }
 
 /** Print the completion confirmation, newline-terminated. */
@@ -117,7 +124,8 @@ export function writeCompletion(
  * The `inventory` run's human line (spec §6.6): a read-only census has no edits
  * and no impact, so it reports what it counted instead of the mutating
  * completion line. `files` is the number of files scanned; `directives` the
- * number of census entries (logical suppressions + bare directives).
+ * number of disable directives found; `byForm` breaks those directives down per
+ * form.
  */
 export interface CensusSummary {
   files: number;
@@ -168,6 +176,8 @@ export interface ImpactSummary {
   edits: number;
   inserted: number;
   prepended: number;
+  /** Autofix edits; the slot appears only when > 0. */
+  fixed?: number;
   byType: ImpactTypeCount[];
   byRule: ImpactRuleCount[];
 }
@@ -180,6 +190,7 @@ export function summarizeImpact(
   let edits = 0;
   let inserted = 0;
   let prepended = 0;
+  let fixed = 0;
   const typeCounts = new Map<EditType, number>();
   const ruleCounts = new Map<string, number>();
 
@@ -189,6 +200,7 @@ export function summarizeImpact(
       edits += 1;
       if (edit.editType === "insert") inserted += 1;
       else if (edit.editType === "prepend") prepended += 1;
+      else if (edit.editType === "fix") fixed += 1;
       typeCounts.set(edit.editType, (typeCounts.get(edit.editType) ?? 0) + 1);
       ruleCounts.set(edit.rule, (ruleCounts.get(edit.rule) ?? 0) + 1);
     }
@@ -199,6 +211,7 @@ export function summarizeImpact(
     edits,
     inserted,
     prepended,
+    fixed,
     byType: EDIT_TYPES.filter((type) => typeCounts.has(type)).map((type) => ({
       editType: type,
       count: typeCounts.get(type)!,
@@ -212,10 +225,12 @@ export function summarizeImpact(
 /**
  * The impact summary, printed before any report (spec §13). Three lines: the
  * headline counts, then edits by type and by rule. A dry run says `would
- * change`; an apply run says `changed`.
+ * change`; an apply run says `changed`. Autofix runs add a `, N fixed` slot.
  */
 export function formatImpactSummary(summary: ImpactSummary, dryRun: boolean): string {
   const verb = dryRun ? "would change" : "changed";
+  const fixed = summary.fixed ?? 0;
+  const fixSlot = fixed > 0 ? `, ${fixed} fixed` : "";
   const byType =
     summary.byType.length === 0
       ? "none"
@@ -226,7 +241,7 @@ export function formatImpactSummary(summary: ImpactSummary, dryRun: boolean): st
       : summary.byRule.map((entry) => `${entry.rule} ${entry.count}`).join(", ");
   return (
     `Impact: ${summary.filesTouched} files ${verb}, ${summary.edits} edits ` +
-    `(${summary.inserted} inserted, ${summary.prepended} prepended)\n` +
+    `(${summary.inserted} inserted, ${summary.prepended} prepended${fixSlot})\n` +
     `  by type: ${byType}\n` +
     `  by rule: ${byRule}`
   );
