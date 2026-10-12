@@ -106,6 +106,22 @@ export function rollupByFile(edits: readonly EditRecord[]): FileCount[] {
   ).map(([file, count]) => ({ file, count }));
 }
 
+/**
+ * Order the ledger deterministically — file, then line, then rule, then edit
+ * type — so a report diffs cleanly across runs regardless of the worker pool's
+ * completion order (the same stable-ordering rationale as the rollups). Returns a
+ * new array; the input is not mutated.
+ */
+export function orderEdits(edits: readonly EditRecord[]): EditRecord[] {
+  return [...edits].sort(
+    (a, b) =>
+      a.file.localeCompare(b.file) ||
+      a.line - b.line ||
+      a.rule.localeCompare(b.rule) ||
+      a.editType.localeCompare(b.editType),
+  );
+}
+
 /** Assemble the canonical report from metadata and the merged ledger. */
 export function buildRunReport(meta: RunMeta, edits: readonly EditRecord[]): RunReport {
   const ledger = [...edits];
