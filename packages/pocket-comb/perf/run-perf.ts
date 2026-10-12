@@ -27,6 +27,7 @@ import {
   type PlannedEdit,
   type SuppressTarget,
 } from "../src/engine.js";
+import { scanDirectives } from "../src/scan.js";
 import { DEFAULT_BATCH_SIZE, defaultWorkerCount, runPool } from "../src/pool.js";
 import type { RunPoolResult } from "../src/pool.js";
 import type { Action } from "../src/types.js";
@@ -409,6 +410,16 @@ export function createStages(): PerfStage[] {
         }
       },
     },
+    {
+      name: "scan-full",
+      async run(context) {
+        // The shared full-file scan over all four forms (spec §7): the work the
+        // non-lazy actions (remove/replace/cleanup/inventory) pay. Every linted
+        // file is scanned, not just the ones with messages.
+        const texts = corpusTexts(context);
+        for (const text of texts.values()) scanDirectives(text.split("\n"));
+      },
+    },
   ];
 }
 
@@ -470,6 +481,12 @@ async function measureStage(
 /** Stages whose cost is reported per file (spec §11 micro-timings). */
 const ENGINE_STAGES = new Set(["scan", "plan", "apply"]);
 
+/**
+ * Stages whose per-file cost is over **every** corpus file, not just the files
+ * with lint messages: the full-file scan touches them all (spec §7).
+ */
+const ALL_FILE_STAGES = new Set(["scan-full"]);
+
 /** Generate the corpus, then measure every stage: warmup, 5 runs, median. */
 export async function measureScale(options: MeasureScaleOptions): Promise<ScaleMeasurement> {
   const seed = options.seed ?? DEFAULT_SEED;
@@ -498,6 +515,8 @@ export async function measureScale(options: MeasureScaleOptions): Promise<ScaleM
     if (ENGINE_STAGES.has(result.stage)) {
       const messageFiles = filesWithMessages(context);
       if (messageFiles > 0) result.perFileUs = (result.medianMs * 1000) / messageFiles;
+    } else if (ALL_FILE_STAGES.has(result.stage) && context.files.length > 0) {
+      result.perFileUs = (result.medianMs * 1000) / context.files.length;
     }
     stages.push(result);
     options.onStage?.(result);

@@ -69,6 +69,27 @@ export interface BatchOutcome {
   output?: string;
   /** Action-specific counters. */
   stats: Record<string, number>;
+  /**
+   * Directives the action found but could not act on (ticket 09+): bare guards
+   * during `remove`, unscopable bare directives during `cleanup`. Additive to the
+   * notes' contract so the command can list them as not-actionable.
+   */
+  notActionable?: NotActionableDirective[];
+}
+
+/**
+ * A directive an action recognised but deliberately left untouched (spec §6.3,
+ * §6.5). Carried from the engine through the pool so the command can report it.
+ */
+export interface NotActionableDirective {
+  file: string;
+  /** 1-based line the directive sits on. */
+  line: number;
+  form: DirectiveForm;
+  /** Why it was skipped. */
+  reason: "bare";
+  /** The directive line's text, without a trailing CR. */
+  text: string;
 }
 
 /** Re-exported ESLint message shape, so `types.ts` stays the shared vocabulary. */

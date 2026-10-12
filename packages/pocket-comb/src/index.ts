@@ -56,7 +56,14 @@ export type {
   LineGuard,
   NextLineGuard,
   RuleList,
+  RemoveParams,
 } from "./engine.js";
+export {
+  scanDirectives,
+  formatDirective,
+  directiveName,
+} from "./scan.js";
+export type { ScannedDirective } from "./scan.js";
 export {
   buildRunReport,
   rollupByRule,
@@ -78,7 +85,7 @@ export type {
   RunPoolResult,
   WorkerStat,
 } from "./pool.js";
-export type { BatchOutcome, DirectiveForm, EditRecord, EditType, JsonValue } from "./types.js";
+export type { BatchOutcome, DirectiveForm, EditRecord, EditType, JsonValue, NotActionableDirective } from "./types.js";
 export type {
   BatchDoneMessage,
   BatchFailedMessage,

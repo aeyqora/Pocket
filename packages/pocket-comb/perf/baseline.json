@@ -13,11 +13,12 @@
           "warmup": 5,
           "runs": 15,
           "stages": {
-            "apply": 1.529,
-            "discover": 5.067,
-            "lint": 552.688,
-            "plan": 0.337,
-            "scan": 2.196
+            "apply": 1.527,
+            "discover": 5.156,
+            "lint": 596.951,
+            "plan": 0.328,
+            "scan": 2.293,
+            "scan-full": 1.951
           }
         },
         "stress": {
@@ -25,11 +26,12 @@
           "warmup": 5,
           "runs": 15,
           "stages": {
-            "apply": 16.516,
-            "discover": 51.668,
-            "lint": 2049.339,
-            "plan": 9.992,
-            "scan": 28.804
+            "apply": 17.778,
+            "discover": 52.877,
+            "lint": 2243.998,
+            "plan": 8.622,
+            "scan": 30.434,
+            "scan-full": 18.867
           }
         }
       }
