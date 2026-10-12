@@ -30,3 +30,36 @@ export type {
   FatalFile,
   LintFilesResult,
 } from "./eslint.js";
+export { runActionForFile, runBatch } from "./engine.js";
+export type {
+  RunActionForFileOptions,
+  RunActionResult,
+  RunBatchOptions,
+  RunBatchResult,
+  StrategyParams,
+  SuppressParams,
+} from "./engine.js";
+export { runPool, defaultWorkerCount, PoolRecoveryError, DEFAULT_BATCH_SIZE } from "./pool.js";
+export type {
+  Progress,
+  RunPoolOptions,
+  RunPoolResult,
+  WorkerStat,
+} from "./pool.js";
+export type { BatchOutcome, DirectiveForm, EditRecord, EditType, JsonValue } from "./types.js";
+export type {
+  BatchDoneMessage,
+  BatchFailedMessage,
+  LintBatchMessage,
+  ParentToWorker,
+  ReadyMessage,
+  WorkerInit,
+  WorkerToParent,
+} from "./worker.js";
+export {
+  createSpinner,
+  formatCompletion,
+  summarizeRun,
+  writeCompletion,
+} from "./ui.js";
+export type { CompletionSummary, Spinner, SpinnerOptions } from "./ui.js";
