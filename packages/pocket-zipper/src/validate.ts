@@ -769,6 +769,8 @@ export interface HygieneContext {
   readonly knownRules: ReadonlySet<string>;
   /** The live line of the suppression each record matches, where one exists. */
   readonly liveLines: ReadonlyMap<ExceptionRecord, number>;
+  /** Whether a record's file is governed; absent, the path axis is not consulted. */
+  readonly isGovernedFile?: (file: string) => boolean;
 }
 
 /**
@@ -838,11 +840,19 @@ export function statusHygiene(
     const status = statuses.get(record);
     if (status === undefined || status === "used") continue;
     const stale = status === "dangling" ? "" : staleNote(record, ctx);
+    // A spent record names which shape spent it: its path left the governed set,
+    // or its suppression became pre-existing debt. The two have the same remedy
+    // (delete the record) but different causes, and the maintainer sweeping has
+    // to be able to tell de-governing from cleared debt.
+    const deGoverned =
+      status === "spent" && ctx.isGovernedFile !== undefined && !ctx.isGovernedFile(record.file);
     const message =
       status === "expired"
         ? `expired ${record.expires}; the record authorizes nothing${stale}`
         : status === "spent"
-          ? `the suppression it excepts is pre-existing debt; the record is spent${stale}`
+          ? deGoverned
+            ? `the record's file is outside the governed set; the record is spent${stale}`
+            : `the suppression it excepts is pre-existing debt; the record is spent${stale}`
           : record.line === undefined
             ? `no suppression matches this record in ${record.file}`
             : `no suppression matches this record in ${record.file} (last known: line ${record.line})`;

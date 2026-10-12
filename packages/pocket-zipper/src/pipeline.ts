@@ -297,7 +297,12 @@ export async function evaluate(options: EvaluateOptions): Promise<EvaluateResult
       // the detector with the verdict, off one pass over the two registries,
       // so the union and the verdict cannot disagree.
       const records = excepted ? [...registry, ...policyChange.sanctioned] : registry;
-      const coverage = coverExceptions({ head, records, now });
+      const coverage = coverExceptions({
+        head,
+        records,
+        now,
+        isGovernedFile: (file) => isGovernedPath(policy, file),
+      });
       // Overlong is hygiene over the *baseline* registry, like every other
       // cleanup counter: a landed date past the maximum still authorizes and is
       // counted, and a change that newly writes one is refused below. It stays

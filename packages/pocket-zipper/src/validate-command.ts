@@ -2,6 +2,7 @@ import { combinedLandingFacts } from "./combined-landing.js";
 import { renderCleanupSection, unusedExceptions, type CleanupCounts } from "./cleanup.js";
 import { EslintSession } from "./eslint.js";
 import { DEFAULT_POLICY, expiryHorizon, parsePolicy } from "./policy.js";
+import { isGovernedPath } from "./governed-path.js";
 import { readIfPresent, readProtectedDocument } from "./protected-document.js";
 import { configPluginRuleNames, recognizeFile, type RecognizeFileResult } from "./recognize.js";
 import {
@@ -80,10 +81,11 @@ export async function runValidate(options: ValidateOptions): Promise<ValidateRes
   const knownRules = session === null ? new Set<string>() : await knownRuleIds(session, cwd);
 
   const policy = readPolicy(configRaw, knownRules, findings);
+  const isGovernedFile = (file: string) => isGovernedPath(policy, file);
   const { entries, findings: registryFindings } = validateRegistry(registryRaw);
   findings.push(...registryFindings);
   const scanned = await liveSuppressions(entries, cwd, session);
-  const { live, statuses, unclaimed } = judge(entries, scanned, now);
+  const { live, statuses, unclaimed } = judge(entries, scanned, now, isGovernedFile);
   // The same delete-ready pointers `check` prints on a FAIL, derived from the
   // same module — a maintainer's sweep is this command, and it should not have
   // to read a FAIL to learn where a record lives. `cleared by this change` is
@@ -95,6 +97,7 @@ export async function runValidate(options: ValidateOptions): Promise<ValidateRes
     maxExpiry: policy.exceptions.maxExpiry,
     knownRules,
     liveLines: live,
+    isGovernedFile,
   };
   findings.push(...recordHygiene(entries, ctx));
   // The pool's arithmetic before the statuses it explains: the count line is the
@@ -117,9 +120,11 @@ export async function runValidate(options: ValidateOptions): Promise<ValidateRes
  * same status map the hygiene findings were, so the tally and the findings
  * beneath it cannot disagree.
  *
- * `spent` is always zero here, and honestly so: spending is a judgment about a
- * change read against a baseline, and a working-tree lint has no baseline. The
- * `overlong` count reads this command's own working-tree maximum, which is
+ * `spent` here means a de-governed record: one whose file left the governed
+ * set. Pre-existing-debt spending is a change-relative judgment a working-tree
+ * lint cannot make (it has no baseline), so that shape stays `check`'s alone;
+ * the path-axis shape is knowable from the policy alone and is this command's.
+ * The `overlong` count reads this command's own working-tree maximum, which is
  * right for a pre-push lint and deliberately differs from `check`'s, which
  * answers about the baseline.
  */
@@ -307,14 +312,17 @@ interface Judgement {
  * unreadable file is no evidence either way — but its date is still read, so
  * expiry is reported even for a record nothing else could judge.
  *
- * `spent` is not derivable here — it is a change-relative judgment (the
- * suppression became pre-existing debt) that belongs to an evaluation, not to a
- * working-tree lint, and needs a baseline this command does not have.
+ * A record whose file is ungoverned is **spent**, whatever else is true of it:
+ * its path left the governed set, so it can never authorize debt. Expiry keeps
+ * precedence over that too — an expired record is expired, not spent. The
+ * pre-existing-debt spending shape is not derivable here (it needs a baseline a
+ * working-tree lint does not have); this is the path-axis shape only.
  */
 function judge(
   entries: readonly RegistryEntry[],
   scanned: LiveSuppressions,
   now: Date,
+  isGovernedFile: (file: string) => boolean,
 ): Judgement {
   const judged = entries.filter(({ record }) => !scanned.unjudged.has(record));
   const { pairs, unclaimed } = allocateExceptions({
@@ -339,6 +347,13 @@ function judge(
     // Everything else the tree could not judge stays unjudged rather than
     // dangling: an unreadable file is not evidence that its exception went unused.
     else if (!scanned.unjudged.has(record)) statuses.set(record, "dangling");
+  }
+  // A de-governed file spends its record even when the suppression still matches:
+  // "used" and "dangling" both surrender to "spent". Expired keeps precedence.
+  for (const { record } of entries) {
+    if (isGovernedFile(record.file)) continue;
+    if (statuses.get(record) === "expired") continue;
+    statuses.set(record, "spent");
   }
   return { live, statuses, unclaimed };
 }

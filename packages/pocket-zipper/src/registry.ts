@@ -248,6 +248,13 @@ export interface CoverExceptionsInput {
   head: ReconciledSuppression[];
   records: ExceptionRecord[];
   now: Date;
+  /**
+   * Whether a record's file is governed. A record whose file is ungoverned is
+   * spent — its path left the governed set, so it can never authorize debt.
+   * Optional: absent, the path axis is not consulted and only pre-existing debt
+   * spends a record (the pre-governed-path behavior).
+   */
+  isGovernedFile?: (file: string) => boolean;
 }
 
 /**
@@ -283,7 +290,7 @@ export function utilizationCounts(
  * been used.
  */
 export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage {
-  const { head, records, now } = input;
+  const { head, records, now, isGovernedFile } = input;
   const statuses = new Map<ExceptionRecord, ExceptionStatus>();
 
   const { pairs, pools } = allocateExceptions({
@@ -329,8 +336,14 @@ export function coverExceptions(input: CoverExceptionsInput): ExceptionCoverage 
         (h.disposition === "existing" || h.disposition === "moved-existing") &&
         coversInScope(record, h),
     );
+    // Expiry keeps precedence; then a de-governed file spends its record — the
+    // path left the governed set, so the record can never authorize — and a
+    // pre-existing matching suppression spends it the old way. Both read
+    // `spent`; only the human report names which.
     if (isExpired(record.expires, now)) statuses.set(record, "expired");
-    else if (matchesExistingInRecordFile) statuses.set(record, "spent");
+    else if (isGovernedFile !== undefined && !isGovernedFile(record.file)) {
+      statuses.set(record, "spent");
+    } else if (matchesExistingInRecordFile) statuses.set(record, "spent");
     else statuses.set(record, "dangling");
   }
 
