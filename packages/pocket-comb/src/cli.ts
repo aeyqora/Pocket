@@ -97,12 +97,17 @@ export async function main(
         cwd: io.cwd,
         prompter: deps.prompter ?? createClackPrompter(io),
         loadConfig,
-        run: async ({ parsed: resolved, config }) => {
+        run: async ({ parsed: resolved, config, resolveReport }) => {
           if (resolved.action === null) {
             // The wizard always resolves an action before running.
             throw new Error("wizard finished without an action");
           }
-          return runAction(resolved.action as Action, { parsed: resolved, config, io });
+          return runAction(resolved.action as Action, {
+            parsed: resolved,
+            config,
+            io,
+            ...(resolveReport !== undefined ? { resolveReport } : {}),
+          });
         },
       });
 

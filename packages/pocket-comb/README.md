@@ -51,7 +51,9 @@ npx pocket-comb@latest suppress --config ./pocket-comb.config.mjs --apply
 
 With no `--config`, Pocket Comb auto-detects `pocket-comb.config.{js,mjs,cjs,json}` in the
 current directory. On a terminal it fills any remaining gaps with a wizard; a
-non-interactive run uses flags only and never prompts a pipe.
+non-interactive run uses flags only and never prompts a pipe. An explicit `--dry-run`
+stops after the impact summary; the wizard's apply/restart/abort menu appears only when
+the dry run was chosen interactively.
 
 ## Actions
 

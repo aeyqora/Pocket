@@ -158,6 +158,11 @@ function writePartialReport(
  * notes, the completion confirmation, and — unless `--no-report` — the report.
  * A dry run with impact exits 1 (the CI probe); an apply run exits 0.
  *
+ * The report resolves after the run: `context.resolveReport` (the wizard's
+ * prompt, spec §5 step 7) when present, otherwise `resolveOutput`'s earlier
+ * answer. Either way `emitReport` runs last, so the impact summary precedes any
+ * report prompt (spec §13).
+ *
  * On an unrecoverable worker failure (`PoolRecoveryError`) the partial ledger is
  * written before the error propagates to the CLI's exit-2 handler (spec §8).
  */
@@ -177,7 +182,7 @@ export async function runActionPipeline(
     throw new OperationalError(`no files matched under ${config.targetRoot}`);
   }
 
-  const { report, humanOutput } = resolveOutput(context);
+  const { report: carriedReport, humanOutput } = resolveOutput(context);
   const spinner = createSpinner({ output: io.stderr, tty: io.tty });
 
   let result: RunPoolResult;
@@ -199,7 +204,7 @@ export async function runActionPipeline(
     if (err instanceof PoolRecoveryError) {
       writePartialReport(context, {
         action: options.action,
-        report,
+        report: carriedReport,
         startedAt,
         durationMs: Date.now() - startedAtMs,
         dryRun,
@@ -222,6 +227,12 @@ export async function runActionPipeline(
   const durationMs = Date.now() - startedAtMs;
   const completion = summarizeRun(outcomes, durationMs);
   writeCompletion(humanOutput, completion);
+
+  // The report resolves here — after the run and the impact/completion lines —
+  // so a wizard prompt (spec §5 step 7) lands after the impact summary (§13).
+  // Without a resolver this is exactly `resolveOutput`'s earlier answer.
+  const report =
+    context.resolveReport !== undefined ? await context.resolveReport() : carriedReport;
 
   if (report.enabled) {
     const edits = orderEdits(outcomes.flatMap((outcome) => outcome.edits));
