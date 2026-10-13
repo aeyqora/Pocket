@@ -83,6 +83,16 @@ export interface ResolvedReportOptions {
 }
 
 /**
+ * The late report-resolution seam (spec §5 step 7): the shared runner calls this
+ * after the run has produced its data and before emitting the report, so an
+ * interactive prompt can decide the format and destination *after* the dry-run
+ * impact summary (spec §13) has printed. The wizard supplies one; flags,
+ * settings and non-TTY runs do not, and the report resolves from the invocation
+ * via `resolveReportOptions`.
+ */
+export type ReportResolver = () => ResolvedReportOptions | Promise<ResolvedReportOptions>;
+
+/**
  * Resolve the report format and destination, precedence
  * **flag > settings key > default** (spec §3): default format `html`, default
  * destination `pocket-comb-report.<ext>` in the cwd. A relative `--out` (or a

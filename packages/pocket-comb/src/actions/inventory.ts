@@ -38,7 +38,7 @@ export async function runInventory(context: ActionContext): Promise<number> {
   // Resolve the report before the human line: when the report streams to stdout
   // (`--out -`, the trend-store piping shape), the census line moves to stderr so
   // the piped CSV/JSON stays parseable (spec §13).
-  const { report, humanOutput } = resolveOutput(context);
+  const { report: carriedReport, humanOutput } = resolveOutput(context);
 
   const durationMs = Date.now() - startedAtMs;
   writeCensusSummary(humanOutput, {
@@ -47,6 +47,11 @@ export async function runInventory(context: ActionContext): Promise<number> {
     byForm: census.byForm,
     elapsedMs: durationMs,
   });
+
+  // The census is inventory's "run": the report resolves after it, so a wizard
+  // prompt (spec §5 step 7) follows the census line rather than preceding it.
+  const report =
+    context.resolveReport !== undefined ? await context.resolveReport() : carriedReport;
 
   if (report.enabled) {
     const meta = buildMeta(context, {

@@ -100,6 +100,7 @@ export type {
   EmitReportResult,
   ReportData,
   ReportOptionsInput,
+  ReportResolver,
   ResolvedReportOptions,
 } from "./report/index.js";
 export { runPool, defaultWorkerCount, PoolRecoveryError, DEFAULT_BATCH_SIZE } from "./pool.js";

@@ -1,6 +1,7 @@
 import type { ParsedInvocation } from "../args.js";
 import type { CommandIo } from "../cli.js";
 import type { LoadedConfig } from "../config.js";
+import type { ReportResolver } from "../report/index.js";
 
 /**
  * What every action command receives: the validated invocation, the loaded
@@ -12,6 +13,14 @@ export interface ActionContext {
   parsed: ParsedInvocation;
   config: LoadedConfig;
   io: CommandIo;
+  /**
+   * The wizard's late report-resolution seam (spec §5 step 7). When present the
+   * shared runner calls it after the run produced its data and before emitting
+   * the report, so the report prompt lands after the dry-run impact summary
+   * (spec §13). Absent for flags/settings/non-TTY runs, where the report resolves
+   * from the invocation; the default path stays byte-identical.
+   */
+  resolveReport?: ReportResolver;
 }
 
 /** A wired verb: its command file's entry point. */

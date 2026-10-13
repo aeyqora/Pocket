@@ -15,6 +15,7 @@ import {
 import { cleanupTemps, fakeIo, tempDir, write } from "./harness.js";
 import type { ParsedInvocation } from "../src/args.js";
 import type { LoadedConfig } from "../src/config.js";
+import type { ResolvedReportOptions } from "../src/report/index.js";
 
 after(cleanupTemps);
 
@@ -107,9 +108,15 @@ function stubConfig(overrides: Partial<LoadedConfig> = {}): LoadedConfig {
 interface RunRecord {
   parsed: ParsedInvocation;
   config: LoadedConfig;
+  /** What the run's report hook resolved, when the wizard supplied one. */
+  resolvedReport?: ResolvedReportOptions;
 }
 
-/** Drive `runWizard` with a scripted prompter, a stubbed loader and a recording run. */
+/**
+ * Drive `runWizard` with a scripted prompter, a stubbed loader and a recording
+ * run. The stub invokes the run's `resolveReport` hook the way the real pipeline
+ * does, so the post-run report prompt is exercised without a TTY.
+ */
 async function drive(options: {
   parsed: ParsedInvocation;
   prompter: FakePrompter;
@@ -128,7 +135,11 @@ async function drive(options: {
     prompter: options.prompter,
     loadConfig: async () => options.config ?? stubConfig(),
     run: async (context) => {
-      runs.push(context);
+      const record: RunRecord = { parsed: context.parsed, config: context.config };
+      if (context.resolveReport !== undefined) {
+        record.resolvedReport = await context.resolveReport();
+      }
+      runs.push(record);
       const value = codes[Math.min(index, codes.length - 1)] ?? 0;
       index += 1;
       return value;
@@ -416,8 +427,124 @@ test("the report prompt asks format (html default) then the out path", async () 
   assert.equal(format.initialValue, "html", "the format select defaults to html");
   const out = promptsOf<PathPrompt>(p, "path")[0]!;
   assert.equal(out.directory, false, "the report out prompt is a file path");
-  assert.equal(runs[0]!.parsed.format, "csv");
-  assert.equal(runs[0]!.parsed.out, "out/report.csv");
+  assert.deepEqual(
+    runs[0]!.resolvedReport,
+    { enabled: true, format: "csv", out: "out/report.csv" },
+    "the prompt answers resolve the report after the run",
+  );
+  assert.equal(runs[0]!.parsed.format, null, "the pre-run invocation no longer carries the format");
+  assert.equal(runs[0]!.parsed.out, null, "nor the out path");
+});
+
+test("the report prompt is asked once; the apply re-run reuses the answer", async () => {
+  const dir = tempDir();
+  const p = new FakePrompter();
+  p.confirms.push(false); // dry run
+  p.selects.push("json"); // report format, asked inside the dry run
+  p.paths.push("report.json"); // report out
+  p.selects.push("apply"); // apply now
+
+  const { runs } = await drive({
+    parsed: invocation({ action: "suppress", config: join(dir, "c.mjs"), target: dir }),
+    prompter: p,
+    cwd: dir,
+    config: stubConfig({ targetRoot: dir }),
+    codes: [1, 0],
+  });
+
+  assert.equal(runs.length, 2);
+  assert.equal(
+    callsOf(p, "select").length,
+    2,
+    "one report format select plus the post-run question; the apply run does not re-ask",
+  );
+  assert.deepEqual(runs[0]!.resolvedReport, { enabled: true, format: "json", out: "report.json" });
+  assert.deepEqual(
+    runs[1]!.resolvedReport,
+    runs[0]!.resolvedReport,
+    "the apply re-run reuses the report answer",
+  );
+});
+
+test("a cancel at the report prompt keeps the dry-run code and never applies", async () => {
+  const dir = tempDir();
+  const p = new FakePrompter();
+  p.confirms.push(false); // dry run
+  p.selects.push(WIZARD_CANCEL); // cancel at the report format prompt
+
+  const { code, runs } = await drive({
+    parsed: invocation({ action: "suppress", config: join(dir, "c.mjs"), target: dir }),
+    prompter: p,
+    cwd: dir,
+    config: stubConfig({ targetRoot: dir }),
+    codes: [1],
+  });
+
+  assert.equal(runs.length, 1, "a report cancel never re-runs in apply mode");
+  assert.equal(code, 1, "the dry-run exit code stands");
+  assert.equal(callsOf(p, "cancel").length, 1, "the cancel is reported");
+});
+
+const WIZARD_CONFIG = `export default [
+  { files: ["**/*.js"], rules: { "no-console": "warn" } },
+];
+`;
+
+test("the dry-run impact summary prints before the report prompt (spec §5 step 7, §13)", async () => {
+  const dir = tempDir();
+  write(dir, "target/a.js", 'console.log("a");\n');
+  write(dir, "comb.config.mjs", WIZARD_CONFIG);
+
+  const io = fakeIo({ cwd: dir, tty: true });
+  // Snapshot stdout at the moment each prompt is asked, so the assertion is about
+  // real ordering — the run's own lines must already be on the stream when the
+  // report prompt fires.
+  const snapshots: Array<{ message: string; stdout: string }> = [];
+  const selects = ["json", "abort"]; // report format, then the post-run question
+  const paths = [join(dir, "report.json")]; // report out
+  const prompter: Prompter = {
+    intro() {},
+    outro() {},
+    cancel() {},
+    select: async (prompt) => {
+      snapshots.push({ message: prompt.message, stdout: io.stdout() });
+      return selects.shift()!;
+    },
+    text: async () => assert.fail("no text prompt expected"),
+    confirm: async () => false, // dry run
+    path: async (prompt) => {
+      snapshots.push({ message: prompt.message, stdout: io.stdout() });
+      return paths.shift()!;
+    },
+  };
+
+  const code = await main(
+    ["suppress", "-c", "comb.config.mjs", "-t", "target", "--workers", "1"],
+    io.io,
+    { prompter },
+  );
+
+  assert.equal(code, 1, "a dry run with impact is the CI probe");
+
+  const reportPrompt = snapshots.find((snapshot) => snapshot.message === "Report format");
+  assert.ok(reportPrompt, "the report prompt is asked");
+  assert.match(
+    reportPrompt.stdout,
+    /^Impact: 1 files would change, 1 edits/m,
+    "the impact summary is already printed when the report prompt is asked",
+  );
+  assert.match(
+    reportPrompt.stdout,
+    /Done: 1 files touched, 1 edits/,
+    "the completion line is already printed when the report prompt is asked",
+  );
+
+  const nextPrompt = snapshots.find((snapshot) => snapshot.message === "Next");
+  assert.ok(nextPrompt, "the apply/restart/abort question is asked after the report prompt");
+  assert.ok(
+    snapshots.indexOf(reportPrompt) < snapshots.indexOf(nextPrompt),
+    "the report prompt precedes apply/restart/abort (spec §5 step 8)",
+  );
 });
 
 test("cancel at any prompt exits cleanly without running", async () => {

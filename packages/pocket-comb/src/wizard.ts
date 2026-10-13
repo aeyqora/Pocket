@@ -11,11 +11,12 @@ import {
   text as clackText,
 } from "@clack/prompts";
 import { autoDetectConfig, configOptionsFor, resolveTarget } from "./config.js";
-import { defaultReportPath } from "./report/index.js";
+import { defaultReportPath, resolveReportOptions } from "./report/index.js";
 import { ACTIONS, REPORT_FORMATS } from "./types.js";
 import type { ParsedInvocation } from "./args.js";
 import type { CommandIo } from "./cli.js";
 import type { LoadConfigOptions, LoadedConfig, ReplacePair } from "./config.js";
+import type { ReportResolver, ResolvedReportOptions } from "./report/index.js";
 import type { Action, ReportFormat, RunMode } from "./types.js";
 import type { Readable, Writable } from "node:stream";
 
@@ -156,6 +157,12 @@ export function createClackPrompter(io: CommandIo): Prompter {
 export interface WizardRunContext {
   parsed: ParsedInvocation;
   config: LoadedConfig;
+  /**
+   * The report prompt seam (spec §5 step 7), supplied only when the report is a
+   * gap. The run callback forwards it to the action pipeline, which calls it
+   * after the run produced its data so the impact summary prints first (§13).
+   */
+  resolveReport?: ReportResolver;
 }
 
 export interface WizardDeps {
@@ -191,8 +198,13 @@ function nonEmpty(value: string): string | undefined {
 /**
  * The interactive session (spec §5): fill only the gaps flags and settings leave,
  * run the chosen action, then offer apply/restart/abort after a dry run. Entered
- * by `cli.ts` only on a TTY; a non-TTY run never reaches here. Cancel at any
- * prompt exits cleanly (exit 0) without running the action.
+ * by `cli.ts` only on a TTY; a non-TTY run never reaches here.
+ *
+ * The report prompt (step 7) is asked *inside* the run, via the `resolveReport`
+ * hook the run callback forwards to the pipeline, so the dry-run impact summary
+ * (step 6, §13) always prints before it. A cancel at any pre-run prompt exits
+ * cleanly (exit 0) without running the action; a cancel at the post-run report
+ * prompt keeps the run's exit code.
  */
 export async function runWizard(deps: WizardDeps): Promise<number> {
   const { cwd, prompter } = deps;
@@ -300,31 +312,46 @@ export async function runWizard(deps: WizardDeps): Promise<number> {
       mode = answer ? "apply" : "dry-run";
     }
 
-    // 6. report: asked only when neither `settings.report` nor the
-    //    `--format`/`--out`/`--no-report` flags carry it.
-    let format = base.format;
-    let out = base.out;
+    // 6. report: the prompt is asked only when neither `settings.report` nor the
+    //    `--format`/`--out`/`--no-report` flags carry it — but it is asked
+    //    *after* the run (step 7), so the dry-run impact summary prints first
+    //    (spec §5 step 7, §13). The `resolveReport` hook below is that seam: the
+    //    runner calls it once the run has produced its report data, before it
+    //    emits the report.
     const reportCarried =
       base.noReport || base.format !== null || base.out !== null || loaded.report !== undefined;
-    if (!reportCarried) {
-      showIntro();
-      const formatAnswer = await prompter.select({
-        message: "Report format",
-        options: REPORT_FORMATS.map((value) => ({ value, label: value })),
-        initialValue: "html",
-      });
-      if (isCancelled(formatAnswer)) return cancelled();
-      format = formatAnswer as ReportFormat;
-      const outAnswer = await prompter.path({
-        message: "Report output",
-        root: cwd,
-        directory: false,
-        initialValue: defaultReportPath(cwd, format),
-        validate: nonEmpty,
-      });
-      if (isCancelled(outAnswer)) return cancelled();
-      out = outAnswer;
-    }
+    let resolvedReport: ResolvedReportOptions | undefined;
+    let reportCancelled = false;
+    const resolveReport: ReportResolver | undefined = reportCarried
+      ? undefined
+      : async () => {
+          // Cache: the apply re-run (step 8) reuses the answer rather than
+          // re-asking.
+          if (resolvedReport !== undefined) return resolvedReport;
+          showIntro();
+          const formatAnswer = await prompter.select({
+            message: "Report format",
+            options: REPORT_FORMATS.map((value) => ({ value, label: value })),
+            initialValue: "html",
+          });
+          if (isCancelled(formatAnswer)) {
+            reportCancelled = true;
+            return (resolvedReport = resolveReportOptions({ noReport: true, cwd }));
+          }
+          const format = formatAnswer as ReportFormat;
+          const outAnswer = await prompter.path({
+            message: "Report output",
+            root: cwd,
+            directory: false,
+            initialValue: defaultReportPath(cwd, format),
+            validate: nonEmpty,
+          });
+          if (isCancelled(outAnswer)) {
+            reportCancelled = true;
+            return (resolvedReport = resolveReportOptions({ noReport: true, cwd }));
+          }
+          return (resolvedReport = { enabled: true, format, out: outAnswer });
+        };
 
     const finalParsed: ParsedInvocation = {
       ...base,
@@ -334,8 +361,6 @@ export async function runWizard(deps: WizardDeps): Promise<number> {
       from,
       to,
       mode,
-      format,
-      out,
     };
     const finalConfig: LoadedConfig = {
       ...loaded,
@@ -346,8 +371,20 @@ export async function runWizard(deps: WizardDeps): Promise<number> {
       ...(wizardPair !== undefined ? { replace: wizardPair } : {}),
     };
 
-    // 7. run, with the action's own spinner and completion line.
-    const code = await deps.run({ parsed: finalParsed, config: finalConfig });
+    // 7. run, with the action's own spinner and completion line. The report
+    //    prompt (step 6's gap) fires inside the run, after the impact summary.
+    const code = await deps.run({
+      parsed: finalParsed,
+      config: finalConfig,
+      ...(resolveReport !== undefined ? { resolveReport } : {}),
+    });
+
+    if (reportCancelled) {
+      // The run already happened; a cancel here declines the report only. The
+      // dry-run exit code stands, exactly like the post-run prompt's cancel.
+      prompter.cancel("Cancelled");
+      return finish(code);
+    }
 
     // 8. after a dry run, offer apply now / restart / abort. All actions are
     //    idempotent, so re-running in apply mode is safe.
@@ -361,7 +398,13 @@ export async function runWizard(deps: WizardDeps): Promise<number> {
       return finish(code);
     }
     if (next === "apply") {
-      const applied = await deps.run({ parsed: { ...finalParsed, mode: "apply" }, config: finalConfig });
+      const applied = await deps.run({
+        parsed: { ...finalParsed, mode: "apply" },
+        config: finalConfig,
+        // The report answer is cached, so the apply run re-emits the report
+        // without re-asking (spec §5 step 8).
+        ...(resolveReport !== undefined ? { resolveReport } : {}),
+      });
       return finish(applied);
     }
     if (next === "abort") return finish(code);
