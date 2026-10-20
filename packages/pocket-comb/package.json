@@ -1,0 +1,72 @@
+{
+  "name": "pocket-comb",
+  "version": "0.1.0",
+  "description": "Mass ESLint suppression-directive operations: suppress, fix, remove, replace, cleanup, inventory.",
+  "keywords": [
+    "eslint",
+    "suppression",
+    "directives",
+    "codemod",
+    "debt",
+    "cli"
+  ],
+  "author": {
+    "name": "aeyqora",
+    "email": "git@aeyqora.com"
+  },
+  "type": "module",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/aeyqora/Pocket/blob/main/packages/pocket-comb/README.md",
+  "bugs": {
+    "url": "https://github.com/aeyqora/Pocket/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aeyqora/Pocket.git"
+  },
+  "bin": {
+    "pocket-comb": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --import tsx --test \"test/*.test.ts\"",
+    "test:one": "node --import tsx --test",
+    "test:pack": "npm run build && node --import tsx test/pack-smoke.ts",
+    "test:perf": "node --expose-gc --import tsx perf/run-perf.ts",
+    "test:perf:harness": "node --import tsx --test \"test/perf/**/*.test.ts\"",
+    "perf:generate": "node --import tsx perf/generate.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.8.1",
+    "tinyglobby": "^0.2.10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "eslint": "^10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "peerDependencies": {
+    "eslint": ">=9.34"
+  }
+}

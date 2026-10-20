@@ -8,6 +8,7 @@ A suite of small developer tools for ESLint, each living in its own directory un
 ```
 packages/
   pocket-zipper/   # Gate a proposed change from adding new ESLint suppression debt; exceptions require approver review.
+  pocket-comb/     # Mass ESLint suppression operations: suppress, fix, remove, replace, cleanup, and inventory, with dry-run impact reports.
 ```
 
 ## Working on a tool
