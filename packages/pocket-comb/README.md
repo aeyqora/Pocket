@@ -12,15 +12,25 @@ comb performs the mass operations the gate's trends justify. Both warn and error
 severities are actionable, and edits are inline and line-anchored — unlike ESLint's own
 errors-only bulk suppressions.
 
+## Documentation
+
+- **[Start here: the wizard](docs/README.md)** — the guided flow, prompt by prompt.
+- **[Configuration](docs/configuration.md)** — the one action config every action shares.
+- **[Actions](docs/actions.md)** — what each verb does, what it changes, and what outcome
+  to expect.
+- **[Examples](docs/examples.md)** — wizard sessions and before/after deltas.
+- **[Reference](docs/reference.md)** — every flag, exit code, report field, and exported
+  function.
+
 ## Install
 
 ```sh
 # Recommended: no install, always the latest release.
-npx pocket-comb@latest <action>
+npx pocket-comb@latest
 
 # Version-pinned teams:
 npm install --save-dev pocket-comb
-npx pocket-comb <action>
+npx pocket-comb
 ```
 
 Pocket Comb requires **Node.js 20.12 or newer** and **ESLint 9.34 or newer** (flat config
@@ -31,7 +41,7 @@ install Pocket Comb, and `npx` resolves it for you.
 
 ```sh
 # 1. Write an action config: a standard ESLint flat config.
-cat > pocket-comb.config.mjs <<'EOF'
+cat > pocket-comb.config.js <<'EOF'
 export default [
   {
     rules: {
@@ -41,30 +51,45 @@ export default [
 ];
 EOF
 
-# 2. Dry run — prints the impact and writes nothing.
-#    Exit 1 when there is impact (the CI probe), 0 when there is none.
-npx pocket-comb@latest suppress --config ./pocket-comb.config.mjs
-
-# 3. Apply — writes the directives.
-npx pocket-comb@latest suppress --config ./pocket-comb.config.mjs --apply
+# 2. Start the wizard.
+npx pocket-comb@latest
 ```
 
-With no `--config`, Pocket Comb auto-detects `pocket-comb.config.{js,mjs,cjs,json}` in the
-current directory. On a terminal it fills any remaining gaps with a wizard; a
-non-interactive run uses flags only and never prompts a pipe. An explicit `--dry-run`
-stops after the impact summary; the wizard's apply/restart/abort menu appears only when
-the dry run was chosen interactively.
+The wizard asks only a few questions:
+
+1. **Which action?** — choose `suppress`.
+2. **Action config** — press Enter to accept `./pocket-comb.config.js`.
+3. **Target directory** — press Enter to accept the current directory.
+4. **Apply changes?** — press Enter for **No**, a dry run.
+5. Review the impact, then accept the report format and output prompts.
+6. Choose **Apply now** to write it.
+
+That is the whole first run. You can also preselect the action and keep the rest of the
+wizard:
+
+```sh
+npx pocket-comb@latest suppress
+```
+
+A non-interactive run never prompts. It defaults to a dry run and uses flags, settings,
+and defaults only. See the [reference](docs/reference.md#flags) for the full flag surface.
+
+The examples use `.js` with ESM `export default`, assuming the package is
+`"type": "module"`. In a CommonJS package, use `.mjs` or write `module.exports = [...]`.
+See the [config guide](docs/configuration.md#esm-and-commonjs).
 
 ## Actions
 
-| Action | What it does |
-|---|---|
-| `suppress` | The flagship. Insert or prepend disable directives for the config's rules, one directive per line. Flags: `--reason <text>`, `--fix-first`, `--reuse-blocks`. |
-| `fix` | Autofix the config's rules under the isolated instance. |
-| `remove` | Strip the config's rules from every directive in the target. |
-| `replace` | Rename rule tokens across every directive. `--from <rule>` / `--to <rule>`; a `--from` ending in `/` re-points every rule under that prefix. |
-| `cleanup` | Prune unused directives (config-scoped). |
-| `inventory` | The read-only census: count every **disable** directive, by form, rule, and file. No linting. |
+| Action | Wizard hint | What it does | Changes |
+|---|---|---|---|
+| `suppress` | insert/prepend disable directives | Insert or prepend directives for the config's rules. | Directive comments |
+| `fix` | autofix the config's rules | Autofix the config's rules under the isolated instance. | Source code |
+| `remove` | strip the config's rules from directives | Strip the config's rules from every directive. | Directive comments |
+| `replace` | rename rule tokens | Rename rule tokens across every directive. | Directive comments |
+| `cleanup` | prune unused directives | Prune unused directives, config-scoped. | Directive comments |
+| `inventory` | read-only census | Count every **disable** directive, by form, rule, and file. | Nothing |
+
+Each action is described in detail in [Actions](docs/actions.md).
 
 ### Exit codes
 
@@ -74,25 +99,21 @@ the dry run was chosen interactively.
 | 1 | Dry run with impact — the CI probe. |
 | 2 | Operational error: config missing or unloadable, no files matched, invalid input, unrecoverable worker failure. |
 
-### Flags
+## Shortcuts and CI
 
-| Flag | Applies to | Meaning / default |
-|---|---|---|
-| `-c, --config <path>` | all | Action config; auto-detected from the cwd convention. |
-| `-t, --target <path\|glob>` | all | Target root; default cwd (after `settings.target`). |
-| `--dry-run` / `--apply` | mutating | Non-interactive default is a dry run; `--apply` writes. |
-| `--from <rule>` / `--to <rule>` | replace | The rename pair; overrides `settings.replace`. |
-| `--reason <text>` | suppress | Append ` -- text` to inserted directives only. |
-| `--fix-first` | suppress | Autofix first, re-lint, then suppress the remainder. |
-| `--reuse-blocks` | suppress | Prepend into enclosing block/file-level guards. |
-| `--format csv\|json\|html` | all | Report format; default `html`. |
-| `--out <path\|->` | all | Report destination; default `pocket-comb-report.<ext>` in cwd; `-` is stdout. |
-| `--no-report` | all | Skip the report. |
-| `--workers <n>` | all | Pool size; default `ceil(cores × 0.75)`, min 1. |
-| `--serial` | all | No pool; a single in-process instance. |
-| `--batch-size <n>` | all | Files per task; default 16. |
-| `--extensions <csv>` | all | Discovery extensions; default `.js,.mjs,.cjs,.jsx,.ts,.mts,.cts,.tsx`. |
-| `--version`, `--help` | — | Print and exit 0. |
+Every wizard answer has a flag twin. Use them when you want a repeat run, a script, or CI:
+
+```sh
+# Non-interactive dry run, then apply.
+npx pocket-comb suppress --config ./pocket-comb.config.js
+npx pocket-comb suppress --config ./pocket-comb.config.js --apply
+
+# Pipe a census to a trend store.
+npx pocket-comb inventory --format csv --out - >> suppressions.csv
+```
+
+The complete option list, applicability rules, report destinations, and worker settings
+are in the [CLI reference](docs/reference.md#flags). The wizard remains the normal path.
 
 ## The action config
 
@@ -106,7 +127,7 @@ The action config is a **standard ESLint flat config** — an array of objects l
 - **Tool knobs** → the namespaced, free-form `settings["pocket-comb"]` block.
 
 ```js
-// pocket-comb.config.mjs
+// pocket-comb.config.js
 import tseslint from "typescript-eslint"; // resolves from THIS file's node_modules
 
 export default tseslint.config(
@@ -128,16 +149,16 @@ export default tseslint.config(
 );
 ```
 
+The wizard asks for the config path and pre-fills the detected file. Full details, path
+rules, and recipes: [Configuration](docs/configuration.md).
+
 ### `settings["pocket-comb"]`
 
 | Key | Type | Meaning |
 |---|---|---|
-| `target` | string | Target root. A relative path resolves against the **config file's directory**, not the cwd. |
-| `replace` | `{ from, to }` | The `replace` action's rename pair. |
-| `report` | `{ format, out }` | Post-run report format (`csv` / `json` / `html`) and destination; suppresses the report prompt. |
-
-Precedence everywhere is **CLI flag > wizard answer > settings key > default**. Define the
-block once; settings across config objects are merged shallowly per key.
+| `target` | string | Target root. Relative paths resolve against the config file's directory. Answers the wizard's target prompt. |
+| `replace` | `{ from, to }` | The `replace` action's rename pair. Answers the wizard's rename prompts. |
+| `report` | `{ format, out }` | Report format (`csv` / `json` / `html`) and destination. Skips the wizard's report prompts. |
 
 ### Config coverage for non-JS targets
 
@@ -157,19 +178,16 @@ matching `files` coverage *and* the parser:
 Dropped files are counted in the report's `counts.dropped`; they are never silently
 misreported as clean.
 
-### TypeScript configs need jiti
+### TypeScript configs
 
 The config file may be `.js`, `.mjs`, `.cjs`, or `.json`. A **TypeScript** config
-(`pocket-comb.config.ts`) requires a user-installed `jiti >= 2.2` — ESLint's own rule for
-loading TypeScript config files. Install it in the repo alongside ESLint:
-
-```sh
-npm install --save-dev jiti
-```
+(`pocket-comb.config.ts`) is not auto-detected; type its path at the wizard's config
+prompt. It is loaded through Node's ESM loader, so the runtime must be able to import
+TypeScript — Node 22.18+ supports this natively; older versions need a loader.
 
 ### Path resolution
 
-- A relative `--config` / `--target` resolves against the **cwd**.
+- A relative config or target answer resolves against the **cwd**.
 - A relative `settings.target` resolves against the **config file's directory**, so a
   tools-directory config can target a repo path elsewhere.
 - ESLint's `cwd` is the resolved target root, so the config's `files` / `ignores` globs
@@ -177,25 +195,21 @@ npm install --save-dev jiti
 
 ## Reports
 
-Every action can emit a report: `--format csv|json|html` (default `html`),
-`--out <path|->` (default `pocket-comb-report.<ext>` in the cwd; `-` is stdout), or
-`--no-report`. JSON is the canonical schema: run metadata (including the config's sha256),
-the per-edit ledger, and rollups by rule, form, and file. `inventory` renders a census
-instead. The piping shape for a trend store:
+The wizard asks for the report format and destination after the run, unless a setting or
+flag already answers it. `html` is the default; `csv` is the flat ledger; `json` is the
+canonical schema. The report is written last, after the impact and completion lines.
 
-```sh
-npx pocket-comb inventory --format csv --out - >> suppressions.csv
-```
+`inventory` renders a census instead. It counts **disable** directives only — the four
+suppression forms (`next-line`, `line`, `block`, `file-level`). An `eslint-enable` is a
+block closer, not a suppression, so it is excluded from census totals and per-file counts.
 
-The census counts **disable** directives only — the four suppression forms
-(`next-line`, `line`, `block`, `file-level`). An `eslint-enable` is a block closer, not a
-suppression, so it is excluded from the census totals and per-file counts.
+For report flags, destinations, and schema, see the
+[reference](docs/reference.md#reports).
 
 ## Requirements
 
 - **Node.js** 20.12 or newer.
 - **ESLint** 9.34 or newer, flat config only. A required peer dependency.
-- **jiti** 2.2 or newer, only when the action config is TypeScript.
 
 ## Development
 

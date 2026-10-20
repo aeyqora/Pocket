@@ -73,7 +73,7 @@ function main(): void {
     for (const path of paths) {
       assert.match(
         path,
-        /^(dist\/|README\.md$|CHANGELOG\.md$|LICENSE$|package\.json$)/,
+        /^(dist\/|docs\/|README\.md$|CHANGELOG\.md$|LICENSE$|package\.json$)/,
         `unexpected file in tarball: ${path}`,
       );
     }
@@ -82,6 +82,11 @@ function main(): void {
       "README.md",
       "CHANGELOG.md",
       "LICENSE",
+      "docs/README.md",
+      "docs/configuration.md",
+      "docs/actions.md",
+      "docs/examples.md",
+      "docs/reference.md",
       "dist/cli.js",
       "dist/index.js",
       "dist/index.d.ts",
@@ -110,7 +115,7 @@ function main(): void {
     );
     assert.equal(meta.bin?.["pocket-comb"], "dist/cli.js");
     assert.equal(meta.license, "Apache-2.0");
-    for (const entry of ["dist", "README.md", "CHANGELOG.md", "LICENSE"]) {
+    for (const entry of ["dist", "docs", "README.md", "CHANGELOG.md", "LICENSE"]) {
       assert.ok(meta.files?.includes(entry), `package.json files is missing ${entry}`);
     }
     process.stdout.write("engines, peer, bin, license, files: ok\n");
