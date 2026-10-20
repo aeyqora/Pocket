@@ -4,7 +4,6 @@ dist/
 .DS_Store
 .scratch
 .agents
-CONTEXT.MD
 skills-lock.json
 AGENTS.md
 docs/agents
