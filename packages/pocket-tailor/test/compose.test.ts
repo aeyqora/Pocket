@@ -12,11 +12,13 @@ import {
   literalRule,
   locRule,
   multiArgRule,
+  testDocs,
+  testRule,
   twoIdsRule,
 } from "./fixtures.js";
 
 test("composed rule replaces the upstream message at the same location", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     meta: { messages: { customFlagged: "Do not use {{name}}: it is {{word}}" } },
     report(detection, helpers) {
@@ -44,14 +46,17 @@ test("returning nothing forwards the upstream report byte for byte", () => {
   ];
 
   for (const [label, upstream, code] of cases) {
-    const composed = defineTailoredRule({ tailors: upstream, report: () => undefined });
+    const composed = testRule({ tailors: upstream, report: () => undefined });
     assert.deepEqual(lintWith(composed, code), lintWith(upstream, code), label);
   }
 });
 
 test("a missing hook and a null return both mean pass-through, never suppression", () => {
-  const passthrough = defineTailoredRule({ tailors: flagRule });
-  const nullHook = defineTailoredRule({ tailors: flagRule, report: () => null });
+  const passthrough = defineTailoredRule({
+    tailors: flagRule,
+    meta: { docs: testDocs, messages: { unrelated: "never reported by upstream" } },
+  });
+  const nullHook = testRule({ tailors: flagRule, report: () => null });
 
   for (const composed of [passthrough, nullHook]) {
     const messages = lintWith(composed, "flag;\n");
@@ -62,7 +67,7 @@ test("a missing hook and a null return both mean pass-through, never suppression
 });
 
 test("a hook only reshapes the detections it claims; the rest pass through", () => {
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: twoIdsRule,
     meta: { messages: { tailoredAlpha: "tailored {{name}}" } },
     report: (detection, helpers) =>
@@ -79,7 +84,7 @@ test("a hook only reshapes the detections it claims; the rest pass through", () 
 });
 
 test("detection parity: the composed rule fires exactly where upstream fires", () => {
-  const composed = defineTailoredRule({ tailors: flagRule });
+  const composed = testRule({ tailors: flagRule });
   const codes = [
     "flag;\n",
     "ok;\n",
@@ -97,7 +102,7 @@ test("detection parity: the composed rule fires exactly where upstream fires", (
 });
 
 test("upstream options are forwarded verbatim to upstream detection", () => {
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: flagRule,
     meta: { messages: { custom: "{{name}} => {{word}}" } },
     report: (detection, helpers) =>
@@ -113,7 +118,7 @@ test("upstream options are forwarded verbatim to upstream detection", () => {
 test("options configured for upstream reach the hook's detection and helpers", () => {
   let detectionOptions: readonly unknown[] | undefined;
   let helperOptions: readonly unknown[] | undefined;
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: flagRule,
     report: (detection, helpers) => {
       detectionOptions = detection.options;
@@ -128,7 +133,7 @@ test("options configured for upstream reach the hook's detection and helpers", (
 });
 
 test("the composed schema is the upstream schema, so options validate identically", () => {
-  const composed = defineTailoredRule({ tailors: flagRule, meta: { messages: {} } });
+  const composed = testRule({ tailors: flagRule, meta: { messages: {} } });
   assert.equal(composed.meta!.schema, flagRule.meta!.schema);
 
   assert.doesNotThrow(() => lintWith(composed, "flag;\n", { options: [{ severityWord: "ok" }] }));
@@ -137,7 +142,7 @@ test("the composed schema is the upstream schema, so options validate identicall
 });
 
 test("upstream defaultOptions are preserved and merged verbatim", () => {
-  const composed = defineTailoredRule({ tailors: defaultedRule });
+  const composed = testRule({ tailors: defaultedRule });
   assert.equal(composed.meta!.defaultOptions, defaultedRule.meta!.defaultOptions);
 
   assert.equal(lintWith(composed, "defaulted;\n")[0]!.message, "defaulted: defaulted");
@@ -149,7 +154,7 @@ test("upstream defaultOptions are preserved and merged verbatim", () => {
 
 test("the hook receives sourceCode, filename, options, and settings", () => {
   const seen: Record<string, unknown> = {};
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: flagRule,
     report(detection, helpers) {
       seen.text = helpers.sourceCode.getText(detection.node);
@@ -169,7 +174,7 @@ test("the hook receives sourceCode, filename, options, and settings", () => {
 });
 
 test("authored messages win id collisions; schema and defaultOptions stay upstream", () => {
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: flagRule,
     meta: { messages: { flagged: "author override {{name}} {{word}}" } },
   });
@@ -182,7 +187,7 @@ test("authored messages win id collisions; schema and defaultOptions stay upstre
 });
 
 test("the hook may return a messageId resolved against authored meta", () => {
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: flagRule,
     meta: { messages: { renamed: "renamed {{name}}" } },
     report: (detection) =>
@@ -195,7 +200,7 @@ test("the hook may return a messageId resolved against authored meta", () => {
 });
 
 test("the hook may switch a literal upstream message to a messageId", () => {
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: literalRule,
     meta: { messages: { custom: "custom literal" } },
     report: (detection) =>
@@ -208,7 +213,7 @@ test("the hook may switch a literal upstream message to a messageId", () => {
 });
 
 test("a name-form declaration throws clearly until composed", () => {
-  const declaration = defineTailoredRule({
+  const declaration = testRule({
     tailors: "flag-identifier",
     meta: { messages: { tailored: "tailored {{name}}" } },
     report: (detection, helpers) =>
@@ -230,18 +235,25 @@ test("a name-form declaration throws clearly until composed", () => {
 });
 
 test("a direct-module composition is runnable and carries its definition", () => {
-  const definition = { tailors: flagRule } as const;
-  const composed = defineTailoredRule(definition);
+  const definition = {
+    tailors: flagRule,
+    meta: { docs: testDocs },
+    report: () => undefined,
+  } as const;
+  const composed = testRule(definition);
 
   assert.equal(typeof composed.create, "function");
   assert.equal(composed[TAILORING].tailors, flagRule);
-  assert.equal(composeRule(flagRule, { tailors: flagRule })[TAILORING].tailors, flagRule);
+  assert.equal(
+    composeRule(flagRule, definition)[TAILORING].tailors,
+    flagRule,
+  );
 });
 
 test("detection exposes the node the upstream rule reported", () => {
   let node: unknown;
   let loc: unknown = "unset";
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: flagRule,
     report(detection) {
       node = detection.node;
@@ -259,7 +271,7 @@ test("detection exposes the node the upstream rule reported", () => {
 test("detection exposes a bare loc the upstream rule reported", () => {
   let loc: unknown;
   let node: unknown;
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: locRule,
     report(detection) {
       loc = detection.loc;
@@ -274,7 +286,7 @@ test("detection exposes a bare loc the upstream rule reported", () => {
 });
 
 test("a hook returning both loc and node keeps loc (ESLint prefers loc over node)", () => {
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: flagRule,
     report: (detection) =>
       detection.messageId === "flagged"

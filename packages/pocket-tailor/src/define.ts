@@ -1,5 +1,6 @@
 import { composeRule } from "./compose.js";
 import { TAILORING, type TailoredRuleModule, type TailoringDefinition } from "./types.js";
+import { assertTailoringDefinition } from "./validate.js";
 
 /**
  * Declare a tailored rule.
@@ -13,6 +14,8 @@ import { TAILORING, type TailoredRuleModule, type TailoringDefinition } from "./
  * The tailoring definition is exposed on the module under {@link TAILORING}.
  */
 export function defineTailoredRule(definition: TailoringDefinition): TailoredRuleModule {
+  assertTailoringDefinition(definition);
+
   if (typeof definition.tailors !== "string") {
     return composeRule(definition.tailors, definition);
   }
@@ -23,7 +26,7 @@ export function defineTailoredRule(definition: TailoringDefinition): TailoredRul
     // author declared. `schema: false` keeps option validation out of the way so
     // the unresolved error below is the one that surfaces.
     meta: {
-      ...(definition.meta ?? {}),
+      ...definition.meta,
       schema: false,
     },
     create() {

@@ -15,14 +15,18 @@ import {
 } from "../src/index.js";
 import { selfRegisteringPlugin } from "./fixtures.js";
 
-// A guard for the README. Ticket 04 is a docs ticket, so the drift test lives
-// with the docs: every public name and every quickstart/worked-example shape the
-// README shows is reproduced here, end to end, against synthetic fixtures. No
-// real published plugin is imported anywhere in this file — `eslint-plugin-thing`
-// is a hypothetical plugin defined below.
+// A guard for the README and the guides. Ticket 04 is a docs ticket, so the
+// drift test lives with the docs: every public name and every quickstart,
+// adoption, and testing shape the public docs show is reproduced here, end to
+// end, against synthetic fixtures. No real published plugin is imported
+// anywhere in this file — `eslint-plugin-thing` is a hypothetical plugin
+// defined below.
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readme = readFileSync(join(packageRoot, "README.md"), "utf8");
+const apiGuide = readFileSync(join(packageRoot, "docs/guides/api.md"), "utf8");
+const adoptionGuide = readFileSync(join(packageRoot, "docs/guides/adopting-in-a-repo.md"), "utf8");
+const testingGuide = readFileSync(join(packageRoot, "docs/guides/testing-and-upgrades.md"), "utf8");
 
 // --- The hypothetical upstream plugin: eslint-plugin-thing ------------------
 
@@ -113,17 +117,18 @@ function makeThing(): UpstreamPlugin {
 /** README quickstart / worked example (a): a repo-local tailored file. */
 const repoLocalNoWidget = defineTailoredRule({
   tailors: "no-widget",
+  message:
+    "Do not use <{{name}}>. Prefer the <Panel> component. "
+    + "Guide: https://example.dev/components/panel",
   meta: {
-    messages: {
-      noWidget:
-        "Do not use <{{name}}>. Prefer the <Panel> component — it handles "
-        + "labelling for you. Guide: https://example.dev/components/panel",
+    docs: {
+      description: "Block widget elements in favour of Panel.",
+      url: "https://example.dev/components/panel",
     },
   },
+  autofix: true,
   report(detection) {
     if (detection.messageId !== "noWidget") return null;
-    // A fix and nothing else: message, data, and location stay inherited from
-    // upstream, and the fix becomes an editor suggestion (no `autofix: true`).
     return { fix: (fixer) => fixer.replaceText(detection.node!, "Panel") };
   },
 });
@@ -132,6 +137,10 @@ const repoLocalNoWidget = defineTailoredRule({
 const sharedPreferPanel = defineTailoredRule({
   tailors: "prefer-panel",
   meta: {
+    docs: {
+      description: "Prefer the shared Panel component.",
+      url: "https://example.dev/components/panel",
+    },
     messages: {
       usePanel:
         "Use <Panel> instead of <{{name}}>. Panel guidance: "
@@ -151,10 +160,14 @@ function lint(wrapped: UpstreamPlugin, code: string, config: Linter.Config = {})
 
 // --- (a) README documents the real public surface ---------------------------
 
-test("the README documents every public runtime export under its real name", () => {
+test("the README and API reference document every public runtime export", () => {
   const names = ["defineTailoredRule", "composeRule", "tailor", "TAILORING"];
   for (const name of names) {
     assert.ok(name in api, `${name} is exported`);
+    assert.match(apiGuide, new RegExp(`\\b${name}\\b`), `API reference documents ${name}`);
+  }
+  // The quick start names the two exports a first-time reader needs.
+  for (const name of ["defineTailoredRule", "tailor"]) {
     assert.match(readme, new RegExp(`\\b${name}\\b`), `README documents ${name}`);
   }
 });
@@ -164,11 +177,7 @@ test("the README keeps the required section headings", () => {
     "# Pocket Tailor",
     "## Install",
     "## Quick start",
-    "## Worked adoption example",
-    "## Migration guide",
-    "## Testing tailored rules",
-    "## Boundaries",
-    "## Requirements",
+    "## Documentation",
     "## Development",
   ]) {
     assert.match(readme, new RegExp(`^${heading}$`, "m"), `README has ${heading}`);
@@ -195,14 +204,13 @@ test("quickstart: tailor() wraps the plugin and the recommended config serves th
 
   const [message] = lint(tailoredThing, "const widget = 1;\n");
   assert.equal(message!.ruleId, "thing/no-widget"); // rule id unchanged (ADR-0001)
-  assert.equal(message!.messageId, "noWidget"); // upstream message id preserved
+  assert.equal(message!.messageId, undefined); // the basic message replaces the id
   assert.match(message!.message, /Do not use <widget>\. Prefer the <Panel> component/);
   assert.match(message!.message, /https:\/\/example\.dev\/components\/panel/);
 
-  // The authored fix is an editor suggestion, not a --fix autofix.
-  assert.equal(message!.fix, undefined);
-  assert.equal(message!.suggestions!.length, 1);
-  assert.deepEqual(message!.suggestions![0]!.fix, { range: [6, 12], text: "Panel" });
+  // `autofix: true` makes the authored fix a real --fix rewrite.
+  assert.deepEqual(message!.fix, { range: [6, 12], text: "Panel" });
+  assert.equal(message!.suggestions, undefined);
 });
 
 test("quickstart: upstream options reach upstream detection verbatim", () => {
@@ -311,11 +319,12 @@ test("drift: composeRule(upstream, tailored[TAILORING]) yields a RuleTester rule
     invalid: [
       {
         code: "const widget = 1;\n",
-        output: null, // the authored fix is a suggestion; --fix leaves the file alone
+        output: "const Panel = 1;\n", // autofix: true rewrites under --fix
         errors: [
           {
-            messageId: "noWidget", // upstream still detects under this id
-            suggestions: [{ desc: "Apply the tailored fix.", output: "const Panel = 1;\n" }],
+            message:
+              "Do not use <widget>. Prefer the <Panel> component. "
+              + "Guide: https://example.dev/components/panel",
           },
         ],
       },
@@ -326,7 +335,13 @@ test("drift: composeRule(upstream, tailored[TAILORING]) yields a RuleTester rule
 test("drift: the direct-module form is runnable under RuleTester with no harness", () => {
   const rule = defineTailoredRule({
     tailors: noWidgetRule,
-    meta: { messages: { noWidget: "Tailored: no <widget>." } },
+    meta: {
+      docs: {
+        description: "Direct-module tailored rule.",
+        url: "https://example.dev/thing/no-widget",
+      },
+      messages: { noWidget: "Tailored: no <widget>." },
+    },
   });
 
   new RuleTester({
@@ -339,14 +354,18 @@ test("drift: the direct-module form is runnable under RuleTester with no harness
 
 // --- The README's documented snippets appear where the docs claim them ------
 
-test("the README shows the shapes this file exercises", () => {
+test("the docs show the shapes this file exercises", () => {
+  for (const anchor of ['tailors: "no-widget"', "eslint-plugin-thing", "tailor(thing, [noWidget])"]) {
+    assert.ok(readme.includes(anchor), `README includes ${JSON.stringify(anchor)}`);
+  }
+  assert.ok(
+    adoptionGuide.includes("tailor(thing, [noWidget, preferPanel])"),
+    "adoption guide shows mixing repo-local and shared rules",
+  );
   for (const anchor of [
-    'tailors: "no-widget"',
-    "tailor(thing, [noWidget, preferPanel])",
     'composeRule(thing.rules["no-widget"], tailored[TAILORING])',
-    "eslint-plugin-thing",
     "is a declaration",
   ]) {
-    assert.ok(readme.includes(anchor), `README includes ${JSON.stringify(anchor)}`);
+    assert.ok(testingGuide.includes(anchor), `testing guide includes ${JSON.stringify(anchor)}`);
   }
 });

@@ -79,10 +79,18 @@ export type ReportHook = (
   helpers: ReportHelpers,
 ) => TailoredReport | null | undefined | void;
 
-/** Authored rule metadata. `messages` are merged over the upstream messages. */
-export interface TailoringMeta {
+/** Authored documentation metadata required of every tailored rule. */
+export interface TailoringDocs {
+  /** A short, human-readable summary of what this tailored rule enforces. */
+  description: string;
+  /** An absolute http(s) URL for the rule's documentation. */
+  url: string;
+}
+
+/** Authored rule metadata. `messages` are merged over the upstream messages. */export interface TailoringMeta {
+  /** Required documentation metadata; powers the editor's rule link. */
+  docs: TailoringDocs;
   messages?: Record<string, string>;
-  docs?: Rule.RuleMetaData["docs"];
   type?: Rule.RuleMetaData["type"];
 }
 
@@ -93,13 +101,20 @@ export interface TailoringMeta {
 export interface TailoringDefinition {
   /** The upstream rule, referenced by name inside a plugin or by direct module. */
   tailors: string | Rule.RuleModule;
+  /** Authored metadata. `docs` is required; `message`, `messages`, or `report` must tailor presentation. */
+  meta: TailoringMeta;
+  /**
+   * One message for every detection of this rule, regardless of whether
+   * upstream reports with `messageId` or a plain `message`. Interpolates
+   * upstream `data` with `{{placeholder}}`. A `report()` result wins.
+   */
+  message?: string;
   /**
    * Opt an authored `fix` into `--fix` by synthesizing `meta.fixable`. When
    * omitted (or `false`), an authored fix becomes an editor suggestion and
    * `--fix` leaves the file alone (ADR-0003).
    */
   autofix?: boolean;
-  meta?: TailoringMeta;
   report?: ReportHook;
 }
 

@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { interpolate } from "../src/interpolate.js";
-import { defineTailoredRule } from "../src/index.js";
-import { flagRule, lintWith } from "./fixtures.js";
+import { flagRule, lintWith, testRule } from "./fixtures.js";
 
 test("interpolate substitutes {{ }} markers exactly like ESLint", () => {
   assert.equal(interpolate("a {{x}} b", { x: "X" }), "a X b");
@@ -32,7 +31,7 @@ test("interpolate coerces replacement values the way String#replace does", () =>
 
 test("helpers.message throws a descriptive error for an unknown message id", () => {
   let thrown: unknown;
-  const composed = defineTailoredRule({
+  const composed = testRule({
     tailors: flagRule,
     report(detection, helpers) {
       if (detection.messageId !== "flagged") return undefined;

@@ -1,5 +1,37 @@
 import { Linter, type Rule } from "eslint";
-import type { UpstreamPlugin } from "../src/index.js";
+import { defineTailoredRule } from "../src/index.js";
+import type {
+  TailoredRuleModule,
+  TailoringDefinition,
+  TailoringDocs,
+  TailoringMeta,
+  UpstreamPlugin,
+} from "../src/index.js";
+
+/** Documentation metadata every synthetic tailored rule in the suite declares. */
+export const testDocs: TailoringDocs = {
+  description: "Test tailored rule.",
+  url: "https://example.test/pocket-tailor/rule",
+};
+
+/**
+ * Build a tailored rule for tests, filling in the required docs and a no-op
+ * `report()` when the test does not supply one. Tests about missing metadata
+ * call `defineTailoredRule()` directly so the guard itself is exercised.
+ */
+export function testRule(
+  definition: Omit<TailoringDefinition, "meta"> & { meta?: Partial<TailoringMeta> },
+): TailoredRuleModule {
+  const meta: TailoringMeta = { docs: testDocs, ...definition.meta };
+  const hasMessages = Object.keys(meta.messages ?? {}).length > 0;
+  return defineTailoredRule({
+    ...definition,
+    meta,
+    ...(definition.report || definition.message !== undefined || hasMessages
+      ? {}
+      : { report: () => undefined }),
+  });
+}
 
 /**
  * Build a synthetic upstream plugin that self-registers: `buildConfigs` is

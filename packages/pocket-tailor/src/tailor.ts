@@ -6,6 +6,7 @@ import {
   type TailoringDefinition,
   type UpstreamPlugin,
 } from "./types.js";
+import { assertTailoringDefinition } from "./validate.js";
 
 /**
  * Wrap an upstream plugin so its tailored rules' reports are reshaped while the
@@ -47,6 +48,8 @@ export function tailor<P extends UpstreamPlugin>(
           `at index ${index}. Create tailored rule modules with defineTailoredRule().`,
       );
     }
+
+    assertTailoringDefinition(definition);
 
     const target = definition.tailors;
     if (typeof target !== "string") {
@@ -94,8 +97,8 @@ export function tailor<P extends UpstreamPlugin>(
 
 /** A human-readable pointer to the offending tailored rule module. */
 function describeModule(definition: TailoringDefinition, index: number): string {
-  const description = definition.meta?.docs?.description;
-  const label = typeof description === "string" ? `"${description}"` : "no description";
+  const description = definition.meta.docs.description;
+  const label = `"${description}"`;
   const target =
     typeof definition.tailors === "string" ? `'${definition.tailors}'` : "a rule module";
   return `module at index ${index} (${label}, tailors ${target})`;

@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Linter } from "eslint";
 import { defineConfig } from "eslint/config";
-import { defineTailoredRule, tailor, TAILORING } from "../src/index.js";
+import { tailor, TAILORING } from "../src/index.js";
 import type { UpstreamPlugin } from "../src/index.js";
-import { fixableRule, flagRule, literalRule, lintWith, selfRegisteringPlugin } from "./fixtures.js";
+import { fixableRule, flagRule, literalRule, lintWith, selfRegisteringPlugin, testDocs, testRule } from "./fixtures.js";
 
 /**
  * A synthetic upstream plugin that carries a named config embedding the plugin
@@ -42,7 +42,7 @@ function makeUpstream(): UpstreamPlugin {
 }
 
 /** A tailored rule module that targets the synthetic `flag-identifier` rule by name. */
-const flagTailoring = defineTailoredRule({
+const flagTailoring = testRule({
   tailors: "flag-identifier",
   meta: { messages: { custom: "Tailored: do not use {{name}} ({{word}})" } },
   report: (detection, helpers) =>
@@ -143,9 +143,9 @@ test("the single-object config form is rewritten and remains usable standalone",
 });
 
 test("a module naming an upstream rule the plugin lacks throws at load time, naming the module", () => {
-  const missing = defineTailoredRule({
+  const missing = testRule({
     tailors: "alt-txt",
-    meta: { docs: { description: "rewrites alt-txt" } },
+    meta: { docs: { ...testDocs, description: "rewrites alt-txt" } },
   });
 
   assert.throws(
@@ -162,13 +162,13 @@ test("a module naming an upstream rule the plugin lacks throws at load time, nam
 });
 
 test("tailoring the same upstream rule twice throws at load time", () => {
-  const first = defineTailoredRule({
+  const first = testRule({
     tailors: "flag-identifier",
-    meta: { docs: { description: "first tailoring" } },
+    meta: { docs: { ...testDocs, description: "first tailoring" } },
   });
-  const second = defineTailoredRule({
+  const second = testRule({
     tailors: "flag-identifier",
-    meta: { docs: { description: "second tailoring" } },
+    meta: { docs: { ...testDocs, description: "second tailoring" } },
   });
 
   assert.throws(
@@ -188,7 +188,7 @@ test("tailor() rejects values that are not tailored rule modules", () => {
 });
 
 test("tailor() requires the name form; a direct-module tailoring is rejected with guidance", () => {
-  const direct = defineTailoredRule({ tailors: flagRule });
+  const direct = testRule({ tailors: flagRule });
 
   assert.throws(
     () => tailor(makeUpstream(), [direct]),

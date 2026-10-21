@@ -1,14 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RuleTester } from "eslint";
-import { defineTailoredRule } from "../src/index.js";
-import { fixWith, fixableRule, flagRule, lintWith, whitespaceFixRule } from "./fixtures.js";
+import { fixWith, fixableRule, flagRule, lintWith, testRule, whitespaceFixRule } from "./fixtures.js";
 
 // Ticket 03: injected fixes and suggestions (ADR-0003). By default an authored
 // fix is an editor suggestion; `autofix: true` opts into `--fix`.
 
 test("an authored fix on a non-fixable upstream rule becomes a suggestion", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     report: (detection) =>
       detection.messageId === "flagged"
@@ -27,14 +26,14 @@ test("suggestion mode declares meta.hasSuggestions as a capability; meta.fixable
   // ESLint requires `hasSuggestions` statically on `meta`, before any report
   // exists, so the composed rule declares the capability of suggestion mode
   // (`autofix` not opted in) rather than the presence of a fix in one report.
-  const composed = defineTailoredRule({ tailors: flagRule });
+  const composed = testRule({ tailors: flagRule });
 
   assert.equal(composed.meta!.fixable, undefined);
   assert.equal(composed.meta!.hasSuggestions, true);
 });
 
 test("autofix mode declares meta.fixable and leaves hasSuggestions to upstream", () => {
-  const composed = defineTailoredRule({ tailors: flagRule, autofix: true });
+  const composed = testRule({ tailors: flagRule, autofix: true });
 
   assert.equal(composed.meta!.fixable, "code");
   assert.equal(composed.meta!.hasSuggestions, undefined);
@@ -45,14 +44,14 @@ test("an upstream meta.hasSuggestions is preserved on the composed rule", () => 
     meta: { type: "problem", hasSuggestions: true, schema: [] as never[], messages: {} },
     create: () => ({}),
   };
-  const composed = defineTailoredRule({ tailors: upstream, autofix: true });
+  const composed = testRule({ tailors: upstream, autofix: true });
 
   assert.equal(composed.meta!.hasSuggestions, true);
   assert.equal(composed.meta!.fixable, "code");
 });
 
 test("--fix does not apply a suggested fix by default", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     report: (detection) =>
       detection.messageId === "flagged"
@@ -66,7 +65,7 @@ test("--fix does not apply a suggested fix by default", () => {
 });
 
 test("autofix: true makes --fix apply the authored fix and marks the rule fixable", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     autofix: true,
     report: (detection) =>
@@ -88,7 +87,7 @@ test("autofix: true makes --fix apply the authored fix and marks the rule fixabl
 });
 
 test("a hook that only rewrites the message keeps the upstream fix as an autofix", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: fixableRule,
     report: (detection) =>
       detection.messageId === "fixable" ? { message: "tailored message" } : undefined,
@@ -103,10 +102,10 @@ test("a hook that only rewrites the message keeps the upstream fix as an autofix
 });
 
 test("upstream meta.fixable is preserved, and autofix reuses its type", () => {
-  const preserved = defineTailoredRule({ tailors: whitespaceFixRule });
+  const preserved = testRule({ tailors: whitespaceFixRule });
   assert.equal(preserved.meta!.fixable, "whitespace");
 
-  const authored = defineTailoredRule({
+  const authored = testRule({
     tailors: whitespaceFixRule,
     autofix: true,
     report: (detection) =>
@@ -118,7 +117,7 @@ test("upstream meta.fixable is preserved, and autofix reuses its type", () => {
 });
 
 test("an authored fix overrides an upstream fix and becomes a suggestion by default", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: fixableRule,
     report: (detection) =>
       detection.messageId === "fixable"
@@ -136,7 +135,7 @@ test("an authored fix overrides an upstream fix and becomes a suggestion by defa
 });
 
 test("a hook may return suggestions directly, and an authored fix is appended", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     meta: { messages: { constHint: "declare with const" } },
     report: (detection) =>
@@ -162,7 +161,7 @@ test("a hook may return suggestions directly, and an authored fix is appended", 
 });
 
 test("a converted fix takes an authored suggestion messageId and data", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     meta: { messages: { useImage: "replace {{name}} with <Image>" } },
     report: (detection) =>
@@ -182,7 +181,7 @@ test("a converted fix takes an authored suggestion messageId and data", () => {
 });
 
 test("a converted fix takes an authored suggestionDesc when provided", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     report: (detection) =>
       detection.messageId === "flagged"
@@ -198,7 +197,7 @@ test("a converted fix takes an authored suggestionDesc when provided", () => {
 });
 
 test("a suggestion applies to the exact fixture range and --fix leaves it alone (RuleTester)", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     report: (detection) =>
       detection.messageId === "flagged"
@@ -227,7 +226,7 @@ test("a suggestion applies to the exact fixture range and --fix leaves it alone 
 });
 
 test("overlapping authored fixes fail loudly rather than corrupting output", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     autofix: true,
     report: (detection) =>
@@ -246,7 +245,7 @@ test("overlapping authored fixes fail loudly rather than corrupting output", () 
 });
 
 test("a malformed fix range fails loudly rather than corrupting output", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     autofix: true,
     report: (detection) =>
@@ -259,7 +258,7 @@ test("a malformed fix range fails loudly rather than corrupting output", () => {
 });
 
 test("an out-of-range authored fix fails loudly rather than being silently clamped", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     autofix: true,
     report: (detection) =>
@@ -273,7 +272,7 @@ test("an out-of-range authored fix fails loudly rather than being silently clamp
 });
 
 test("an out-of-range authored fix in suggestion mode fails loudly too", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     report: (detection) =>
       detection.messageId === "flagged"
@@ -285,7 +284,7 @@ test("an out-of-range authored fix in suggestion mode fails loudly too", () => {
 });
 
 test("an in-range authored fix still applies exactly", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     autofix: true,
     report: (detection) =>

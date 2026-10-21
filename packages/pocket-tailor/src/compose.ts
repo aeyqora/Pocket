@@ -1,5 +1,6 @@
 import type { Rule } from "eslint";
 import { interpolate } from "./interpolate.js";
+import { assertTailoringDefinition } from "./validate.js";
 import {
   TAILORING,
   type Detection,
@@ -68,6 +69,27 @@ function routeReportFix(
   delete descriptor.suggestionData;
 
   return descriptor;
+}
+
+/**
+ * Whether the hook itself chose the report's message. When it did, the basic
+ * `message` template must not overwrite that per-detection decision.
+ */
+function authoredMessage(next: TailoredReport | null | undefined): boolean {
+  if (!next) return false;
+  return (
+    next.message !== undefined ||
+    (next.messageId !== undefined && next.messageId !== "")
+  );
+}
+
+/**
+ * Render the basic `message` template for a detection. ESLint rejects a report
+ * carrying both `message` and `messageId`, so the id is dropped.
+ */
+function applyGlobalMessage(descriptor: ReportDescriptor, template: string): ReportDescriptor {
+  const { messageId: _upstreamMessageId, ...rest } = descriptor;
+  return { ...rest, message: interpolate(template, descriptor.data) };
 }
 
 /**
@@ -193,11 +215,13 @@ export function composeRule(
   upstream: Rule.RuleModule,
   definition: TailoringDefinition,
 ): TailoredRuleModule {
+  assertTailoringDefinition(definition);
+
   const upstreamMeta = upstream.meta ?? {};
   const autofix = definition.autofix === true;
   const messages: Record<string, string> = {
     ...(upstreamMeta.messages ?? {}),
-    ...(definition.meta?.messages ?? {}),
+    ...(definition.meta.messages ?? {}),
   };
 
   // ESLint requires `fixable` and `hasSuggestions` to be declared statically on
@@ -220,11 +244,11 @@ export function composeRule(
   const ruleLabel =
     typeof definition.tailors === "string"
       ? definition.tailors
-      : (definition.meta?.docs?.description ?? "tailored rule");
+      : definition.meta.docs.description;
 
   const meta: Rule.RuleMetaData = {
     ...upstreamMeta,
-    ...(definition.meta ?? {}),
+    ...definition.meta,
     ...(fixable === undefined ? {} : { fixable }),
     ...(hasSuggestions === undefined ? {} : { hasSuggestions }),
     messages,
@@ -262,25 +286,31 @@ export function composeRule(
         value(...args: unknown[]) {
           const descriptor = normalizeReportArgs(args);
           const detection: Detection = { ...descriptor, options: context.options };
-          const next = report ? report(detection, helpers) : undefined;
+          const next = report ? (report(detection, helpers) ?? undefined) : undefined;
 
-          if (!next) {
+          if (!next && definition.message === undefined) {
             originalReport(descriptor as Rule.ReportDescriptor);
             return;
           }
 
           // Only a fix the hook itself returned is range-checked; a fix merely
           // inherited from upstream is forwarded untouched.
-          const merged = typeof next.fix === "function"
-            ? {
-                ...next,
-                fix: guardAuthoredFix(next.fix, context.sourceCode.text.length, ruleLabel),
-              }
-            : next;
+          const authored =
+            next && typeof next.fix === "function"
+              ? {
+                  ...next,
+                  fix: guardAuthoredFix(next.fix, context.sourceCode.text.length, ruleLabel),
+                }
+              : next;
+
+          const merged = next ? mergeReport(descriptor, authored ?? next) : descriptor;
+          const withMessage =
+            definition.message !== undefined && !authoredMessage(next)
+              ? applyGlobalMessage(merged, definition.message)
+              : merged;
 
           originalReport(
-            routeReportFix(mergeReport(descriptor, merged), next.fix !== undefined, autofix) as
-              Rule.ReportDescriptor,
+            routeReportFix(withMessage, next?.fix !== undefined, autofix) as Rule.ReportDescriptor,
           );
         },
       },

@@ -10,6 +10,7 @@ export type {
   TailoredReport,
   TailoredRuleModule,
   TailoringDefinition,
+  TailoringDocs,
   TailoringMeta,
   UpstreamPlugin,
   UpstreamRuleModule,

@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import { RuleTester } from "eslint";
-import { defineTailoredRule } from "../src/index.js";
-import { flagRule } from "./fixtures.js";
+import { flagRule, testRule } from "./fixtures.js";
 
 const ruleTester = new RuleTester({
   languageOptions: { ecmaVersion: 2022, sourceType: "module" },
@@ -10,7 +9,7 @@ const ruleTester = new RuleTester({
 // The spec's test process: a composed rule is a rule-shaped module, so it runs
 // in the standard RuleTester with no harness.
 test("a composed rule runs under RuleTester with no harness", () => {
-  const rule = defineTailoredRule({
+  const rule = testRule({
     tailors: flagRule,
     meta: { messages: { renamed: "renamed {{name}}" } },
     report: (detection) =>
@@ -31,7 +30,7 @@ test("a composed rule runs under RuleTester with no harness", () => {
 });
 
 test("a composed rule asserting the upstream message id when it passes through", () => {
-  const rule = defineTailoredRule({ tailors: flagRule });
+  const rule = testRule({ tailors: flagRule });
 
   ruleTester.run("flag-identifier-passthrough", rule, {
     valid: [{ code: "const ok = 1;\n" }],

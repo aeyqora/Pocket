@@ -36,6 +36,10 @@
   },
   "files": [
     "dist",
+    "docs/README.md",
+    "docs/guides",
+    "examples",
+    "CONTEXT.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
