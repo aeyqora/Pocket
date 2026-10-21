@@ -1,0 +1,11 @@
+node_modules
+dist/
+*.log
+.DS_Store
+.scratch
+.agents
+AGENTS.md
+skills-lock.json
+docs/agents
+pocket-comb-report.*
+perf/corpus/

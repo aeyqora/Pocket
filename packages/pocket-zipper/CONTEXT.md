@@ -95,7 +95,8 @@ _Avoid_: diff (the diff is the change map, the mechanism; the proposed change is
 **Policy**:
 The committed tool configuration (`.pocket-zipper/config.yml`) that shapes what debt exists
 and whether it is counted: the `enabled` flag (the gate evaluates only when true), the
-optional `governedRules` allowlist, the optional `exceptions` stanza
+optional `governedRules` allowlist, the optional `governedPaths`/`ungovernedPaths`
+pair declaring the path scope, the optional `exceptions` stanza
 (`defaultExpiry`/`maxExpiry`) governing temporary-exception horizons, the optional
 `minSeverities` map of Severity floors, and the optional
 combined-landing opt-in (`allowSameChangeExceptions` plus the declared `host`) that permits
@@ -105,6 +106,23 @@ authorizes new debt rather than shaping it. If the baseline registry alone is de
 registry half may read the head-side file for one change under the poisoned-baseline repair
 guards: the change carries the registry, the head file is defect-free, and this baseline policy
 parsed cleanly. The effective policy remains the baseline's.
+
+**Governed path**:
+A repository path the policy counts suppression debt for: every tracked path by default,
+narrowed by the optional `governedPaths` allowlist, then minus the optional
+`ungovernedPaths` subtractor — exclusion wins. A suppression in a path outside the governed
+set is not a logical suppression on either side of the comparison, so one moved into the set
+is new debt; config-offs and severity weakenings are scoped by their config block's declared
+reach, never by the config file's own path.
+_Avoid_: gated path (the domain's adjective is governed, on both axes).
+
+**Ungoverned path**:
+A repository path the policy subtracts from the governed set after the allowlist narrows it;
+overlap with `governedPaths` is legal and the ungoverned entry wins. An exception record
+whose file sits in an ungoverned path is spent, and pre-excluding a path governance never
+claimed is forward declaration, not an error.
+_Avoid_: excluded path (the `excluded` verdict is the disabled gate), exempt path
+(exceptions are the registry's, one per suppression).
 
 **Severity floor**:
 The minimum severity band the Policy declares for one named governed rule
@@ -234,7 +252,8 @@ _Avoid_: out-of-policy exception, beyond-max.
 An exception record that authorizes nothing. Three shapes: dangling (no *unclaimed*
 suppression matching it remains in its file — a surplus record whose matching
 suppressions are all already covered by sibling records is dangling too), spent (its
-suppression has become existing debt in its file), and expired (a temporary past its date,
+suppression has become existing debt in its file, or de-governed — its rule or path left
+the governed set), and expired (a temporary past its date,
 which authorizes nothing at all). Reported as cleanup debt, never a gate failure on its own.
 Each is reported as a delete-ready pointer — the record's position in the registry, the line
 range it occupies, and its own text — so removal is find-in-one-glance; the tool never deletes
