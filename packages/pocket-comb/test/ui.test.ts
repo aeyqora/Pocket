@@ -1,6 +1,13 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { createSpinner, formatCompletion, summarizeRun, writeCompletion } from "../src/ui.js";
+import { join } from "node:path";
+import {
+  createSpinner,
+  formatCompletion,
+  summarizeRun,
+  writeCompletion,
+  writeNotActionable,
+} from "../src/ui.js";
 import { cleanupTemps, fakeIo, tempDir } from "./harness.js";
 import type { EditRecord } from "../src/types.js";
 
@@ -58,6 +65,58 @@ test("writeCompletion prints the completion line with a trailing newline", () =>
     elapsedMs: 250,
   });
   assert.equal(fake.stdout(), "Done: 1 files touched, 0 edits (0 inserted, 0 prepended) — 0.3s\n");
+});
+
+test("writeNotActionable keeps bare-only wording and explains context skips in a mixed run", () => {
+  const fake = fakeIo({ cwd: tempDir() });
+  const cwd = fake.io.cwd;
+
+  writeNotActionable(fake.io.output, cwd, [
+    {
+      notActionable: [
+        {
+          kind: "bare",
+          file: join(cwd, "a.js"),
+          line: 3,
+          form: "next-line",
+          text: "// eslint-disable-next-line",
+        },
+      ],
+    },
+  ]);
+  assert.equal(
+    fake.stdout(),
+    "Not actionable: 1 bare directives (no rule list)\n" +
+      "  a.js:3 next-line // eslint-disable-next-line\n",
+  );
+
+  const mixed = fakeIo({ cwd });
+  writeNotActionable(mixed.io.output, cwd, [
+    {
+      notActionable: [
+        {
+          kind: "bare",
+          file: join(cwd, "a.js"),
+          line: 3,
+          form: "next-line",
+          text: "// eslint-disable-next-line",
+        },
+        {
+          kind: "context",
+          file: join(cwd, "b.jsx"),
+          line: 7,
+          text: "  ${value}",
+          reason: "inside a template literal",
+        },
+      ],
+    },
+  ]);
+  assert.equal(
+    mixed.stdout(),
+    "Not actionable: 2 items\n" +
+      "  a.js:3 next-line // eslint-disable-next-line — bare directive (no rule list)\n" +
+      "  b.jsx:7   ${value} — inside a template literal\n",
+  );
 });
 
 test("the spinner animates on a TTY without blocking the event loop", async () => {

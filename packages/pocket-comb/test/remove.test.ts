@@ -54,7 +54,7 @@ test("remove strips exactly the config's rules across all four forms; others are
   );
   assert.deepEqual(result.stats, { stripped: 2, deleted: 2, skippedBare: 1, rulesRemoved: 4 });
   assert.deepEqual(result.notActionable, [
-    { file: "/repo/a.js", line: 7, form: "file-level", text: "// eslint-disable" },
+    { kind: "bare", file: "/repo/a.js", line: 7, form: "file-level", text: "// eslint-disable" },
   ]);
 });
 
@@ -136,12 +136,13 @@ test("bare directives are untouched and reported as not-actionable", () => {
   assert.deepEqual(result.edits, []);
   assert.deepEqual(result.notActionable, [
     {
+      kind: "bare",
       file: "/repo/a.js",
       line: 1,
       form: "next-line",
       text: "// eslint-disable-next-line",
     },
-    { file: "/repo/a.js", line: 2, form: "file-level", text: "/* eslint-disable */" },
+    { kind: "bare", file: "/repo/a.js", line: 2, form: "file-level", text: "/* eslint-disable */" },
   ]);
   assert.equal(result.stats.skippedBare, 2);
 });
@@ -171,4 +172,37 @@ test("a directive with none of the config's rules is left completely alone", () 
   assert.equal(result.output, text);
   assert.deepEqual(result.edits, []);
   assert.deepEqual(result.notActionable, []);
+});
+
+test("remove rewrites every comment style, including JSX and suffix block forms", () => {
+  const text = [
+    "{/* eslint-disable no-console, no-alert */}",
+    "{console.log(1)}",
+    "<div>{value}</div>{/* eslint-disable-line no-console */}",
+    "code(); /* eslint-disable-line no-alert */",
+    "{ /* eslint-disable no-console */ }",
+    "",
+  ].join("\n");
+
+  const result = remove(text, ["no-console"]);
+
+  assert.equal(
+    result.output,
+    [
+      "{/* eslint-disable no-alert */}",
+      "{console.log(1)}",
+      "<div>{value}</div>",
+      "code(); /* eslint-disable-line no-alert */",
+      "",
+    ].join("\n"),
+    "JSX spellings survive a rewrite; an emptied suffix loses only its comment",
+  );
+  assert.deepEqual(
+    result.edits.map((edit) => [edit.line, edit.rule, edit.form]),
+    [
+      [1, "no-console", "file-level"],
+      [3, "no-console", "line"],
+      [5, "no-console", "file-level"],
+    ],
+  );
 });

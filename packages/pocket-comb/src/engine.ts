@@ -3,17 +3,21 @@ import { ESLint } from "eslint";
 import { lintFiles, type DroppedFile, type FatalFile } from "./eslint.js";
 import {
   formatDirective,
+  matchSuffix,
+  matchWholeLine,
   scanDirectives,
   splitRuleList,
   stripCr,
-  SUFFIX_LINE_RE,
-  WHOLE_NEXT_LINE_RE,
 } from "./scan.js";
 import type { ScannedDirective } from "./scan.js";
+import { createLineSyntaxResolver, edgesFor, unavailableSyntax } from "./syntax.js";
+import type { LineSyntax, LineSyntaxResolver, SyntaxLanguageOptions } from "./syntax.js";
 import { BARE_RULE } from "./types.js";
 import type {
   Action,
+  BareDirectiveNote,
   BatchOutcome,
+  ContextNote,
   DirectiveForm,
   EditRecord,
   JsonValue,
@@ -51,6 +55,14 @@ export interface RunActionForFileOptions {
   filePath: string;
   text: string;
   messages: LintMessage[];
+  /**
+   * Insertion context for `suppress` (spec §6.1/§7). The worker builds this from
+   * the resolved parser; a direct caller must supply it too. When absent, an
+   * insert is **not** emitted — the line is reported as not-actionable, because
+   * guessing between `//` and `{/* ... *\/}` can silently fail to suppress or
+   * render a comment as text.
+   */
+  syntax?: LineSyntaxResolver;
 }
 
 export interface RunActionResult {
@@ -79,22 +91,38 @@ export interface LineGuard {
   text: string;
   /** Code prefix preceding the comment (group 1). */
   code: string;
+  /** Exact whitespace between code and comment. */
+  sep: string;
   rules: string[];
   desc: string;
   bare: boolean;
   /** The line ended in CRLF. */
   cr: boolean;
+  /** The comment's exact opener (`//`, `/*`, `{/*`, or `{ /*`). */
+  open: string;
+  /** The comment's exact closer; "" for `//`. */
+  close: string;
 }
 
 export interface NextLineGuard {
   /** The directive line's text without a trailing CR (never rewritten raw). */
   text: string;
-  /** Indentation preceding the comment. */
+  /** Indentation preceding the comment (whole-line form only). */
   indent: string;
+  /** Code prefix preceding the comment (suffix form only). */
+  code: string;
+  /** Exact whitespace between code and comment (suffix form only). */
+  sep: string;
+  /** True when the directive rides at the end of a code line. */
+  suffix: boolean;
   rules: string[];
   desc: string;
   bare: boolean;
   cr: boolean;
+  /** The comment's exact opener (`//`, `/*`, `{/*`, or `{ /*`). */
+  open: string;
+  /** The comment's exact closer; "" for `//`. */
+  close: string;
 }
 
 /** One violation line and the guards the lazy scan found for it. */
@@ -103,6 +131,8 @@ export interface SuppressTarget {
   line: number;
   /** Actionable rules on the line, in first-seen order. */
   rules: string[];
+  /** The violation line's text, without a trailing CR (for notes). */
+  text: string;
   /** The violation line's leading whitespace (used for insert indentation). */
   indent: string;
   /** The violation line ended in CRLF. */
@@ -156,30 +186,65 @@ export function scanSuppressFile(
     const target: SuppressTarget = {
       line,
       rules,
+      text: own.probe,
       indent: leadingWhitespace(own.probe),
       cr: own.cr,
     };
 
-    const suffix = SUFFIX_LINE_RE.exec(own.probe);
-    if (suffix !== null) {
-      const { rules: listed, desc, bare } = splitRuleList(suffix[2] ?? "");
-      target.lineGuard = { text: own.probe, code: suffix[1] ?? "", rules: listed, desc, bare, cr: own.cr };
+    const suffix = matchSuffix(own.probe);
+    if (suffix !== null && suffix.form === "line" && suffix.kind === "disable") {
+      target.lineGuard = {
+        text: own.probe,
+        code: suffix.code,
+        sep: suffix.sep,
+        rules: suffix.rules,
+        desc: suffix.description,
+        bare: suffix.bare,
+        cr: own.cr,
+        open: suffix.open,
+        close: suffix.close,
+      };
     } else {
       const above = stripCr(lines[line - 2] ?? "");
-      const whole = WHOLE_NEXT_LINE_RE.exec(above.probe);
-      // A `line`-form whole comment on the line above guards its own line, not
-      // this violation — only `next-line` counts here. Group 3 is the form,
-      // group 4 the directive's tail (`WHOLE_NEXT_LINE_RE`'s extra comment group).
-      if (whole !== null && whole[3] === "next-line") {
-        const { rules: listed, desc, bare } = splitRuleList(whole[4] ?? "");
+      // A whole-line `next-line` directive on the line above guards this line;
+      // a whole-line `line` form guards its own line, not this one. A suffix
+      // `next-line` directive (any comment style) also guards the next line.
+      const whole = matchWholeLine(above.probe);
+      if (whole !== null && whole.form === "next-line" && whole.kind === "disable") {
         target.nextLineGuard = {
           text: above.probe,
-          indent: whole[1] ?? "",
-          rules: listed,
-          desc,
-          bare,
+          indent: whole.indent,
+          code: "",
+          sep: "",
+          suffix: false,
+          rules: whole.rules,
+          desc: whole.description,
+          bare: whole.bare,
           cr: above.cr,
+          open: whole.open,
+          close: whole.close,
         };
+      } else {
+        const aboveSuffix = matchSuffix(above.probe);
+        if (
+          aboveSuffix !== null &&
+          aboveSuffix.form === "next-line" &&
+          aboveSuffix.kind === "disable"
+        ) {
+          target.nextLineGuard = {
+            text: above.probe,
+            indent: "",
+            code: aboveSuffix.code,
+            sep: aboveSuffix.sep,
+            suffix: true,
+            rules: aboveSuffix.rules,
+            desc: aboveSuffix.description,
+            bare: aboveSuffix.bare,
+            cr: above.cr,
+            open: aboveSuffix.open,
+            close: aboveSuffix.close,
+          };
+        }
       }
     }
     targets.push(target);
@@ -196,8 +261,16 @@ export interface BlockGuard {
   /** 1-based line of the directive (the ledger anchor). */
   line: number;
   indent: string;
-  /** The comment opener, `//` or `/*`. */
+  /** Suffix block guards: the code preceding the comment; else "". */
+  code: string;
+  /** Suffix block guards: the exact separator between code and comment. */
+  sep: string;
+  /** True when the directive rides at the end of a code line. */
+  suffix: boolean;
+  /** The comment's exact opener (`//`, `/*`, `{/*`, or `{ /*`). */
   open: string;
+  /** The comment's exact closer; "" for `//`. */
+  close: string;
   /** The directive line's text without a trailing CR. */
   text: string;
   rules: string[];
@@ -238,7 +311,11 @@ export function findEnclosingBlockGuard(
     index: best.index,
     line: best.line,
     indent: best.indent,
-    open: best.comment,
+    code: best.code,
+    sep: best.sep,
+    suffix: best.suffix,
+    open: best.open,
+    close: best.close,
     text: best.text,
     rules: best.rules,
     desc: best.description,
@@ -272,7 +349,12 @@ export interface PlannedEdit {
  * suppressions (spec §6.1 step 3). Surfaced to the command as a not-actionable
  * note, like remove/cleanup's bare directives.
  */
-export type BareGuardSkip = Omit<NotActionableDirective, "file">;
+export type BareGuardSkip = Omit<BareDirectiveNote, "file">;
+
+/** A violation line where no directive could be inserted safely. */
+export type ContextSkip = Omit<ContextNote, "file">;
+
+export type SuppressSkip = BareGuardSkip | ContextSkip;
 
 export interface SuppressPlan {
   edits: PlannedEdit[];
@@ -280,8 +362,20 @@ export interface SuppressPlan {
   skippedBare: number;
   /** Lines skipped because the guard already listed every rule: idempotent. */
   skippedGuarded: number;
-  /** The bare guards behind `skippedBare`, for the command to report. */
-  notActionable: BareGuardSkip[];
+  /** Lines skipped because no safe insertion context could be determined. */
+  skippedContext: number;
+  /** The bare and context skips, for the command to report. */
+  notActionable: SuppressSkip[];
+}
+
+/** Ask the resolver, turning a thrown parser/path error into a reportable skip. */
+function classifyInsertion(syntax: LineSyntaxResolver, line: number): LineSyntax {
+  try {
+    return syntax(line);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return { context: "not-actionable", reason: `syntax context could not be determined: ${detail}` };
+  }
 }
 
 /**
@@ -302,19 +396,29 @@ export function planSuppressEdits(
   targets: readonly SuppressTarget[],
   params: SuppressParams,
   lines?: readonly string[],
+  syntax?: LineSyntaxResolver,
 ): SuppressPlan {
   const reason = params.reason ? ` -- ${params.reason}` : "";
   const reuseBlocks = params.reuseBlocks === true && lines !== undefined;
   const edits: PlannedEdit[] = [];
-  const notActionable: BareGuardSkip[] = [];
+  const notActionable: SuppressSkip[] = [];
+  let skippedBare = 0;
   let skippedGuarded = 0;
+  let skippedContext = 0;
+
+  // Strict fallback: with no resolver there is no safe way to choose between
+  // `//` and `{/* */}`. Never guess; report every insert candidate instead.
+  const resolver: LineSyntaxResolver = syntax ?? unavailableSyntax(
+    "no syntax context is available to choose a directive style",
+  );
 
   for (const target of targets) {
     const lineGuard = target.lineGuard;
     if (lineGuard !== undefined) {
       if (lineGuard.bare) {
         // Bare guard on the violation's own line: report the directive's line.
-        notActionable.push({ line: target.line, form: "line", text: lineGuard.text });
+        notActionable.push({ kind: "bare", line: target.line, form: "line", text: lineGuard.text });
+        skippedBare += 1;
         continue;
       }
       const missing = target.rules.filter((rule) => !lineGuard.rules.includes(rule));
@@ -331,7 +435,9 @@ export function planSuppressEdits(
         index: target.line - 1,
         added: missing,
         before: lineGuard.text + cr,
-        after: `${lineGuard.code} // eslint-disable-line ${all.join(", ")}${desc}${cr}`,
+        after: `${lineGuard.code}${lineGuard.sep}${lineGuard.open} eslint-disable-line ${all.join(
+          ", ",
+        )}${desc}${lineGuard.close}${cr}`,
         form: "line",
       });
       continue;
@@ -341,7 +447,13 @@ export function planSuppressEdits(
     if (nextLine !== undefined) {
       if (nextLine.bare) {
         // Bare guard on the line above: report the guard's own line.
-        notActionable.push({ line: target.line - 1, form: "next-line", text: nextLine.text });
+        notActionable.push({
+          kind: "bare",
+          line: target.line - 1,
+          form: "next-line",
+          text: nextLine.text,
+        });
+        skippedBare += 1;
         continue;
       }
       const missing = target.rules.filter((rule) => !nextLine.rules.includes(rule));
@@ -352,13 +464,16 @@ export function planSuppressEdits(
       const all = [...missing, ...nextLine.rules];
       const desc = nextLine.desc ? ` -- ${nextLine.desc}` : "";
       const cr = nextLine.cr ? "\r" : "";
+      const prefix = nextLine.suffix ? `${nextLine.code}${nextLine.sep}` : nextLine.indent;
       edits.push({
         kind: "prepend-next",
         line: target.line,
         index: target.line - 2,
         added: missing,
         before: nextLine.text + cr,
-        after: `${nextLine.indent}// eslint-disable-next-line ${all.join(", ")}${desc}${cr}`,
+        after: `${prefix}${nextLine.open} eslint-disable-next-line ${all.join(", ")}${desc}${
+          nextLine.close
+        }${cr}`,
         form: "next-line",
       });
       continue;
@@ -370,7 +485,13 @@ export function planSuppressEdits(
       const block = findEnclosingBlockGuard(lines!, target.line);
       if (block !== undefined) {
         if (block.bare) {
-          notActionable.push({ line: block.line, form: block.form, text: block.text });
+          notActionable.push({
+            kind: "bare",
+            line: block.line,
+            form: block.form,
+            text: block.text,
+          });
+          skippedBare += 1;
           continue;
         }
         const missing = target.rules.filter((rule) => !block.rules.includes(rule));
@@ -381,14 +502,14 @@ export function planSuppressEdits(
         const all = [...missing, ...block.rules];
         const desc = block.desc ? ` -- ${block.desc}` : "";
         const cr = block.cr ? "\r" : "";
-        const close = block.open === "/*" ? " */" : "";
+        const prefix = block.suffix ? `${block.code}${block.sep}` : block.indent;
         edits.push({
           kind: "prepend-block",
           line: block.line,
           index: block.index,
           added: missing,
           before: lines![block.index] ?? "",
-          after: `${block.indent}${block.open} eslint-disable ${all.join(", ")}${desc}${close}${cr}`,
+          after: `${prefix}${block.open} eslint-disable ${all.join(", ")}${desc}${block.close}${cr}`,
           form: block.form,
         });
         continue;
@@ -396,21 +517,34 @@ export function planSuppressEdits(
     }
 
     // No guard: the minimal-span insert — one directive suppressing exactly this
-    // line, indented to match it (spec §6.1). This is also the default for
-    // violations inside a block span or under a file-level directive.
+    // line, indented to match it (spec §6.1). The spelling comes from the
+    // line's syntax: `//` in JS/TS/opening tags, `{/* */}` in JSX children.
+    // Anything unsafe or unknown is reported, never guessed.
+    const decision: LineSyntax = classifyInsertion(resolver, target.line);
+    if (decision.context === "not-actionable") {
+      notActionable.push({
+        kind: "context",
+        line: target.line,
+        text: target.text,
+        reason: decision.reason,
+      });
+      skippedContext += 1;
+      continue;
+    }
+    const edges = edgesFor(decision.context);
     edits.push({
       kind: "insert",
       line: target.line,
       index: target.line - 1,
       added: [...target.rules],
-      after: `${target.indent}// eslint-disable-next-line ${target.rules.join(", ")}${reason}${
-        target.cr ? "\r" : ""
-      }`,
+      after: `${target.indent}${edges.open} eslint-disable-next-line ${target.rules.join(", ")}${reason}${
+        edges.close
+      }${target.cr ? "\r" : ""}`,
       form: "next-line",
     });
   }
 
-  return { edits, skippedBare: notActionable.length, skippedGuarded, notActionable };
+  return { edits, skippedBare, skippedGuarded, skippedContext, notActionable };
 }
 
 // --- apply --------------------------------------------------------------------
@@ -458,10 +592,11 @@ function suppressStrategy(options: RunActionForFileOptions): RunActionResult {
   const params = suppressParams(options.params);
   const lines = options.text.split("\n");
   const targets = scanSuppressFile(lines, options.messages);
-  const { edits, skippedBare, skippedGuarded, notActionable } = planSuppressEdits(
+  const { edits, skippedBare, skippedGuarded, skippedContext, notActionable } = planSuppressEdits(
     targets,
     params,
     params.reuseBlocks === true ? lines : undefined,
+    options.syntax,
   );
 
   const records: EditRecord[] = [];
@@ -484,6 +619,7 @@ function suppressStrategy(options: RunActionForFileOptions): RunActionResult {
       prepended: edits.length - inserted,
       skippedBare,
       skippedGuarded,
+      skippedContext,
     },
   };
 }
@@ -576,6 +712,7 @@ function removeStrategy(options: RunActionForFileOptions): RunActionResult {
     if (directive.bare) {
       // A bare guard names no rules, so it cannot be scoped to the config's set.
       notActionable.push({
+        kind: "bare",
         file: options.filePath,
         line: directive.line,
         form: directive.form,
@@ -978,6 +1115,7 @@ function cleanupStrategy(options: RunActionForFileOptions): RunActionResult {
     if (directive.kind !== "disable" || !directive.bare) continue;
     if (deletedDisables.has(directive.index)) continue;
     notActionable.push({
+      kind: "bare",
       file: options.filePath,
       line: directive.line,
       form: directive.form,
@@ -1228,6 +1366,39 @@ async function runFixBatch(
   return { outcomes, dropped, fatal };
 }
 
+/** True when a file has a message the suppress scan will act on. */
+function hasActionableMessage(messages: readonly LintMessage[]): boolean {
+  return messages.some(
+    (message) =>
+      message.severity >= 1 &&
+      message.ruleId !== null &&
+      message.ruleId !== undefined &&
+      typeof message.line === "number",
+  );
+}
+
+/**
+ * Build the suppress insertion-context resolver from the file's resolved parser
+ * configuration. Only called for suppress files that actually carry an
+ * actionable message; the parser itself stays lazy inside the resolver, so files
+ * whose violations are all guarded are never parsed.
+ */
+async function syntaxResolverFor(
+  eslint: ESLint,
+  filePath: string,
+  text: string,
+): Promise<LineSyntaxResolver> {
+  try {
+    const config = (await eslint.calculateConfigForFile(filePath)) as
+      | { languageOptions?: SyntaxLanguageOptions }
+      | undefined;
+    return createLineSyntaxResolver(text, config?.languageOptions, filePath);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return unavailableSyntax(`could not resolve the file's parser configuration: ${detail}`);
+  }
+}
+
 /**
  * `suppress --fix-first` (spec §6.1): fix first, then suppress only the
  * remainder, in one batch. On apply the fix phase writes via `outputFixes`, so
@@ -1260,12 +1431,16 @@ async function runFixFirstBatch(
     const onDisk = readFileSync(result.filePath, "utf8");
     const baseText =
       options.mode === "dry-run" && result.output !== undefined ? result.output : onDisk;
+    const syntax = hasActionableMessage(result.messages)
+      ? await syntaxResolverFor(eslint, result.filePath, baseText)
+      : undefined;
     const planned = runActionForFile({
       action: "suppress",
       params: options.params,
       filePath: result.filePath,
       text: baseText,
       messages: result.messages,
+      ...(syntax === undefined ? {} : { syntax }),
     });
 
     const suppressChanged = planned.output !== baseText;
@@ -1315,12 +1490,17 @@ export async function runBatch(
   const outcomes: BatchOutcome[] = [];
   for (const result of results) {
     const text = readFileSync(result.filePath, "utf8");
+    const syntax =
+      options.action === "suppress" && hasActionableMessage(result.messages)
+        ? await syntaxResolverFor(eslint, result.filePath, text)
+        : undefined;
     const planned = runActionForFile({
       action: options.action,
       params: options.params,
       filePath: result.filePath,
       text,
       messages: result.messages,
+      ...(syntax === undefined ? {} : { syntax }),
     });
 
     const changed = planned.output !== text;

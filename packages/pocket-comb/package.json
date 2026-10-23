@@ -1,6 +1,6 @@
 {
   "name": "pocket-comb",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Mass ESLint suppression-directive operations: suppress, fix, remove, replace, cleanup, inventory.",
   "keywords": [
     "eslint",

@@ -194,6 +194,13 @@ export default tseslint.config(
 their own work, but they still run through the same config and discovery pipeline. A
 file ESLint cannot parse is skipped and never treated as clean.
 
+`suppress` also uses that resolved parser to choose the inserted comment spelling:
+`// eslint-disable-next-line` in ordinary JS/TS and JSX attribute positions,
+`{/* eslint-disable-next-line */}` in JSX children. Enable JSX parsing
+(`parserOptions.ecmaFeatures.jsx: true`, or a TSX/JSX parser) for JSX files; without it
+they are parse errors, no directive is inserted, and the line is reported rather than
+guessed.
+
 ## The `settings["pocket-comb"]` block
 
 Tool settings are namespaced so ESLint ignores them. Define the block in any config

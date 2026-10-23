@@ -34,6 +34,18 @@ answer, the action config's `target` setting, the current working directory.
 A directive positioned to suppress a violation at a given line — on the violation's
 own line (the `line` form) or on the line above it (the `next-line` form).
 
+**Directive spelling**:
+The comment syntax a directive is written in — `//`, `/* */`, `{/* */}`, or
+`{ /* */ }` — together with its exact opener, closer, and spacing. Spelling is
+semantic: in JSX children only the `{/* */}` spelling is a comment, while `//` is
+rendered text. A rewrite preserves the directive's spelling; the `suppress` insert
+chooses the spelling from the target line's syntax.
+
+**JSX directive**:
+A suppression directive written in the `{/* */}` or `{ /* */ }` spelling. It is an
+ordinary directive for form (`next-line`, `line`, `block`, `file-level`), rule-list,
+and enable-pairing purposes; only its spelling differs.
+
 **Minimal-span insert**:
 The `suppress` default: every inserted directive suppresses exactly one line, even
 when the violation sits inside a `block` span or under a `file-level` directive, so

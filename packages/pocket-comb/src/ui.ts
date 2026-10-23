@@ -258,10 +258,14 @@ export function writeImpactSummary(
 }
 
 /**
- * List the directives an action recognised but could not act on (spec §6.1,
- * §6.3, §6.5): a bare guard names no rules, so it cannot be scoped — remove and
- * cleanup leave it, and suppress will not rewrite it. Stable order: file, then
- * line. Shared by every action that can surface one.
+ * List the lines an action recognised but could not act on (spec §6.1, §6.3,
+ * §6.5): a bare guard names no rules, so it cannot be scoped — remove and
+ * cleanup leave it, and suppress will not rewrite it; a context skip names the
+ * reason no safe directive could be inserted. Stable order: file, line, kind.
+ * Shared by every action that can surface one.
+ *
+ * A run whose notes are all bare keeps the original single-line header
+ * (`... bare directives (no rule list)`), so remove/cleanup output is unchanged.
  */
 export function writeNotActionable(
   output: NodeJS.WritableStream,
@@ -270,11 +274,27 @@ export function writeNotActionable(
 ): void {
   const notes = outcomes
     .flatMap((outcome) => outcome.notActionable ?? [])
-    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+    .sort(
+      (a, b) =>
+        a.file.localeCompare(b.file) || a.line - b.line || a.kind.localeCompare(b.kind),
+    );
   if (notes.length === 0) return;
 
-  output.write(`Not actionable: ${notes.length} bare directives (no rule list)\n`);
+  const allBare = notes.every((note) => note.kind === "bare");
+  if (allBare) {
+    output.write(`Not actionable: ${notes.length} bare directives (no rule list)\n`);
+    for (const note of notes) {
+      output.write(`  ${relative(cwd, note.file)}:${note.line} ${note.form} ${note.text}\n`);
+    }
+    return;
+  }
+
+  output.write(`Not actionable: ${notes.length} items\n`);
   for (const note of notes) {
-    output.write(`  ${relative(cwd, note.file)}:${note.line} ${note.form} ${note.text}\n`);
+    const detail =
+      note.kind === "bare"
+        ? `${note.form} ${note.text} — bare directive (no rule list)`
+        : `${note.text} — ${note.reason}`;
+    output.write(`  ${relative(cwd, note.file)}:${note.line} ${detail}\n`);
   }
 }

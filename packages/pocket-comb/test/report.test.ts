@@ -22,7 +22,7 @@ after(cleanupTemps);
 
 const META: RunMeta = {
   tool: "pocket-comb",
-  version: "0.1.0",
+  version: "0.2.0",
   action: "suppress",
   configPath: "/repo/comb.config.mjs",
   configHash: "9f2c0a",
@@ -297,7 +297,7 @@ test("one suppress dry run emits JSON, CSV and HTML with consistent content", as
 
   // Full run metadata, including the config sha256.
   assert.equal(parsed.meta.tool, "pocket-comb");
-  assert.equal(parsed.meta.version, "0.1.0");
+  assert.equal(parsed.meta.version, "0.2.0");
   assert.equal(parsed.meta.action, "suppress");
   assert.equal(parsed.meta.configPath, join(fix.dir, "comb.config.mjs"));
   assert.equal(parsed.meta.configHash, hash);

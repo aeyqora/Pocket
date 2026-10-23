@@ -140,3 +140,25 @@ test("replace is idempotent: a second pass over its own output finds no matching
   assert.equal(second.output, first.output);
   assert.deepEqual(second.edits, []);
 });
+
+test("replace preserves JSX and spaced comment spellings", () => {
+  const text = [
+    "{/* eslint-disable-next-line old-rule */}",
+    "{ /* eslint-disable old-rule */ }",
+    "<div>{value}</div>{/* eslint-disable-line old-rule */}",
+    "",
+  ].join("\n");
+
+  const result = replace(text, "old-rule", "new-rule");
+
+  assert.equal(
+    result.output,
+    [
+      "{/* eslint-disable-next-line new-rule */}",
+      "{ /* eslint-disable new-rule */ }",
+      "<div>{value}</div>{/* eslint-disable-line new-rule */}",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(result.stats.renamed, 3);
+});

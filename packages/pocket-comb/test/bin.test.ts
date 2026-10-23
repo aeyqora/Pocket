@@ -7,7 +7,7 @@ after(cleanupTemps);
 test("the built bin answers --version", () => {
   const result = runBin(["--version"], { cwd: tempDir() });
   assert.equal(result.status, 0);
-  assert.equal(result.stdout.trim(), "0.1.0");
+  assert.equal(result.stdout.trim(), "0.2.0");
 });
 
 test("the built bin answers --help", () => {

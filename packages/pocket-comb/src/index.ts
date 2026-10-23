@@ -50,6 +50,9 @@ export type {
   SuppressPlan,
   SuppressTarget,
   SuppressEditKind,
+  SuppressSkip,
+  BareGuardSkip,
+  ContextSkip,
   PlannedEdit,
   LineGuard,
   NextLineGuard,
@@ -59,6 +62,19 @@ export type {
   ReplaceParams,
   CleanupParams,
 } from "./engine.js";
+export {
+  createLineSyntaxResolver,
+  edgesFor,
+  unavailableSyntax,
+} from "./syntax.js";
+export type {
+  InsertContext,
+  LineSyntax,
+  LineSyntaxResolver,
+  ParserLike,
+  SyntaxLanguageOptions,
+  CommentEdges,
+} from "./syntax.js";
 export {
   scanDirectives,
   formatDirective,
@@ -110,7 +126,16 @@ export type {
   RunPoolResult,
   WorkerStat,
 } from "./pool.js";
-export type { BatchOutcome, DirectiveForm, EditRecord, EditType, JsonValue, NotActionableDirective } from "./types.js";
+export type {
+  BareDirectiveNote,
+  BatchOutcome,
+  ContextNote,
+  DirectiveForm,
+  EditRecord,
+  EditType,
+  JsonValue,
+  NotActionableDirective,
+} from "./types.js";
 export {
   createSpinner,
   formatCompletion,

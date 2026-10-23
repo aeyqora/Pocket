@@ -52,7 +52,7 @@ test("byFile counts are ordered by path", () => {
 test("buildRunReport assembles metadata, the ledger copy, and all rollups", () => {
   const meta: RunMeta = {
     tool: "pocket-comb",
-    version: "0.1.0",
+    version: "0.2.0",
     action: "suppress",
     configPath: "/repo/comb.config.mjs",
     configHash: "abc",

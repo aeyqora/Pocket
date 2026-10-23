@@ -78,20 +78,35 @@ export interface BatchOutcome {
 }
 
 /**
- * A directive an action recognised but deliberately left untouched (spec §6.3,
- * §6.5, §6.1). Carried from the engine through the pool so the command can
- * report it. A bare guard names no rules, so remove/cleanup cannot scope it and
- * suppress will not rewrite it (rewriting bare→explicit would break other
- * suppressions).
+ * Why an action left a line untouched (spec §6.1, §6.3, §6.5). Carried from the
+ * engine through the pool so the command can report it. The union keeps the two
+ * cases distinct: a **bare** note points at a directive that names no rules and
+ * so cannot be scoped; a **context** note points at a violation line where no
+ * directive could be inserted safely (template literal, comment, unknown
+ * syntax). A context note has no directive form, so `form` exists only on the
+ * bare variant.
  */
-export interface NotActionableDirective {
+interface NotActionableBase {
   file: string;
-  /** 1-based line the directive sits on. */
+  /** 1-based line the note points at. */
   line: number;
-  form: DirectiveForm;
-  /** The directive line's text, without a trailing CR. */
+  /** The directive line (bare) or violation line (context), without a trailing CR. */
   text: string;
 }
+
+/** A directive that names no rules, so remove/cleanup/suppress cannot scope it. */
+export type BareDirectiveNote = NotActionableBase & {
+  kind: "bare";
+  form: DirectiveForm;
+};
+
+/** A violation line where no directive can be inserted safely. */
+export type ContextNote = NotActionableBase & {
+  kind: "context";
+  reason: string;
+};
+
+export type NotActionableDirective = BareDirectiveNote | ContextNote;
 
 /**
  * The ledger's rule token for a bare-directive deletion (cleanup, spec §6.5):

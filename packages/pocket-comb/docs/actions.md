@@ -51,16 +51,23 @@ Comb aggregates the rules that fired on that line into one directive.
 
 **Expected outcome.**
 
-- A line with no guard gets a new `// eslint-disable-next-line <rules>` directly above
-  it, indented to match the code.
+- A line with no guard gets a new `eslint-disable-next-line <rules>` directly above it,
+  indented to match the code. The comment spelling follows the line's syntax:
+  - ordinary JS/TS code and JSX attribute lines inside an opening tag get
+    `// eslint-disable-next-line <rules>`;
+  - JSX children get `{/* eslint-disable-next-line <rules> */}`, because a `//` line
+    there is rendered text rather than a comment.
 - A line with an existing `line`-form or `next-line`-form guard gets any missing rule
-  **prepended** to the guard's list. Existing rule order and any trailing
+  **prepended** to the guard's list. Existing rule order, comment spelling
+  (`//`, `/* */`, `{/* */}`, `{ /* */ }`), code prefix, and any trailing
   `-- description` are preserved.
 - A violation already covered by a guard never becomes a lint message, so the action is
   naturally idempotent.
 - A violation inside a `block` span or under a `file-level` directive that does not name
   the rule gets a precise **minimal-span insert** by default: one new `next-line`
   directive inside the span. It does not widen the enclosing guard.
+- A violation inside a template literal, string, or comment has no safe insertion point:
+  the line is left untouched and listed as not actionable with the reason.
 - A bare guard at the guard position (the violation's own line or the line above) cannot
   be scoped: it is left untouched and listed as not actionable.
 
@@ -70,6 +77,10 @@ Comb aggregates the rules that fired on that line into one directive.
   keeps suppression counts exact.
 - A bare guard is reported, not rewritten. Rewriting bare to explicit would break the
   other suppressions it covers.
+- Context is decided by parsing with the action config's configured parser, never by the
+  file extension or a text heuristic. If the parser cannot be resolved or the file cannot
+  be parsed, the line is reported instead of guessing a directive that might not suppress
+  or might render as text.
 
 **Beyond the wizard.** The wizard does not ask about reasons or wider guards. Those are
 advanced flags, documented in the [suppress flags](reference.md#suppress-flags):

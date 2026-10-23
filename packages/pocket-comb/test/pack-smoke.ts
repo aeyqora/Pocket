@@ -157,7 +157,7 @@ function main(): void {
     step("npx pocket-comb --version");
     const version = npx(["--version"]);
     assert.equal(version.status, 0, version.stderr);
-    assert.equal(version.stdout.trim(), "0.1.0");
+    assert.equal(version.stdout.trim(), "0.2.0");
 
     step("npx pocket-comb suppress --dry-run");
     const suppress = npx([

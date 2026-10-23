@@ -134,6 +134,14 @@ value is a usage error.
 
 These three flags are rejected on every other action.
 
+**Directive spelling.** `suppress` parses the file with the action config's configured
+parser and chooses the inserted comment style from the violation line's syntax. Ordinary
+JS/TS code and JSX attribute lines get `// eslint-disable-next-line <rules>`; JSX children
+get `{/* eslint-disable-next-line <rules> */}`. A line inside a template literal, string,
+or comment — or a file whose parser cannot be resolved or parsed — is reported as not
+actionable and is never edited. Existing directives keep their own spelling on prepend:
+`//`, `/* */`, `{/* */}`, and `{ /* */ }` all round-trip unchanged.
+
 ### `replace` flags
 
 | Flag | Value | Meaning |
@@ -276,8 +284,20 @@ Not actionable: 2 bare directives (no rule list)
   src/b.js:10 block /* eslint-disable */
 ```
 
-`suppress` reports bare guards it left untouched. `remove` and `cleanup` report bare
-directives they could not scope. The list is emitted after the impact summary.
+When every note is a bare directive, that exact line is printed. When a run also has
+context skips (a violation inside a template literal, string, comment, or an unknown
+syntax position), the header becomes `Not actionable: N items` and each row carries its
+reason:
+
+```text
+Not actionable: 2 items
+  src/a.js:3 next-line // eslint-disable-next-line — bare directive (no rule list)
+  src/b.js:7   ${value} — inside a template literal
+```
+
+`suppress` reports bare guards it left untouched and violation lines with no safe
+insertion point. `remove` and `cleanup` report bare directives they could not scope. The
+list is emitted after the impact summary.
 
 ### Replace hint
 
@@ -319,7 +339,7 @@ Resolution:
 {
   "meta": {
     "tool": "pocket-comb",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "action": "suppress",
     "configPath": "/repo/pocket-comb.config.js",
     "configHash": "sha256-hex",
@@ -474,10 +494,13 @@ import { main, loadConfig, discover, createIsolatedESLint } from "pocket-comb";
 
 | Export | Signature | Purpose |
 |---|---|---|
-| `runActionForFile` | `(options: RunActionForFileOptions) => RunActionResult` | Plan and apply one action to one file's text. |
-| `runBatch` | `(eslint: ESLint, files: string[], options: RunBatchOptions) => Promise<RunBatchResult>` | Lint and run one batch. |
+| `runActionForFile` | `(options: RunActionForFileOptions) => RunActionResult` | Plan and apply one action to one file's text. `suppress` needs `options.syntax` for inserts; without it, inserts are reported as not actionable rather than guessed. |
+| `runBatch` | `(eslint: ESLint, files: string[], options: RunBatchOptions) => Promise<RunBatchResult>` | Lint and run one batch. Builds the suppress syntax resolver from the resolved parser. |
 | `scanSuppressFile` | `(lines: readonly string[], messages: readonly LintMessage[]) => SuppressTarget[]` | The lazy suppress guard scan. |
-| `planSuppressEdits` | `(targets: readonly SuppressTarget[], params: SuppressParams, lines?: readonly string[]) => SuppressPlan` | Turn targets into insert/prepend edits. |
+| `planSuppressEdits` | `(targets: readonly SuppressTarget[], params: SuppressParams, lines?: readonly string[], syntax?: LineSyntaxResolver) => SuppressPlan` | Turn targets into insert/prepend edits, choosing the spelling from `syntax`. |
+| `createLineSyntaxResolver` | `(text: string, languageOptions: SyntaxLanguageOptions \| undefined, filePath: string) => LineSyntaxResolver` | Lazy, parser-backed insertion-context classifier. |
+| `edgesFor` | `(context: InsertContext) => CommentEdges` | The `//` or `{/* */}` spelling for a context. |
+| `unavailableSyntax` | `(reason: string) => LineSyntaxResolver` | A resolver that refuses every insert with a reason. |
 | `applySuppressEdits` | `(lines: string[], edits: readonly PlannedEdit[]) => void` | Apply planned edits bottom-up. |
 | `findEnclosingBlockGuard` | `(lines: readonly string[], violationLine: number) => BlockGuard \| undefined` | The `--reuse-blocks` lookup. |
 | `splitRuleList` | `(rest: string) => RuleList` | Split a directive tail into rules and description. |
@@ -490,8 +513,8 @@ import { main, loadConfig, discover, createIsolatedESLint } from "pocket-comb";
 
 | Export | Signature | Purpose |
 |---|---|---|
-| `scanDirectives` | `(lines: readonly string[]) => ScannedDirective[]` | Full-file scan across all four forms. |
-| `formatDirective` | `(directive: ScannedDirective, rules: readonly string[]) => string` | Re-render a directive preserving form and description. |
+| `scanDirectives` | `(lines: readonly string[]) => ScannedDirective[]` | Full-file scan across all four forms and every comment spelling (`//`, `/* */`, `{/* */}`, `{ /* */ }`). |
+| `formatDirective` | `(directive: ScannedDirective, rules: readonly string[]) => string` | Re-render a directive preserving form, exact spelling, description, prefix, and CRLF. |
 | `directiveName` | `(directive: ScannedDirective) => string` | The directive keyword for a form. |
 | `censusFiles` | `(files: readonly CensusInput[]) => CensusResult` | Aggregate per-file scans into census totals. |
 | `censusFileScan` | `(lines: readonly string[]) => CensusFileScan` | One file's census entries. |

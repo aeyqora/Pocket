@@ -2,11 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runActionForFile } from "../src/engine.js";
 import type { SuppressParams } from "../src/engine.js";
+import type { LineSyntaxResolver } from "../src/syntax.js";
 import type { LintMessage } from "../src/types.js";
 
 function msg(line: number, rule: string, severity: 1 | 2 = 1): LintMessage {
   return { ruleId: rule, severity, message: "", line, column: 1 } as LintMessage;
 }
+
+const codeSyntax: LineSyntaxResolver = () => ({ context: "js" });
 
 function run(
   text: string,
@@ -19,6 +22,7 @@ function run(
     filePath: "/repo/reuse.js",
     text,
     messages,
+    syntax: codeSyntax,
   });
 }
 
@@ -165,6 +169,41 @@ test("--reuse-blocks skips a guard that already lists the rule", () => {
   assert.equal(result.output, text);
   assert.deepEqual(result.edits, []);
   assert.equal(result.stats.skippedGuarded, 1);
+});
+
+test("--reuse-blocks finds a JSX block guard and keeps the matching JSX enable", () => {
+  const text =
+    "{/* eslint-disable no-unused-vars -- legacy */}\n" +
+    "<div>\n" +
+    "  {console.log(x)}\n" +
+    "</div>\n" +
+    "{/* eslint-enable no-unused-vars */}\n";
+
+  const result = run(text, [msg(3, "no-console")], { reuseBlocks: true });
+
+  assert.equal(
+    result.output,
+    "{/* eslint-disable no-console, no-unused-vars -- legacy */}\n" +
+      "<div>\n" +
+      "  {console.log(x)}\n" +
+      "</div>\n" +
+      "{/* eslint-enable no-unused-vars */}\n",
+    "the rule is prepended into the JSX block-open and the enable survives",
+  );
+  assert.equal(result.edits[0]?.form, "block");
+  assert.equal(result.edits[0]?.line, 1);
+});
+
+test("--reuse-blocks finds a spaced JSX file-level guard and preserves its spelling", () => {
+  const text = "{ /* eslint-disable no-console */ }\n{console.log(x)}\n";
+
+  const result = run(text, [msg(2, "no-unused-vars")], { reuseBlocks: true });
+
+  assert.equal(
+    result.output,
+    "{ /* eslint-disable no-unused-vars, no-console */ }\n{console.log(x)}\n",
+  );
+  assert.equal(result.edits[0]?.form, "file-level");
 });
 
 test("--reuse-blocks preserves CRLF on the rewritten directive", () => {

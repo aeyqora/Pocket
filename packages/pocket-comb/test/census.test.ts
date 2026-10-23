@@ -98,3 +98,21 @@ test("censusFiles is order-independent: shuffled input yields byte-identical tot
   assert.deepEqual(backward.byForm, forward.byForm);
   assert.equal(backward.directives, forward.directives);
 });
+
+test("the census counts JSX and suffix block directives like any other spelling", () => {
+  const scan = censusFileScan([
+    "{/* eslint-disable-next-line no-console */}",
+    "{ /* eslint-disable no-alert */ }",
+    "<div>{value}</div>{/* eslint-disable-line no-debugger */}",
+    "code(); /* eslint-disable-line no-unused-vars */",
+    "",
+  ]);
+
+  assert.deepEqual(scan.entries, [
+    { form: "next-line", rule: "no-console" },
+    { form: "file-level", rule: "no-alert" },
+    { form: "line", rule: "no-debugger" },
+    { form: "line", rule: "no-unused-vars" },
+  ]);
+  assert.equal(scan.disables.length, 4);
+});

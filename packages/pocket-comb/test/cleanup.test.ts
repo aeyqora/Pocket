@@ -125,6 +125,7 @@ test("a bare directive is deleted whole when ESLint flags the whole comment", ()
   );
   assert.deepEqual(result.notActionable, [
     {
+      kind: "bare",
       file: "/repo/a.js",
       line: 2,
       form: "file-level",
@@ -258,4 +259,15 @@ test("cleanup is idempotent: a second pass over its own output changes nothing",
 
   assert.equal(second.output, first.output);
   assert.deepEqual(second.edits, []);
+});
+
+test("cleanup prunes JSX directives and preserves their spelling", () => {
+  const text = "{/* eslint-disable-next-line no-console, no-alert */}\n{code()}\n";
+  const result = cleanup(text, ["no-console"], [from("'no-console'")]);
+
+  assert.equal(result.output, "{/* eslint-disable-next-line no-alert */}\n{code()}\n");
+  assert.deepEqual(
+    result.edits.map((edit) => [edit.line, edit.rule, edit.form, edit.after]),
+    [[1, "no-console", "next-line", "{/* eslint-disable-next-line no-alert */}"]],
+  );
 });

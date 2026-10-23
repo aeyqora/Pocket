@@ -14,6 +14,11 @@ after(cleanupTemps);
  */
 const CONFIG = `export default [
   { files: ["**/*.js"], rules: { "no-console": "warn", "no-unused-vars": "error" } },
+  {
+    files: ["**/*.jsx"],
+    languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } },
+    rules: { "no-console": "warn", "no-unused-vars": "error" },
+  },
 ];
 `;
 
@@ -227,4 +232,32 @@ test("a target with no matching files is an operational error (exit 2)", async (
   const code = await main(["cleanup", "-c", "comb.config.mjs", "-t", "target"], io.io);
   assert.equal(code, 2);
   assert.match(io.stderr(), /no files matched/);
+});
+
+test("cleanup prunes an unused JSX directive end-to-end and is idempotent", async () => {
+  const fix = fixture({
+    "unused.jsx":
+      "export const App = () => (\n" +
+      "  <div>\n" +
+      "    {/* eslint-disable-next-line no-console */}\n" +
+      "    <span>hi</span>\n" +
+      "  </div>\n" +
+      ");\n",
+  });
+
+  const applied = await cleanup(fix.dir, ["--apply"]);
+  assert.equal(applied.code, 0);
+  assert.equal(
+    readFileSync(join(fix.target, "unused.jsx"), "utf8"),
+    "export const App = () => (\n" +
+      "  <div>\n" +
+      "    <span>hi</span>\n" +
+      "  </div>\n" +
+      ");\n",
+    "ESLint reports the unused JSX directive at its own line",
+  );
+
+  const rerun = await cleanup(fix.dir);
+  assert.equal(rerun.code, 0);
+  assert.match(rerun.out, /Impact: 0 files would change, 0 edits/);
 });

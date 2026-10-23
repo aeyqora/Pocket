@@ -4,6 +4,44 @@ All notable changes to `pocket-comb` are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-10-23
+
+### Fixed
+
+- **Context-aware directive spelling.** `suppress` now chooses the inserted comment
+  style from the violation line's parsed syntax instead of always emitting `//`.
+  Ordinary JS/TS code and JSX attribute lines get
+  `// eslint-disable-next-line <rules>`; JSX children get
+  `{/* eslint-disable-next-line <rules> */}`, which actually suppresses the line and
+  does not render as text. The syntax decision is parser-backed and lazy: only files
+  that need an insert are parsed. A line inside a template literal, string, or comment
+  — or a file whose parser cannot be resolved or parsed — is reported as not actionable
+  and is never edited.
+- **Every comment style is scanned and preserved.** The full-file scan now recognises
+  `// ...`, `/* ... */`, `{/* ... */}`, and `{ /* ... */ }` for whole-line and suffix
+  forms of `eslint-disable`, `eslint-disable-next-line`, `eslint-disable-line`, and
+  `eslint-enable`, including `-- description`, CRLF, and arbitrary indentation.
+  `remove`, `replace`, `cleanup`, and `inventory` now see and rewrite/count JSX
+  directives, and suffix block-comment forms (`code /* eslint-disable-line ... */`)
+  are no longer missed.
+- **Prepend preserves spelling.** Adding a missing rule to an existing guard keeps its
+  exact opener/closer and code separator instead of rewriting it as `//`. This covers
+  the `line` suffix, `next-line`, and `--reuse-blocks` paths, including JSX block and
+  file-level guards and their paired `eslint-enable`.
+
+### Changed
+
+- **Breaking (public types).** `ScannedDirective.comment` is replaced by `open`/`close`
+  (plus `sep` for suffix forms), so the exact spelling can round-trip.
+  `NotActionableDirective` is now a discriminated union requiring
+  `kind: "bare" | "context"`.
+- Not-actionable notes are that union: a `bare` note carries the directive form, a
+  `context` note carries the reason no safe insert exists. Bare-only output is
+  unchanged; mixed runs print `Not actionable: N items` with a per-row reason.
+- `runActionForFile` accepts an optional `syntax` resolver. Without it, `suppress`
+  inserts are reported as not actionable rather than guessed; `runBatch` always builds
+  the resolver from the action config's parser.
+
 ## [0.1.0] — 2026-10-20
 
 The first release: six mass ESLint suppression-directive operations over a
@@ -92,4 +130,5 @@ config-isolated ESLint instance, a persistent worker pool, and hand-rolled repor
   `inventory` census end to end.
 -  **Documentation** — wizard-first guides, configuration guide, action guide, examples, and full reference, included in the npm package.
 
+[0.2.0]: https://github.com/aeyqora/Pocket/commits/main/packages/pocket-comb
 [0.1.0]: https://github.com/aeyqora/Pocket/commits/main/packages/pocket-comb

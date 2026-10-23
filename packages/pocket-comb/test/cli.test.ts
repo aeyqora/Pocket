@@ -29,7 +29,7 @@ test("--help prints usage and exits 0", async () => {
 test("--version prints the version and exits 0", async () => {
   const { code, out } = await run(["--version"], tempDir());
   assert.equal(code, 0);
-  assert.equal(out.trim(), "0.1.0");
+  assert.equal(out.trim(), "0.2.0");
 });
 
 test("an unknown verb exits 2", async () => {

@@ -33,7 +33,8 @@ test("the scan recognises all four forms with rules, description, indent and cod
       code: block?.code,
       indent: block?.indent,
       suffix: block?.suffix,
-      comment: block?.comment,
+      open: block?.open,
+      close: block?.close,
       cr: block?.cr,
       pairLine: block?.pairLine,
     },
@@ -48,7 +49,8 @@ test("the scan recognises all four forms with rules, description, indent and cod
       code: "",
       indent: "",
       suffix: false,
-      comment: "/*",
+      open: "/*",
+      close: " */",
       cr: false,
       pairLine: 6,
     },
@@ -58,7 +60,8 @@ test("the scan recognises all four forms with rules, description, indent and cod
   assert.equal(nextLine?.form, "next-line");
   assert.deepEqual(nextLine?.rules, ["no-debugger"]);
   assert.equal(nextLine?.indent, "  ");
-  assert.equal(nextLine?.comment, "//");
+  assert.equal(nextLine?.open, "//");
+  assert.equal(nextLine?.close, "");
   assert.equal(nextLine?.suffix, false);
   assert.equal(nextLine?.line, 3);
 
@@ -141,6 +144,70 @@ test("the scan is a µs-per-file operation", () => {
   const perRunUs = Number(process.hrtime.bigint() - start) / 1000 / RUNS;
 
   assert.ok(perRunUs < 500, `a 400-line scan should be µs-scale, took ${perRunUs.toFixed(1)} µs`);
+});
+
+test("the scan recognises every comment style, including JSX and suffix block forms", () => {
+  const directives = scanDirectives([
+    "{/* eslint-disable-next-line no-console */}",
+    "{ /* eslint-disable-next-line no-debugger -- spaced */ }",
+    "<div>{value}</div>{/* eslint-disable-line no-alert */}",
+    "code(); /* eslint-disable-line no-unused-vars */",
+    "above(); /* eslint-disable-next-line no-console */",
+    "{/* eslint-disable no-console */}",
+    "{/* eslint-enable no-console */}",
+  ]);
+
+  assert.deepEqual(
+    directives.map((directive) => ({
+      line: directive.line,
+      form: directive.form,
+      kind: directive.kind,
+      rules: directive.rules,
+      description: directive.description,
+      suffix: directive.suffix,
+      indent: directive.indent,
+      code: directive.code,
+      open: directive.open,
+      close: directive.close,
+    })),
+    [
+      { line: 1, form: "next-line", kind: "disable", rules: ["no-console"], description: "", suffix: false, indent: "", code: "", open: "{/*", close: " */}" },
+      { line: 2, form: "next-line", kind: "disable", rules: ["no-debugger"], description: "spaced", suffix: false, indent: "", code: "", open: "{ /*", close: " */ }" },
+      { line: 3, form: "line", kind: "disable", rules: ["no-alert"], description: "", suffix: true, indent: "", code: "<div>{value}</div>", open: "{/*", close: " */}" },
+      { line: 4, form: "line", kind: "disable", rules: ["no-unused-vars"], description: "", suffix: true, indent: "", code: "code();", open: "/*", close: " */" },
+      { line: 5, form: "next-line", kind: "disable", rules: ["no-console"], description: "", suffix: true, indent: "", code: "above();", open: "/*", close: " */" },
+      { line: 6, form: "block", kind: "disable", rules: ["no-console"], description: "", suffix: false, indent: "", code: "", open: "{/*", close: " */}" },
+      { line: 7, form: "block", kind: "enable", rules: ["no-console"], description: "", suffix: false, indent: "", code: "", open: "{/*", close: " */}" },
+    ],
+  );
+  assert.deepEqual(directives[5]?.pairLine, 7);
+  assert.deepEqual(directives[6]?.closes, [6]);
+});
+
+test("formatDirective preserves JSX and spaced spellings exactly", () => {
+  const [jsx, spaced] = scanDirectives([
+    "{/* eslint-disable-next-line no-console */}",
+    "{ /* eslint-disable no-alert */ }",
+  ]);
+  assert.equal(formatDirective(jsx!, ["no-console"]), "{/* eslint-disable-next-line no-console */}");
+  assert.equal(formatDirective(spaced!, ["no-alert"]), "{ /* eslint-disable no-alert */ }");
+});
+
+test("CRLF and a trailing description survive every comment style", () => {
+  const directives = scanDirectives([
+    "  {/* eslint-disable-next-line no-console -- why */}\r",
+    "  { /* eslint-disable no-alert -- legacy */ }\r",
+  ]);
+  assert.equal(directives[0]?.cr, true);
+  assert.equal(directives[0]?.description, "why");
+  assert.equal(
+    formatDirective(directives[0]!, ["no-console"]),
+    "  {/* eslint-disable-next-line no-console -- why */}\r",
+  );
+  assert.equal(
+    formatDirective(directives[1]!, ["no-alert"]),
+    "  { /* eslint-disable no-alert -- legacy */ }\r",
+  );
 });
 
 test("splitRuleList separates rules from a trailing -- description", () => {

@@ -5,9 +5,12 @@ import { join } from "node:path";
 import { createIsolatedESLint } from "../src/eslint.js";
 import { runActionForFile, runBatch } from "../src/engine.js";
 import { cleanupTemps, tempDir, write } from "./harness.js";
+import type { LineSyntaxResolver } from "../src/syntax.js";
 import type { LintMessage } from "../src/types.js";
 
 after(cleanupTemps);
+
+const codeSyntax: LineSyntaxResolver = () => ({ context: "js" });
 
 const CONFIG = `export default [
   { files: ["**/*.js"], rules: { "no-debugger": "warn", "no-unused-vars": "error" } },
@@ -31,6 +34,7 @@ test("the suppress strategy inserts an indent-matched guard and ledgers the edit
     filePath: "/tmp/x.js",
     text: "function f() {\n  debugger;\n}\n",
     messages: [message(1, "no-debugger", 2)],
+    syntax: codeSyntax,
   });
 
   assert.equal(result.output, "function f() {\n  // eslint-disable-next-line no-debugger\n  debugger;\n}\n");
@@ -38,7 +42,13 @@ test("the suppress strategy inserts an indent-matched guard and ledgers the edit
   assert.equal(result.edits[0]?.rule, "no-debugger");
   assert.equal(result.edits[0]?.editType, "insert");
   assert.equal(result.edits[0]?.form, "next-line");
-  assert.deepEqual(result.stats, { inserted: 1, prepended: 0, skippedBare: 0, skippedGuarded: 0 });
+  assert.deepEqual(result.stats, {
+    inserted: 1,
+    prepended: 0,
+    skippedBare: 0,
+    skippedGuarded: 0,
+    skippedContext: 0,
+  });
 });
 
 test("runBatch lints a batch and plans inserts without writing on a dry run", async () => {

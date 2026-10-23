@@ -12,7 +12,15 @@ after(cleanupTemps);
  * to the target's JS files so the action config itself is never linted.
  */
 const CONFIG = `export default [
-  { files: ["**/*.js"], rules: { "no-console": "warn", "no-unused-vars": "error" } },
+  {
+    files: ["**/*.js"],
+    rules: { "no-console": "warn", "no-unused-vars": "error", "no-irregular-whitespace": "error" },
+  },
+  {
+    files: ["**/*.jsx"],
+    languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } },
+    rules: { "no-console": "warn", "no-unused-vars": "error", "no-irregular-whitespace": "error" },
+  },
 ];
 `;
 
@@ -201,6 +209,109 @@ test("the completion confirmation prints files touched, edit counts and elapsed"
 
   const { out } = await suppress(fix.dir);
   assert.match(out, /Done: 1 files touched, 1 edits \(1 inserted, 0 prepended\) — \d+\.\ds\n$/);
+});
+
+test("a JSX child violation inserts {/* */}, lints clean, and a second run is a no-op", async () => {
+  const fix = fixture({
+    "app.jsx":
+      "export const App = () => (\n" +
+      "  <div>\n" +
+      '    {console.log("x")}\n' +
+      "  </div>\n" +
+      ");\n",
+  });
+
+  const applied = await suppress(fix.dir, ["--apply"]);
+  assert.equal(applied.code, 0);
+
+  const text = readFileSync(join(fix.target, "app.jsx"), "utf8");
+  assert.equal(
+    text,
+    "export const App = () => (\n" +
+      "  <div>\n" +
+      "    {/* eslint-disable-next-line no-console */}\n" +
+      '    {console.log("x")}\n' +
+      "  </div>\n" +
+      ");\n",
+    "JSX children get a JSX comment, not a // line that would render as text",
+  );
+
+  const rerun = await suppress(fix.dir);
+  assert.equal(rerun.code, 0, "the inserted directive actually suppresses the violation");
+  assert.match(rerun.out, /Impact: 0 files would change, 0 edits/);
+});
+
+test("a JSX attribute violation inserts //, lints clean, and a second run is a no-op", async () => {
+  const fix = fixture({
+    "button.jsx":
+      "export const Button = () => (\n" +
+      "  <button\n" +
+      '    onClick={() => console.log("x")}\n' +
+      "  >\n" +
+      "    hi\n" +
+      "  </button>\n" +
+      ");\n",
+  });
+
+  const applied = await suppress(fix.dir, ["--apply"]);
+  assert.equal(applied.code, 0);
+
+  const text = readFileSync(join(fix.target, "button.jsx"), "utf8");
+  assert.equal(
+    text,
+    "export const Button = () => (\n" +
+      "  <button\n" +
+      "    // eslint-disable-next-line no-console\n" +
+      '    onClick={() => console.log("x")}\n' +
+      "  >\n" +
+      "    hi\n" +
+      "  </button>\n" +
+      ");\n",
+    "a // comment between attributes is valid and suppresses the attribute line",
+  );
+
+  const rerun = await suppress(fix.dir);
+  assert.equal(rerun.code, 0);
+  assert.match(rerun.out, /Impact: 0 files would change, 0 edits/);
+});
+
+test("a violation inside a template literal is not actionable and never modifies the file", async () => {
+  const source = "export const text = `first\nsecond\u00a0bad\nthird`;\n";
+  const fix = fixture({ "template.js": source });
+
+  const dry = await suppress(fix.dir);
+  assert.equal(dry.code, 0, "no edit means no dry-run impact");
+  assert.match(dry.out, /Not actionable: 1 items/);
+  assert.match(dry.out, /inside a template literal/);
+  assert.equal(readFileSync(join(fix.target, "template.js"), "utf8"), source);
+});
+
+test("an existing JSX next-line guard is widened in place, never duplicated as //", async () => {
+  const fix = fixture({
+    "merge.jsx":
+      "export const App = () => (\n" +
+      "  <div>\n" +
+      "    {/* eslint-disable-next-line no-console */}\n" +
+      "    {(() => { const unused = 1; })()}\n" +
+      "  </div>\n" +
+      ");\n",
+  });
+
+  const applied = await suppress(fix.dir, ["--apply"]);
+  assert.equal(applied.code, 0);
+
+  const text = readFileSync(join(fix.target, "merge.jsx"), "utf8");
+  assert.equal(
+    text,
+    "export const App = () => (\n" +
+      "  <div>\n" +
+      "    {/* eslint-disable-next-line no-unused-vars, no-console */}\n" +
+      "    {(() => { const unused = 1; })()}\n" +
+      "  </div>\n" +
+      ");\n",
+    "one merged JSX directive, no second // directive",
+  );
+  assert.doesNotMatch(text, /^\s*\/\/ eslint-disable/m);
 });
 
 test("a target with no matching files is an operational error (exit 2)", async () => {

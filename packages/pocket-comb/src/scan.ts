@@ -11,6 +11,13 @@
  * keeps ordinary source lines out of the regexes, and pairing is a single linear
  * walk over the handful of directives a file actually contains.
  *
+ * **Spelling is part of the grammar.** A directive may be written `// ...`,
+ * `/* ... *\/`, `{/* ... *\/}`, or `{ /* ... *\/ }` (the last two are JSX
+ * children). The scan stores the exact opener and closer so a rewrite
+ * (`formatDirective`, prepend) keeps the original spelling instead of
+ * normalising it. Rewriting a JSX directive as `//` would turn it into rendered
+ * text, so spelling is semantic, not cosmetic.
+ *
  * `scan.ts` deliberately imports nothing from `engine.ts`: the engine imports
  * *this* module (the remove strategy and the shared `splitRuleList`), so the
  * dependency arrow points one way.
@@ -65,12 +72,16 @@ export interface ScannedDirective {
   bare: boolean;
   /** `line`-form suffix directives: the code preceding the comment; else "". */
   code: string;
+  /** Suffix directives: the exact whitespace between code and comment; else "". */
+  sep: string;
   /** Whole-line directives: the leading whitespace; else "". */
   indent: string;
   /** True when the comment rides at the end of a code line (suffix form). */
   suffix: boolean;
-  /** The comment's spelling, preserved so a rewrite keeps it. */
-  comment: "//" | "/*";
+  /** The comment's exact opener: `//`, `/*`, `{/*`, or `{ /*`. */
+  open: string;
+  /** The comment's exact closer, including its leading whitespace; "" for `//`. */
+  close: string;
   /** The line's text without a trailing CR. */
   text: string;
   /** The line ended in CRLF. */
@@ -87,139 +98,134 @@ export interface ScannedDirective {
   closes?: number[];
 }
 
-// Whole-line comment directives: the line is (indent +) a comment and nothing
-// else. `eslint-disable(?!-)` excludes the `-next-line`/`-line` suffixes.
-// `WHOLE_NEXT_LINE_RE` is also the suppress lazy scan's guard matcher, so it is
-// exported: one grammar definition for both scans (engine.ts imports it).
-export const WHOLE_NEXT_LINE_RE =
-  /^(\s*)(\/\/|\/\*)\s*eslint-disable-(next-line|line)\b\s*(.*?)\s*(?:\*\/)?\s*$/;
-const WHOLE_DISABLE_RE = /^(\s*)(\/\/|\/\*)\s*eslint-disable(?!-)\b\s*(.*?)\s*(?:\*\/)?\s*$/;
-const WHOLE_ENABLE_RE = /^(\s*)(\/\/|\/\*)\s*eslint-enable\b\s*(.*?)\s*(?:\*\/)?\s*$/;
+/** A matched directive before block pairing assigns `block`/`file-level`. */
+export interface DirectiveMatch {
+  form: "next-line" | "line" | "block";
+  kind: "disable" | "enable";
+  rules: string[];
+  description: string;
+  bare: boolean;
+  code: string;
+  sep: string;
+  indent: string;
+  suffix: boolean;
+  open: string;
+  close: string;
+}
 
-// Suffix directives: a comment riding at the end of a code line.
-export const SUFFIX_LINE_RE = /^(\s*.*\S)\s+\/\/\s*eslint-disable-line\b\s*(.*)$/;
-const SUFFIX_DISABLE_RE =
-  /^(\s*.*\S)\s+(\/\/|\/\*)\s*eslint-disable(?!-)\b\s*(.*?)\s*(?:\*\/)?\s*$/;
-const SUFFIX_ENABLE_RE = /^(\s*.*\S)\s+(\/\/|\/\*)\s*eslint-enable\b\s*(.*?)\s*(?:\*\/)?\s*$/;
+// One grammar per comment style, shared by the full-file scan and the suppress
+// lazy scan. `disable(?!-)` excludes the `-next-line`/`-line` suffixes when the
+// short `disable` alternative is tried. The block/JSX patterns require their
+// closer, so a malformed line is not half-recognised. Multi-line block
+// directives (`/*` newline `eslint-disable` ...) are deliberately out of scope.
+const KEYWORD = String.raw`(eslint-(?:disable-next-line|disable-line|disable(?!-)|enable)\b)`;
+
+const WHOLE_SLASH_RE = new RegExp(String.raw`^(\s*)(\/\/)\s*${KEYWORD}\s*(.*?)\s*$`);
+const WHOLE_BLOCK_RE = new RegExp(String.raw`^(\s*)(\/\*)\s*${KEYWORD}\s*(.*?)(\s*\*\/)\s*$`);
+const WHOLE_JSX_RE = new RegExp(String.raw`^(\s*)(\{\s*\/\*)\s*${KEYWORD}\s*(.*?)(\s*\*\/\s*\})\s*$`);
+
+// Suffix forms allow zero whitespace before the comment: `code();// ...` and
+// `</div>{/* ... */}` are both valid and must not be missed. The separator is
+// captured so a rewrite keeps the original spacing too.
+const SUFFIX_SLASH_RE = new RegExp(String.raw`^(\s*.*\S)(\s*)(\/\/)\s*${KEYWORD}\s*(.*?)\s*$`);
+const SUFFIX_BLOCK_RE = new RegExp(
+  String.raw`^(\s*.*\S)(\s*)(\/\*)\s*${KEYWORD}\s*(.*?)(\s*\*\/)\s*$`,
+);
+const SUFFIX_JSX_RE = new RegExp(
+  String.raw`^(\s*.*\S)(\s*)(\{\s*\/\*)\s*${KEYWORD}\s*(.*?)(\s*\*\/\s*\})\s*$`,
+);
 
 /** Strip one trailing CR (CRLF files keep the CR on the stored line). */
 export function stripCr(line: string): { probe: string; cr: boolean } {
   return line.endsWith("\r") ? { probe: line.slice(0, -1), cr: true } : { probe: line, cr: false };
 }
 
-interface Matched {
-  form: DirectiveForm;
-  kind: "disable" | "enable";
-  rules: string[];
-  description: string;
-  bare: boolean;
-  code: string;
-  indent: string;
-  suffix: boolean;
-  comment: "//" | "/*";
+/** Turn a regex match into the shared directive shape. */
+function matched(
+  m: RegExpExecArray,
+  style: "slash" | "block" | "jsx",
+  suffix: boolean,
+): DirectiveMatch {
+  const prefix = m[1] ?? "";
+  // Whole-line matches are (prefix, open, keyword, tail[, close]); suffix
+  // matches insert the separator between the code prefix and the open.
+  const sep = suffix ? (m[2] ?? "") : "";
+  const open = suffix ? (m[3] ?? "") : (m[2] ?? "");
+  const keyword = suffix ? (m[4] ?? "") : (m[3] ?? "");
+  const tail = suffix ? (m[5] ?? "") : (m[4] ?? "");
+  const close = style === "slash" ? "" : (m[suffix ? 6 : 5] ?? "");
+  const { rules, desc, bare } = splitRuleList(tail);
+
+  let form: DirectiveMatch["form"];
+  let kind: DirectiveMatch["kind"];
+  if (keyword === "eslint-enable") {
+    form = "block";
+    kind = "enable";
+  } else if (keyword === "eslint-disable-next-line") {
+    form = "next-line";
+    kind = "disable";
+  } else if (keyword === "eslint-disable-line") {
+    form = "line";
+    kind = "disable";
+  } else {
+    form = "block";
+    kind = "disable";
+  }
+
+  return {
+    form,
+    kind,
+    rules,
+    description: desc,
+    bare,
+    code: suffix ? prefix : "",
+    sep,
+    indent: suffix ? "" : prefix,
+    suffix,
+    open,
+    close,
+  };
 }
 
-function matchLine(probe: string): Matched | null {
+/**
+ * Match a directive that occupies the whole line (indent + comment only). The
+ * suppress lazy scan uses this for the `next-line` guard on the line above; the
+ * full-file scan uses it for every form.
+ */
+export function matchWholeLine(probe: string): DirectiveMatch | null {
   // Fast path: no directive keyword on the line, no regex work at all. Ordinary
   // source lines dominate a file, so this is what keeps the scan µs-scale.
   if (!probe.includes("eslint-")) return null;
 
-  let m = WHOLE_NEXT_LINE_RE.exec(probe);
-  if (m !== null) {
-    const { rules, desc, bare } = splitRuleList(m[4] ?? "");
-    return {
-      form: m[3] === "line" ? "line" : "next-line",
-      kind: "disable",
-      rules,
-      description: desc,
-      bare,
-      code: "",
-      indent: m[1] ?? "",
-      suffix: false,
-      comment: m[2] === "/*" ? "/*" : "//",
-    };
-  }
+  let m = WHOLE_SLASH_RE.exec(probe);
+  if (m !== null) return matched(m, "slash", false);
+  m = WHOLE_BLOCK_RE.exec(probe);
+  if (m !== null) return matched(m, "block", false);
+  m = WHOLE_JSX_RE.exec(probe);
+  if (m !== null) return matched(m, "jsx", false);
+  return null;
+}
 
-  m = WHOLE_DISABLE_RE.exec(probe);
-  if (m !== null) {
-    const { rules, desc, bare } = splitRuleList(m[3] ?? "");
-    return {
-      form: "block",
-      kind: "disable",
-      rules,
-      description: desc,
-      bare,
-      code: "",
-      indent: m[1] ?? "",
-      suffix: false,
-      comment: m[2] === "/*" ? "/*" : "//",
-    };
-  }
+/**
+ * Match a directive riding at the end of a code line. Every comment style is
+ * recognised, including JSX `code {/* ... *\/}` and the block-comment
+ * `code /* eslint-disable-line ... *\/` suffix forms.
+ */
+export function matchSuffix(probe: string): DirectiveMatch | null {
+  if (!probe.includes("eslint-")) return null;
 
-  m = WHOLE_ENABLE_RE.exec(probe);
-  if (m !== null) {
-    const { rules, desc, bare } = splitRuleList(m[3] ?? "");
-    return {
-      form: "block",
-      kind: "enable",
-      rules,
-      description: desc,
-      bare,
-      code: "",
-      indent: m[1] ?? "",
-      suffix: false,
-      comment: m[2] === "/*" ? "/*" : "//",
-    };
-  }
+  // A whole-line JSX directive (`{/* ... */}`) can look like a block-comment
+  // suffix with `{` as the code prefix. It is a whole-line directive, so never
+  // report it as a suffix (the full-file scan tries whole-line first anyway).
+  const wholeLineJsx = (match: DirectiveMatch | null): DirectiveMatch | null =>
+    match !== null && match.code.trim() === "{" ? null : match;
 
-  m = SUFFIX_LINE_RE.exec(probe);
-  if (m !== null) {
-    const { rules, desc, bare } = splitRuleList(m[2] ?? "");
-    return {
-      form: "line",
-      kind: "disable",
-      rules,
-      description: desc,
-      bare,
-      code: m[1] ?? "",
-      indent: "",
-      suffix: true,
-      comment: "//",
-    };
-  }
-
-  m = SUFFIX_DISABLE_RE.exec(probe);
-  if (m !== null) {
-    const { rules, desc, bare } = splitRuleList(m[3] ?? "");
-    return {
-      form: "block",
-      kind: "disable",
-      rules,
-      description: desc,
-      bare,
-      code: m[1] ?? "",
-      indent: "",
-      suffix: true,
-      comment: m[2] === "/*" ? "/*" : "//",
-    };
-  }
-
-  m = SUFFIX_ENABLE_RE.exec(probe);
-  if (m !== null) {
-    const { rules, desc, bare } = splitRuleList(m[3] ?? "");
-    return {
-      form: "block",
-      kind: "enable",
-      rules,
-      description: desc,
-      bare,
-      code: m[1] ?? "",
-      indent: "",
-      suffix: true,
-      comment: m[2] === "/*" ? "/*" : "//",
-    };
-  }
-
+  let m = SUFFIX_SLASH_RE.exec(probe);
+  if (m !== null) return wholeLineJsx(matched(m, "slash", true));
+  m = SUFFIX_BLOCK_RE.exec(probe);
+  if (m !== null) return wholeLineJsx(matched(m, "block", true));
+  m = SUFFIX_JSX_RE.exec(probe);
+  if (m !== null) return wholeLineJsx(matched(m, "jsx", true));
   return null;
 }
 
@@ -253,10 +259,10 @@ function pairBlocks(found: ScannedDirective[]): void {
       continue;
     }
     if (directive.kind !== "enable" || open.length === 0) continue;
-    const matched = open.filter((disable) => closes(disable, directive));
-    if (matched.length === 0) continue;
-    directive.closes = matched.map((disable) => disable.line);
-    for (const disable of matched) {
+    const matchedOpens = open.filter((disable) => closes(disable, directive));
+    if (matchedOpens.length === 0) continue;
+    directive.closes = matchedOpens.map((disable) => disable.line);
+    for (const disable of matchedOpens) {
       disable.pairLine = directive.line;
       open.splice(open.indexOf(disable), 1);
     }
@@ -272,9 +278,9 @@ export function scanDirectives(lines: readonly string[]): ScannedDirective[] {
   const found: ScannedDirective[] = [];
   for (let index = 0; index < lines.length; index++) {
     const { probe, cr } = stripCr(lines[index] ?? "");
-    const matched = matchLine(probe);
-    if (matched === null) continue;
-    found.push({ ...matched, line: index + 1, index, text: probe, cr });
+    const matchedLine = matchWholeLine(probe) ?? matchSuffix(probe);
+    if (matchedLine === null) continue;
+    found.push({ ...matchedLine, line: index + 1, index, text: probe, cr });
   }
   pairBlocks(found);
   return found;
@@ -304,8 +310,7 @@ export function formatDirective(directive: ScannedDirective, rules: readonly str
   const list = rules.join(", ");
   const body = list.length === 0 ? name : `${name} ${list}`;
   const desc = directive.description ? ` -- ${directive.description}` : "";
-  const close = directive.comment === "/*" ? " */" : "";
   const cr = directive.cr ? "\r" : "";
-  const prefix = directive.suffix ? `${directive.code} ` : directive.indent;
-  return `${prefix}${directive.comment} ${body}${desc}${close}${cr}`;
+  const prefix = directive.suffix ? `${directive.code}${directive.sep}` : directive.indent;
+  return `${prefix}${directive.open} ${body}${desc}${directive.close}${cr}`;
 }
